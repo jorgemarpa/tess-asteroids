@@ -1,0 +1,26 @@
+[tool.poetry]
+name = "tess-asteroids"
+version = "0.1.0"
+description = ""
+authors = ["altuson <73840616+altuson@users.noreply.github.com>"]
+readme = "README.md"
+packages = [{include = "tess_asteroids", from = "src"}]
+
+[tool.poetry.dependencies]
+python = ">=3.9, <3.13"
+tess-ephem = "^0.5.0"
+tesscube = "^1.0.0dev"
+numpy = "^1.26.4"
+pandas = "^1.5.3"
+
+[tool.poetry.group.dev.dependencies]
+mkdocs = "^1.6.0"
+mkdocstrings = "^0.25.2"
+mkdocs-material = "^9.5.33"
+ruff = "^0.6.2"
+pytest = "^8.3.2"
+mypy = "^1.11.2"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
