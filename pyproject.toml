@@ -1,8 +1,8 @@
 [tool.poetry]
 name = "tess-asteroids"
 version = "0.1.0"
-description = ""
-authors = ["altuson <73840616+altuson@users.noreply.github.com>"]
+description = "Create TPFs and LCs for solar system asteroids observed by NASA's TESS mission."
+authors = ["Amy Tuson"]
 readme = "README.md"
 packages = [{include = "tess_asteroids", from = "src"}]
 
