@@ -28,6 +28,10 @@ class MovingObjectTPF:
     def __init__(self, ephem: pd.DataFrame):
         self.ephem = ephem
 
+        # Check self.ephem['time'] has correct units
+        if min(self.ephem["time"]) >= 2457000:
+            raise ValueError("ephem['time'] must have units (BJD - 2457000).")
+
         # Check self.ephem['sector'] has one unique value
         if self.ephem["sector"].nunique() == 1:
             self.sector = int(self.ephem["sector"][0])
@@ -251,24 +255,34 @@ class MovingObjectTPF:
                 "`tpf_type` must be `tracking` or `static`. Not `{0}`".format(tpf_type)
             )
 
+        # Save variables to class
+        self.time = cube_time.tolist()
+        self.flux = tpf_flux
+        self.flux_err = tpf_flux_err
+        self.quality = cube_quality.tolist()
+        self.corner = corner.tolist()
+        self.ephemeris = ephemeris.tolist()
+
         if difference_image:
+            self.difference = difference
+
             return (
-                cube_time.tolist(),
-                tpf_flux,
-                tpf_flux_err,
-                cube_quality.tolist(),
-                corner.tolist(),
-                ephemeris.tolist(),
-                difference,
+                self.time,
+                self.flux,
+                self.flux_err,
+                self.quality,
+                self.corner,
+                self.ephemeris,
+                self.difference,
             )
         else:
             return (
-                cube_time.tolist(),
-                tpf_flux,
-                tpf_flux_err,
-                cube_quality.tolist(),
-                corner.tolist(),
-                ephemeris.tolist(),
+                self.time,
+                self.flux,
+                self.flux_err,
+                self.quality,
+                self.corner,
+                self.ephemeris,
             )
 
     def get_aperture(self):
@@ -320,6 +334,8 @@ class MovingObjectTPF:
         # Add column for time in units (JD - 2457000)
         # >>>>> Note: tess-ephem returns time in JD, not BJD. <<<<<
         df_ephem["time"] = [t.value - 2457000 for t in df_ephem.index.values]
-        df_ephem = df_ephem[["time", "sector", "camera", "ccd", "column", "row"]]
+        df_ephem = df_ephem[
+            ["time", "sector", "camera", "ccd", "column", "row"]
+        ].reset_index(drop=True)
 
         return MovingObjectTPF(ephem=df_ephem), df_ephem
