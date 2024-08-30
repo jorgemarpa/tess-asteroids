@@ -14,7 +14,7 @@ pytest:
 # Run ruff linter/formatter - does not change files
 ruff:
 	$(CMD) ruff check $(PYMODULE) $(TESTS)
-	$(CMD) ruff format --check $(PYMODULE) $(TESTS)	
+	$(CMD) ruff format --diff $(PYMODULE) $(TESTS)	
 
 # Run ruff linter/formatter - changes files
 ruff_changes:
