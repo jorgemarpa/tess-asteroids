@@ -99,6 +99,8 @@ class MovingObjectTPF:
                 If `difference_image`, difference image cube.
         """
 
+        self.type = tpf_type
+
         # Use interpolation to get object (row,column) at cube time.
         column_interp = np.interp(
             self.cube.time,
