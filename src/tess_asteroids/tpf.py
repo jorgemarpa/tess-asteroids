@@ -61,7 +61,6 @@ class MovingObjectTPF:
         self,
         tpf_type: str = "tracking",
         shape: Tuple[int, int] = (11, 11),
-        difference_image: bool = True,
         verbose: bool = False,
     ):
         """
@@ -76,8 +75,6 @@ class MovingObjectTPF:
                 Shape is defined as (row,column) in pixels.
                 If tpf_type = "tracking", this is the shape of the cutout.
                 If tpf_type = "static", this is the buffer around the object.
-        difference_image : bool
-                If True, function returns difference image as well as flux.
         verbose : bool
                 If True, print statements.
 
@@ -95,8 +92,6 @@ class MovingObjectTPF:
                 Original FFI (row,column) of lower left pixel in TPF.
         ephemeris : list
                 Predicted (row,column) of object from ephem.
-        difference : list
-                If `difference_image`, difference image cube.
         """
 
         self.type = tpf_type
@@ -122,13 +117,13 @@ class MovingObjectTPF:
         row_interp, column_interp = row_interp[nan_mask], column_interp[nan_mask]
 
         # Corner coordinates
-        corner = np.ceil(
+        self.corner = np.ceil(
             np.asarray([row_interp - shape[0] / 2, column_interp - shape[1] / 2]).T
         ).astype(int)
 
         # Pixel positions to retrieve around object
         row, column = (
-            np.mgrid[: shape[0], : shape[1]][:, None, :, :] + corner.T[:, :, None, None]
+            np.mgrid[: shape[0], : shape[1]][:, None, :, :] + self.corner.T[:, :, None, None]
         )
 
         # Remove frames that include pixels outide bounds of FFI.
@@ -140,10 +135,10 @@ class MovingObjectTPF:
                 for c in np.logical_and(column[:, 0, :] >= 1, column[:, 0, :] <= 2136)
             ],
         )
-        cube_time = self.cube.time[nan_mask][bound_mask]
-        cube_quality = self.cube.quality[nan_mask][bound_mask]
-        ephemeris = np.asarray([row_interp[bound_mask], column_interp[bound_mask]]).T
-        corner = corner[bound_mask]
+        self.time = self.cube.time[nan_mask][bound_mask]
+        self.quality = self.cube.quality[nan_mask][bound_mask]
+        self.ephemeris = np.asarray([row_interp[bound_mask], column_interp[bound_mask]]).T
+        self.corner = self.corner[bound_mask]
         row, column = row[bound_mask], column[bound_mask]
         pixel_coordinates = np.asarray([row.ravel(), column.ravel()]).T
 
@@ -196,9 +191,9 @@ class MovingObjectTPF:
             )
 
         # Split result into flux, flux_err and reshape into (ntimes, npixels)
-        flux, flux_err = np.vstack(result).transpose([2, 1, 0])
+        self.all_flux, self.all_flux_err = np.vstack(result).transpose([2, 1, 0])
         # Apply masks to remove rejected frames.
-        flux, flux_err = flux[nan_mask][bound_mask], flux_err[nan_mask][bound_mask]
+        self.all_flux, self.all_flux_err = self.all_flux[nan_mask][bound_mask], self.all_flux_err[nan_mask][bound_mask]
 
         # Transform unique pixel indices back into (row,column)
         pixels = np.asarray(
@@ -222,32 +217,21 @@ class MovingObjectTPF:
 
         # Convert data to TPF that moves with object over time.
         if tpf_type == "tracking":
-            tpf_flux = []
-            tpf_flux_err = []
-            difference = []
-            # Number of frames either side to calculate difference image.
-            nframes = 25
+            self.flux = []
+            self.flux_err = []
+            self.target_indices = []
 
-            for t in range(len(cube_time)):
-                indices = np.logical_and(
+            for t in range(len(self.time)):
+                self.target_indices.append(np.logical_and(
                     np.isin(pixels.T[0], row[t].ravel()),
                     np.isin(pixels.T[1], column[t].ravel()),
-                )
-                tpf_flux.append(flux[t][indices].reshape(shape))
-                tpf_flux_err.append(flux_err[t][indices].reshape(shape))
-                # >>>>> ERROR ON DIFFERENCE - use MAD for error on median? <<<<<
-                if difference_image:
-                    difference.append(
-                        tpf_flux[-1]
-                        - np.nanmedian(
-                            flux[
-                                t - nframes if t >= nframes else 0 : t + nframes + 1
-                                if t <= len(flux) - nframes
-                                else len(flux)
-                            ][:, indices],
-                            axis=0,
-                        ).reshape(shape)
-                    )
+                ))
+                self.flux.append(self.all_flux[t][self.target_indices[-1]].reshape(shape))
+                self.flux_err.append(self.all_flux_err[t][self.target_indices[-1]].reshape(shape))
+
+            self.flux = np.asarray(self.flux) 
+            self.flux_err = np.asarray(self.flux_err)
+            self.target_indices = np.asarray(self.target_indices)
 
         elif tpf_type == "static":
             raise NotImplementedError("Not yet implemented static TPF.")
@@ -257,35 +241,36 @@ class MovingObjectTPF:
                 "`tpf_type` must be `tracking` or `static`. Not `{0}`".format(tpf_type)
             )
 
-        # Save variables to class
-        self.time = cube_time.tolist()
-        self.flux = tpf_flux
-        self.flux_err = tpf_flux_err
-        self.quality = cube_quality.tolist()
-        self.corner = corner.tolist()
-        self.ephemeris = ephemeris.tolist()
+    def background_correction(self, method='rolling', **kwargs):
+        """
+        Get background correction for TPF.
+        """
+        if not hasattr(self, 'all_flux'):
+            raise AttributeError("Must run `get_data()` before computing background.")
 
-        if difference_image:
-            self.difference = difference
+        if method == 'rolling':
+            self.bg, self.bg_err = self._bg_rolling_median(**kwargs)
 
-            return (
-                self.time,
-                self.flux,
-                self.flux_err,
-                self.quality,
-                self.corner,
-                self.ephemeris,
-                self.difference,
-            )
         else:
-            return (
-                self.time,
-                self.flux,
-                self.flux_err,
-                self.quality,
-                self.corner,
-                self.ephemeris,
-            )
+           raise ValueError("`method` must be one of: `rolling`. Not `{0}`".format(method)) 
+        
+        self.corr_flux = self.flux - self.bg
+        self.corr_flux_err = np.sqrt(self.flux_err**2 + self.bg_err**2)
+
+    def _bg_rolling_median(self, nframes=25):
+
+        if not hasattr(self, 'all_flux'):
+            raise AttributeError("Must run `get_data()` before computing background.")
+        
+        # >>>>> ERROR ON BG - is using median absolute deviation for error on median appropriate? <<<<<
+        bg = []
+        bg_err = []
+        for i in range(len(self.all_flux)):
+            flux_window = self.all_flux[i - nframes if i >= nframes else 0 : i + nframes + 1 if i <= len(self.all_flux) - nframes else len(self.all_flux)][:, self.target_indices[i]]
+            bg.append(np.nanmedian(flux_window, axis=0).reshape(np.shape(self.flux[i])))
+            bg_err.append(np.nanmedian(np.abs(flux_window-np.nanmedian(flux_window, axis=0)), axis=0).reshape(np.shape(self.flux[i])))
+
+        return np.asarray(bg), np.asarray(bg_err)
 
     def get_aperture(self):
         """
