@@ -2,7 +2,10 @@
 name = "tess-asteroids"
 version = "0.1.0"
 description = "Create TPFs and LCs for solar system asteroids observed by NASA's TESS mission."
-authors = ["Amy Tuson"]
+license = "MIT"
+authors = ["Amy Tuson <amy.l.tuson@nasa.gov>",
+           "Jorge Martinez-Palomera",
+           "Christina Hedges"]
 readme = "README.md"
 packages = [{include = "tess_asteroids", from = "src"}]
 
