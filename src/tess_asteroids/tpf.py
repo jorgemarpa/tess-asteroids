@@ -259,16 +259,12 @@ class MovingTargetTPF:
         if not hasattr(self, 'all_flux'):
             raise AttributeError("Must run `get_data()` before computing background.")
 
-        if not hasattr(self, 'flux'):
-            raise AttributeError("Must run `reshape_data()` before computing background.")  
-
         bg = []
         bg_err = []
         for i in range(len(self.all_flux)):
-            if hasattr(self, 'flux'):
-                flux_window = self.all_flux[i - nframes if i >= nframes else 0 : i + nframes + 1 if i <= len(self.all_flux) - nframes else len(self.all_flux)][:, self.target_mask[i]]
-                bg.append(np.nanmedian(flux_window, axis=0).reshape(np.shape(self.flux[i])))
-                bg_err.append(np.nanmedian(np.abs(flux_window-np.nanmedian(flux_window, axis=0)), axis=0).reshape(np.shape(self.flux[i])))
+            flux_window = self.all_flux[i - nframes if i >= nframes else 0 : i + nframes + 1 if i <= len(self.all_flux) - nframes else len(self.all_flux)][:, self.target_mask[i]]
+            bg.append(np.nanmedian(flux_window, axis=0).reshape(self.shape))
+            bg_err.append(np.nanmedian(np.abs(flux_window-np.nanmedian(flux_window, axis=0)), axis=0).reshape(self.shape))
 
         return np.asarray(bg), np.asarray(bg_err)
 
@@ -280,13 +276,12 @@ class MovingTargetTPF:
 
     def save_data(self, save_tpf=True, save_all=False):
         if save_tpf:
-            # Save fits file with SPOC format, _save_tpf
+            # Save fits image cube with SPOC format
             self._save_tpf()
 
         if save_all:
-            # Save fits table with all flux data, _save_table
+            # Save fits table of all flux data
             self._save_table()
-        raise NotImplementedError("save_data() is not yet implemented.")
 
     def _save_tpf(self):
         """
