@@ -1,4 +1,4 @@
-from .tpf import MovingObjectTPF
+from .tpf import MovingTargetTPF
 
 __version__ = "0.1.0"
-__all__ = ["MovingObjectTPF"]
+__all__ = ["MovingTargetTPF"]
