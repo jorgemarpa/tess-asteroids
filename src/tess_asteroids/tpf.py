@@ -9,17 +9,17 @@ from tesscube import TESSCube
 from tesscube.utils import _sync_call, convert_coordinates_to_runs
 
 
-class MovingObjectTPF:
+class MovingTargetTPF:
     """
-    Create a TPF for a moving object (e.g. asteroid) from a TESS FFI.
+    Create a TPF for a moving target (e.g. asteroid) from a TESS FFI.
 
-    It includes methods to efficiently retrieve the data, define an aperture mask
-    to extract a LC, save a TPF fits file and animate the TPF data.
+    It includes methods to efficiently retrieve the data, correct the background, 
+    define an aperture mask and save a fits file.
 
     Parameters
     ----------
     ephem : DataFrame
-            Object ephemeris with columns ['time','sector','camera','ccd','column','row'].
+            Target ephemeris with columns ['time','sector','camera','ccd','column','row'].
                     'time' : float with units (BJD - 2457000).
                     'sector', 'camera', 'ccd' : int
                     'column', 'row' : float. These must be one-indexed, where the lower left pixel of the FFI is (1,1).
@@ -38,14 +38,14 @@ class MovingObjectTPF:
         else:
             raise ValueError("ephem['sector'] must have one unique value.")
 
-        # Check if object is only observed on one camera/ccd during sector
+        # Check if target is only observed on one camera/ccd during sector
         if self.ephem["camera"].nunique() == 1 and self.ephem["ccd"].nunique() == 1:
             self.camera = int(self.ephem["camera"][0])
             self.ccd = int(self.ephem["ccd"][0])
         else:
             # >>>>> INCLUDE A WAY TO GET MULTIPLE CUBES. <<<<<
             raise NotImplementedError(
-                "Object crosses multiple camera/ccd. Not yet implemented."
+                "Target crosses multiple camera/ccd. Not yet implemented."
             )
 
         # Initialise tesscube
@@ -53,28 +53,23 @@ class MovingObjectTPF:
 
     def refine_coordinates(self):
         """
-        Apply correction to object ephemeris.
+        Apply correction to target ephemeris.
         """
         raise NotImplementedError("refine_coordinates() is not yet implemented.")
 
     def get_data(
         self,
-        tpf_type: str = "tracking",
         shape: Tuple[int, int] = (11, 11),
         verbose: bool = False,
     ):
         """
-        Get TPF data for a moving object from a TESS FFI.
+        Retrieve pixel data for a moving target from a TESS FFI.
 
         Parameters
         ----------
-        tpf_type : str
-                Type of TPF to return, either "tracking" (cutout that tracks object)
-                or "static" (all pixels that object crosses, with buffer).
         shape : Tuple(int,int)
-                Shape is defined as (row,column) in pixels.
-                If tpf_type = "tracking", this is the shape of the cutout.
-                If tpf_type = "static", this is the buffer around the object.
+                Defined as (row,column) in pixels. 
+                Defines the number of pixels that will be retrieved, cented on the target, at each timestamp.
         verbose : bool
                 If True, print statements.
 
@@ -91,12 +86,11 @@ class MovingObjectTPF:
         corner : list
                 Original FFI (row,column) of lower left pixel in TPF.
         ephemeris : list
-                Predicted (row,column) of object from ephem.
+                Predicted (row,column) of target from ephem.
         """
+        self.shape = shape
 
-        self.type = tpf_type
-
-        # Use interpolation to get object (row,column) at cube time.
+        # Use interpolation to get target (row,column) at cube time.
         column_interp = np.interp(
             self.cube.time,
             self.ephem["time"].astype(float),
@@ -118,12 +112,12 @@ class MovingObjectTPF:
 
         # Corner coordinates
         self.corner = np.ceil(
-            np.asarray([row_interp - shape[0] / 2, column_interp - shape[1] / 2]).T
+            np.asarray([row_interp - self.shape[0] / 2, column_interp - self.shape[1] / 2]).T
         ).astype(int)
 
-        # Pixel positions to retrieve around object
+        # Pixel positions to retrieve around target
         row, column = (
-            np.mgrid[: shape[0], : shape[1]][:, None, :, :] + self.corner.T[:, :, None, None]
+            np.mgrid[: self.shape[0], : self.shape[1]][:, None, :, :] + self.corner.T[:, :, None, None]
         )
 
         # Remove frames that include pixels outide bounds of FFI.
@@ -196,7 +190,7 @@ class MovingObjectTPF:
         self.all_flux, self.all_flux_err = self.all_flux[nan_mask][bound_mask], self.all_flux_err[nan_mask][bound_mask]
 
         # Transform unique pixel indices back into (row,column)
-        pixels = np.asarray(
+        self.pixels = np.asarray(
             [
                 j
                 for i in [
@@ -215,38 +209,41 @@ class MovingObjectTPF:
             ]
         )
 
-        # Convert data to TPF that moves with object over time.
-        if tpf_type == "tracking":
-            self.flux = []
-            self.flux_err = []
-            self.target_indices = []
+        # Pixel mask that tracks moving target
+        self.target_mask = []
+        for t in range(len(self.time)):
+            self.target_mask.append(np.logical_and(
+                np.isin(self.pixels.T[0], row[t].ravel()),
+                np.isin(self.pixels.T[1], column[t].ravel()),
+            ))
+        self.target_mask = np.asarray(self.target_mask)
 
-            for t in range(len(self.time)):
-                self.target_indices.append(np.logical_and(
-                    np.isin(pixels.T[0], row[t].ravel()),
-                    np.isin(pixels.T[1], column[t].ravel()),
-                ))
-                self.flux.append(self.all_flux[t][self.target_indices[-1]].reshape(shape))
-                self.flux_err.append(self.all_flux_err[t][self.target_indices[-1]].reshape(shape))
+    def reshape_data(self):
+        """
+        Reshape flux data into cube with shape (len(self.time), self.shape).
+        """
+        if not hasattr(self, 'all_flux'):
+            raise AttributeError("Must run `get_data()` before reshaping data.")
 
-            self.flux = np.asarray(self.flux) 
-            self.flux_err = np.asarray(self.flux_err)
-            self.target_indices = np.asarray(self.target_indices)
+        self.flux = []
+        self.flux_err = []
 
-        elif tpf_type == "static":
-            raise NotImplementedError("Not yet implemented static TPF.")
+        for t in range(len(self.time)):
+            self.flux.append(self.all_flux[t][self.target_mask[t]].reshape(self.shape))
+            self.flux_err.append(self.all_flux_err[t][self.target_mask[t]].reshape(self.shape))
 
-        else:
-            raise ValueError(
-                "`tpf_type` must be `tracking` or `static`. Not `{0}`".format(tpf_type)
-            )
+        self.flux = np.asarray(self.flux) 
+        self.flux_err = np.asarray(self.flux_err)
 
     def background_correction(self, method='rolling', **kwargs):
         """
-        Get background correction for TPF.
+        Get background correction for data.
         """
         if not hasattr(self, 'all_flux'):
             raise AttributeError("Must run `get_data()` before computing background.")
+
+        if not hasattr(self, 'flux'):
+            raise AttributeError("Must run `reshape_data()` before computing background.")
 
         if method == 'rolling':
             self.bg, self.bg_err = self._bg_rolling_median(**kwargs)
@@ -261,14 +258,17 @@ class MovingObjectTPF:
 
         if not hasattr(self, 'all_flux'):
             raise AttributeError("Must run `get_data()` before computing background.")
-        
-        # >>>>> ERROR ON BG - is using median absolute deviation for error on median appropriate? <<<<<
+
+        if not hasattr(self, 'flux'):
+            raise AttributeError("Must run `reshape_data()` before computing background.")  
+
         bg = []
         bg_err = []
         for i in range(len(self.all_flux)):
-            flux_window = self.all_flux[i - nframes if i >= nframes else 0 : i + nframes + 1 if i <= len(self.all_flux) - nframes else len(self.all_flux)][:, self.target_indices[i]]
-            bg.append(np.nanmedian(flux_window, axis=0).reshape(np.shape(self.flux[i])))
-            bg_err.append(np.nanmedian(np.abs(flux_window-np.nanmedian(flux_window, axis=0)), axis=0).reshape(np.shape(self.flux[i])))
+            if hasattr(self, 'flux'):
+                flux_window = self.all_flux[i - nframes if i >= nframes else 0 : i + nframes + 1 if i <= len(self.all_flux) - nframes else len(self.all_flux)][:, self.target_mask[i]]
+                bg.append(np.nanmedian(flux_window, axis=0).reshape(np.shape(self.flux[i])))
+                bg_err.append(np.nanmedian(np.abs(flux_window-np.nanmedian(flux_window, axis=0)), axis=0).reshape(np.shape(self.flux[i])))
 
         return np.asarray(bg), np.asarray(bg_err)
 
@@ -278,11 +278,27 @@ class MovingObjectTPF:
         """
         raise NotImplementedError("get_aperture() is not yet implemented.")
 
-    def save_tpf(self):
+    def save_data(self, save_tpf=True, save_all=False):
+        if save_tpf:
+            # Save fits file with SPOC format, _save_tpf
+            self._save_tpf()
+
+        if save_all:
+            # Save fits table with all flux data, _save_table
+            self._save_table()
+        raise NotImplementedError("save_data() is not yet implemented.")
+
+    def _save_tpf(self):
         """
         Save data and aperture in format that matches SPOC TPFs.
         """
-        raise NotImplementedError("save_tpf() is not yet implemented.")
+        raise NotImplementedError("_save_tpf() is not yet implemented.")
+
+    def _save_table(self):
+        """
+        Save all data in fits table.
+        """
+        raise NotImplementedError("_save_table() is not yet implemented.")
 
     def animate_tpf(self):
         """
@@ -293,7 +309,7 @@ class MovingObjectTPF:
     @staticmethod
     def from_name(target: str, sector: int, time_step: float = 1.0):
         """
-        Initialises MovingObjectTPF from object name and TESS sector.
+        Initialises MovingTargetTPF from target name and TESS sector.
 
         Parameters
         ----------
@@ -306,16 +322,16 @@ class MovingObjectTPF:
 
         Returns
         -------
-        MovingObjectTPF :
-                Initiliased MovingObjectTPF.
+        MovingTargetTPF :
+                Initiliased MovingTargetTPF.
         df_ephem : DataFrame
-                Object ephemeris with columns ['time','sector','camera','ccd','column','row'].
+                Target ephemeris with columns ['time','sector','camera','ccd','column','row'].
                         'time' : float with units (JD - 2457000).
                         'sector', 'camera', 'ccd' : int
                         'column', 'row' : float. These are one-indexed, where the lower left pixel of the FFI is (1,1).
         """
 
-        # Get object ephemeris using tess-ephem
+        # Get target ephemeris using tess-ephem
         df_ephem = ephem(target, sector=sector, time_step=time_step)
 
         # Add column for time in units (JD - 2457000)
@@ -325,4 +341,4 @@ class MovingObjectTPF:
             ["time", "sector", "camera", "ccd", "column", "row"]
         ].reset_index(drop=True)
 
-        return MovingObjectTPF(ephem=df_ephem), df_ephem
+        return MovingTargetTPF(ephem=df_ephem), df_ephem
