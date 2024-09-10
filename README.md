@@ -10,12 +10,12 @@
 
 ### Making a TPF
 
-You can create a TPF that tracks a moving object by providing the ephemeris, as follows:
+You can create a TPF that tracks a moving object by providing an ephemeris, as follows:
 
 ```python
 import numpy as np
 import pandas as pd
-from tess_asteroids import MovingObjectTPF
+from tess_asteroids import MovingTargetTPF
 
 # Create an artificial ephemeris
 time = np.linspace(1790.5, 1795.5, 100)
@@ -28,37 +28,57 @@ ephem = pd.DataFrame({
             "row": np.linspace(1000, 900, len(time)),
         })
 
-# Initialise TPF
-tpf = MovingObjectTPF(ephem)
+# Initialise
+target = MovingTargetTPF("example", ephem)
 
-# Get TPF data - this step queries AWS to get TESS data
-time, flux, flux_err, quality, corner, ephemeris, difference = tpf.get_data()
+# Make TPF and save to file
+target.make_tpf()
 
 ```
 
-This will return a TPF cutout, centred on the moving object, from the full FFI. A few things to note about the format of the ephemeris:
+This will create a SPOC-like TPF, centred on the moving object, and it will save this TPF as a fits file. A few things to note about the format of the ephemeris:
 - `time` must have units BTJD = BJD - 2457000.
 - `sector`, `camera`, `ccd` must each have one unique value.
 - `column`, `row` must be one-indexed, where the lower left pixel of the FFI has value (1,1).
 
-There are a few optional parameters in the `get_data()` function:
-- `shape` controls the shape of the TPF cutout. Default : (11,11).
-- `difference_image` determines whether or not the function returns a difference image as well as the raw flux. Default : True.
-- `verbose` enables you to print the time taken to retrieve the TESS data. Default : False.
+There are a few optional parameters in the `make_tpf()` function. This includes:
+- `shape` controls the shape of the TPF. Default : (11,11).
+- `file_name` is the name the TPF will be saved with. If one is not given, a default name will be generated. In the above example, the default name was `tess-example-s0018-shape11x11-moving_tp.fits`.
+- `save_loc` is the directory where the TPF will be saved. Note, the directory is not automatically created.
 
 These settings can be changed as follows:
 
 ```python
-# Get TPF data - changed default settings
-time, flux, flux_err, quality, corner, ephemeris = tpf.get_data(shape=(20,10), difference_image=False, verbose=True)
+# Make TPF and save to file - changed default settings
+target.make_tpf(shape=(20,10), file_name="test.fits", save_loc="movingTPF")
 ```
 
 Instead of inputting an ephemeris, you can also create a TPF using the name of an object from the JPL/Horizons database and the TESS sector. This will use `tess-ephem` to compute the ephemeris for you.
 
 ```python
-# Initialise TPF for asteroid 1998 YT6 from TESS sector 6.
-tpf, ephem = MovingObjectTPF.from_name("1998 YT6", sector=6)
+# Initialise for asteroid 1998 YT6 from TESS sector 6.
+target, ephem = MovingTargetTPF.from_name("1998 YT6", sector=6)
 
-# Get TPF data
-time, flux, flux_err, quality, corner, ephemeris, difference = tpf.get_data()
+# Make TPF and save to file
+target.make_tpf()
 ```
+
+### Plotting TPFs with `lightkurve`
+
+The TPFs that get created can be plot using `lightkurve`, as follows:
+
+```python
+import lightkurve as lk
+import matplotlib.pyplot as plt
+
+tpf = lk.read("tess-example-s0018-shape11x11-moving_tp.fits")
+tpf.plot(frame = 110)
+plt.show()
+
+# If you're in a Jupyter notebook, you can also animate the TPF.
+tpf.animate()
+```
+
+![Example asteroid TPF](./docs/tess-1998YT6-s0006-shape11x11-moving_tp.pdf)
+
+

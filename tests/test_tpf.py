@@ -1,32 +1,35 @@
+import logging
+import os
+
 import numpy as np
 import pandas as pd
-import pytest
 
-from tess_asteroids import MovingObjectTPF
+from tess_asteroids import MovingTargetTPF
 
 
 def test_from_name():
     """
     Check that static method from_name() gives expected ephemeris for asteroid 1998 YT6.
     """
-    tpf, ephem = MovingObjectTPF.from_name("1998 YT6", sector=6)
+    target, track = MovingTargetTPF.from_name("1998 YT6", sector=6)
 
-    assert tpf.sector == 6
-    assert tpf.camera == 1
-    assert tpf.ccd == 1
+    assert target.sector == 6
+    assert target.camera == 1
+    assert target.ccd == 1
 
     # Bounds taken from tesswcs pointings.csv file for sector 6.
-    assert min(ephem["time"]) >= 2458463.5 - 2457000
-    assert max(ephem["time"]) <= 2458490.5 - 2457000
+    assert min(track["time"]) >= 2458463.5 - 2457000
+    assert max(track["time"]) <= 2458490.5 - 2457000
 
 
-def test_get_data_logic():
+def test_data_logic(caplog):
     """
-    Check that get_data() gives expected output in terms of variable shapes and warnings.
+    Check that get_data(), reshape_data() and background_correction() give expected output
+    in terms of variable shapes and warnings.
     """
-    time = np.linspace(2458790.5, 2458795.5, 100) - 2457000
 
     # Create artificial track
+    time = np.linspace(2458790.5, 2458795.5, 100) - 2457000
     track = pd.DataFrame(
         {
             "time": time,
@@ -39,35 +42,58 @@ def test_get_data_logic():
     )
 
     shape = (12, 10)
-    tpf = MovingObjectTPF(track)
+    target = MovingTargetTPF("simulated_track", track)
 
-    # Check function returns expected warnings
-    with pytest.warns(
-        UserWarning, match="Some of the requested pixels are outside of the FFI bounds"
-    ):
-        with pytest.warns(
-            UserWarning,
-            match="Some of the requested pixels are outside of the FFI science array",
-        ):
-            time, flux, flux_err, quality, corner, ephemeris, difference = tpf.get_data(
-                shape=shape
-            )
-
-    # Check all lists have length time
+    # Check get_data() returns expected warnings
+    with caplog.at_level(logging.WARNING):
+        target.get_data(shape=shape)
+    assert "Some of the requested pixels are outside of the FFI bounds" in caplog.text
     assert (
-        len(flux) == len(time)
-        and len(flux_err) == len(time)
-        and len(quality) == len(time)
-        and len(corner) == len(time)
-        and len(ephemeris) == len(time)
-        and len(difference) == len(time)
+        "Some of the requested pixels are outside of the FFI science array"
+        in caplog.text
     )
 
-    # Check the data has requested shape.
-    assert np.shape(flux)[1] == shape[0] and np.shape(flux)[2] == shape[1]
-    assert np.shape(flux_err)[1] == shape[0] and np.shape(flux_err)[2] == shape[1]
-    assert np.shape(difference)[1] == shape[0] and np.shape(difference)[2] == shape[1]
+    # Check attributes have the same length as target.time
+    assert (
+        len(target.all_flux) == len(target.time)
+        and len(target.all_flux_err) == len(target.time)
+        and len(target.quality) == len(target.time)
+        and len(target.cadence_number) == len(target.time)
+        and len(target.corner) == len(target.time)
+        and len(target.ephemeris) == len(target.time)
+        and len(target.target_mask) == len(target.time)
+    )
 
-    # Check ephemeris and corner shape
-    assert np.shape(corner)[1] == 2
-    assert np.shape(ephemeris)[1] == 2
+    # Check the ephemeris and corner have expected shape
+    assert np.shape(target.corner)[1] == 2
+    assert np.shape(target.ephemeris)[1] == 2
+
+    # Check the reshaped flux data has expected shape
+    target.reshape_data()
+    assert np.shape(target.flux) == (len(target.time), *shape)
+    assert np.shape(target.flux_err) == (len(target.time), *shape)
+
+    # Check the background correction was applied correctly
+    target.background_correction()
+    assert np.array_equal(target.corr_flux, target.flux - target.bg)
+    assert np.array_equal(
+        target.corr_flux_err, np.sqrt(target.flux_err**2 + target.bg_err**2)
+    )
+    assert np.shape(target.corr_flux) == (len(target.time), *shape)
+    assert np.shape(target.corr_flux_err) == (len(target.time), *shape)
+
+
+def test_make_tpf():
+    """
+    Check that make_tpf() saves TPF as expected.
+    """
+
+    # Make TPF for asteroid 1998 YT6
+    target, _ = MovingTargetTPF.from_name("1998 YT6", sector=6)
+    target.make_tpf(save_loc="tests")
+
+    # Check the file exists
+    assert os.path.exists("tests/tess-1998YT6-s0006-shape11x11-moving_tp.fits")
+
+    # Delete the file
+    os.remove("tests/tess-1998YT6-s0006-shape11x11-moving_tp.fits")
