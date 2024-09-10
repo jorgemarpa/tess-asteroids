@@ -79,6 +79,6 @@ plt.show()
 tpf.animate()
 ```
 
-![Example asteroid TPF](./docs/tess-1998YT6-s0006-shape11x11-moving_tp.pdf)
+![Example asteroid TPF](./docs/tess-1998YT6-s0006-shape11x11-moving_tp.png)
 
 
