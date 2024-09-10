@@ -6,8 +6,6 @@ import pandas as pd
 
 from tess_asteroids import MovingTargetTPF
 
-logger = logging.getLogger(__name__)
-
 
 def test_from_name():
     """

@@ -186,7 +186,7 @@ class MovingTargetTPF:
             )
         # Warn user if some of the pixels are outside of FFI bounds.
         elif sum(~bound_mask) > 0:
-            logger.warn(
+            logger.warning(
                 "Some of the requested pixels are outside of the FFI bounds (1<=row<=2078, 1<=col<=2136) and will not be returned."
             )
         # Warn user if there are pixels outside of FFI science array.
@@ -204,7 +204,7 @@ class MovingTargetTPF:
             )
             > 0
         ):
-            logger.warn(
+            logger.warning(
                 "Some of the requested pixels are outside of the FFI science array (1<=row<=2048, 45<=col<=2092), but they will be included in your TPF."
             )
 
