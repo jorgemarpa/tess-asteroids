@@ -296,7 +296,9 @@ class MovingTargetTPF:
         -------
         """
         if not hasattr(self, "all_flux") or not hasattr(self, "flux"):
-            raise AttributeError("Must run `get_data()` and `reshape_data()` before computing background.")
+            raise AttributeError(
+                "Must run `get_data()` and `reshape_data()` before computing background."
+            )
 
         # Get background via chosen method
         if method == "rolling":
@@ -415,8 +417,14 @@ class MovingTargetTPF:
         Returns
         -------
         """
-        if not hasattr(self, "all_flux") or not hasattr(self, "flux") or not hasattr(self, "corr_flux"):
-            raise AttributeError("Must run `get_data()`, `reshape_data()` and `background_correction()` before saving TPF.")
+        if (
+            not hasattr(self, "all_flux")
+            or not hasattr(self, "flux")
+            or not hasattr(self, "corr_flux")
+        ):
+            raise AttributeError(
+                "Must run `get_data()`, `reshape_data()` and `background_correction()` before saving TPF."
+            )
 
         # Create default file name
         if file_name is None:
@@ -688,7 +696,9 @@ class MovingTargetTPF:
 
         # Check whether target was observed in sector.
         if len(df_ephem) == 0:
-            raise ValueError("Target {} was not observed in sector {}.".format(target,sector))
+            raise ValueError(
+                "Target {} was not observed in sector {}.".format(target, sector)
+            )
 
         # Add column for time in units (JD - 2457000)
         # >>>>> Note: tess-ephem returns time in JD, not BJD. <<<<<
