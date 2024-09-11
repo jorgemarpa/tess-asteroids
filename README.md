@@ -59,20 +59,21 @@ Instead of inputting an ephemeris, you can also create a TPF using the name of a
 # Initialise for asteroid 1998 YT6 from TESS sector 6.
 target, ephem = MovingTargetTPF.from_name("1998 YT6", sector=6)
 
-# Make TPF and save to file
+# Make TPF and save to file (tess-1998YT6-s0006-shape11x11-moving_tp.fits)
 target.make_tpf()
 ```
 
-### Plotting TPFs with `lightkurve`
+### Plotting the TPF with `lightkurve`
 
-The TPFs that get created can be plot using `lightkurve`, as follows:
+The TPFs that get created by `tess-asteroids` can be plotted using `lightkurve`, as follows:
 
 ```python
 import lightkurve as lk
 import matplotlib.pyplot as plt
 
-tpf = lk.read("tess-example-s0018-shape11x11-moving_tp.fits")
-tpf.plot(frame = 110)
+tpf = lk.read("tess-1998YT6-s0006-shape11x11-moving_tp.fits")
+fig, ax = plt.subplots(1, figsize=(7,7))
+tpf.plot(ax=ax, frame=10, title='Target ID: 1998 YT6, Cadence: 12')
 plt.show()
 
 # If you're in a Jupyter notebook, you can also animate the TPF.
