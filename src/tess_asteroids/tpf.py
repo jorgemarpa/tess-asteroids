@@ -1,8 +1,9 @@
 import time
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
+from scipy import stats, ndimage
 from astropy.coordinates import SkyCoord
 from astropy.io import fits
 from astropy.wcs.utils import fit_wcs_from_points
@@ -356,17 +357,68 @@ class MovingTargetTPF:
 
         return np.asarray(bg), np.asarray(bg_err)
 
-    def get_aperture(self):
+    def create_threshold_mask(
+        self,
+        threshold: float = 3.0,
+        reference_pixel: Union[str, Tuple[int, int]] = "center",
+    ):
         """
         Get aperture for LC extraction.
 
         Parameters
         ----------
+        threshold : float
+            A value for the number of sigma by which a pixel needs to be
+            brighter than the median flux to be included in the aperture mask.
+        reference_pixel: (int, int) tuple, 'center', or None
+            (col, row) pixel coordinate closest to the desired region.
+            For example, use `reference_pixel=(0,0)` to select the region
+            closest to the bottom left corner of the target pixel file.
+            If 'center' (default) then the region closest to the center pixel
+            will be selected. If `None` then all regions will be selected.
 
         Returns
         -------
         """
-        raise NotImplementedError("get_aperture() is not yet implemented.")
+        if not hasattr(self, "flux"):
+            raise AttributeError("Must run `reshape_data()` before computing aperture.")
+
+        if reference_pixel == "center":
+            reference_pixel = (self.shape[1] / 2, self.shape[0] / 2)
+
+        self.aperture_mask = np.zeros_like(self.flux).astype(bool)
+        diff = self.flux - self.bg
+
+        # iterate over frames
+        for nt in range(len(self.time)):
+            # mask with value threshold
+            median = np.nanmedian(diff)
+            mad = stats.median_abs_deviation(diff.ravel())
+            # Calculate the theshold value and mask
+            self.aperture_mask[nt] = diff[nt] >= (1.4826 * mad * threshold) + median
+            # skip frames with zero mask
+            if self.aperture_mask[nt].sum() == 0:
+                continue
+            # keep all pixels above threhold if asked
+            if reference_pixel is None:
+                continue
+
+            # find mask patch closest to reference_pixel
+            labels = ndimage.label(self.aperture_mask[nt])[0]
+            # For all pixels above threshold, compute distance to reference pixel:
+            label_args = np.argwhere(labels > 0)
+            distances = [
+                np.hypot(crd[0], crd[1])
+                for crd in label_args
+                - np.array([reference_pixel[1], reference_pixel[0]])
+            ]
+            # Which label corresponds to the closest pixel
+            closest_arg = label_args[np.argmin(distances)]
+            closest_label = labels[closest_arg[0], closest_arg[1]]
+            # update mask with closest patch
+            self.aperture_mask[nt] = labels == closest_label
+
+        return
 
     def save_data(
         self,
