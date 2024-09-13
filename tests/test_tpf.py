@@ -98,8 +98,8 @@ def test_make_tpf():
     # Delete the file
     os.remove("tests/tess-1998YT6-s0006-shape11x11-moving_tp.fits")
 
+
 def test_create_threshold_mask():
-    
     # Make TPF for asteroid 1998 YT6
     test, _ = MovingTargetTPF.from_name("1998 YT6", sector=6)
     test.get_data(shape=(11, 11))
@@ -109,5 +109,7 @@ def test_create_threshold_mask():
     test.create_threshold_mask(reference_pixel="center")
 
     assert test.aperture_mask.shape == test.flux.shape
-    assert np.median(test.aperture_mask.reshape((test.time.shape[0], -1)).sum(axis=1)) == 7.0
-
+    assert (
+        np.median(test.aperture_mask.reshape((test.time.shape[0], -1)).sum(axis=1))
+        == 7.0
+    )
