@@ -3,10 +3,10 @@ from typing import Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
-from scipy import stats, ndimage
 from astropy.coordinates import SkyCoord
 from astropy.io import fits
 from astropy.wcs.utils import fit_wcs_from_points
+from scipy import ndimage, stats
 from tess_ephem import ephem
 from tesscube import TESSCube
 from tesscube.fits import get_wcs_header_by_extension
@@ -360,7 +360,7 @@ class MovingTargetTPF:
     def create_threshold_mask(
         self,
         threshold: float = 3.0,
-        reference_pixel: Union[str, Tuple[int, int]] = "center",
+        reference_pixel: Union[str, Tuple[float, float]] = "center",
     ):
         """
         Get aperture for LC extraction.
