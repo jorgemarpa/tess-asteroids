@@ -100,16 +100,20 @@ def test_make_tpf():
 
 
 def test_create_threshold_mask():
+    """
+    Test threshold mask method that creates an aperture mask at each frame
+    of flux pixels > threshold * STD.
+    We test that the return mask has the same shape as `self.flux` and
+    that expected median number of pixels in the mask for the test asteroid
+    is a fixed numer (7).
+    """
     # Make TPF for asteroid 1998 YT6
     test, _ = MovingTargetTPF.from_name("1998 YT6", sector=6)
     test.get_data(shape=(11, 11))
     test.reshape_data()
     test.background_correction(method="rolling")
 
-    test.create_threshold_mask(reference_pixel="center")
+    aperture_mask = test._create_threshold_mask(threshold=3.0, reference_pixel="center")
 
-    assert test.aperture_mask.shape == test.flux.shape
-    assert (
-        np.median(test.aperture_mask.reshape((test.time.shape[0], -1)).sum(axis=1))
-        == 7.0
-    )
+    assert aperture_mask.shape == test.flux.shape
+    assert np.median(aperture_mask.reshape((test.time.shape[0], -1)).sum(axis=1)) == 7.0

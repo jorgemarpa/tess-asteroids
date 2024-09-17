@@ -357,7 +357,39 @@ class MovingTargetTPF:
 
         return np.asarray(bg), np.asarray(bg_err)
 
-    def create_threshold_mask(
+    def create_aperture(self, method: str = "threshold", **kwargs):
+        """
+        Creates an aperture mask using a method ['threshold', 'prf', 'ellipse'].
+        It creates the `self.aperture_mask` attribute with the 3D mask.
+
+        Parameters
+        ----------
+        method : str
+            Method used for apertrue estimation. One of ['threshold', 'prf', 'ellipse'].
+        kwargs : dict
+            Keywords arguments passed to aperture mask method, e.g
+            `self._create_threshold_mask` takes `threshold` and `reference_pixel`.
+
+        Returns
+        -------
+        """
+        if not hasattr(self, "all_flux") or not hasattr(self, "flux"):
+            raise AttributeError(
+                "Must run `get_data()` and `reshape_data()` before computing aperture mask."
+            )
+
+        # Get mask via chosen method
+        if method == "threshold":
+            self.aperture_mask = self._create_threshold_mask(**kwargs)
+        # will add these methods in a future PR
+        elif method in ["prf", "ellipse"]:
+            raise NotImplementedError(f"Method '{method}' not implemented yet.")
+        else:
+            raise ValueError(
+                f"`{method}` must be one of: ['threshold', 'prf', 'ellipse']"
+            )
+
+    def _create_threshold_mask(
         self,
         threshold: float = 3.0,
         reference_pixel: Union[str, Tuple[float, float]] = "center",
@@ -371,7 +403,7 @@ class MovingTargetTPF:
             A value for the number of sigma by which a pixel needs to be
             brighter than the median flux to be included in the aperture mask.
         reference_pixel: (int, int) tuple, 'center', or None
-            (col, row) pixel coordinate closest to the desired region.
+            (row, column) pixel coordinate closest to the desired region.
             For example, use `reference_pixel=(0,0)` to select the region
             closest to the bottom left corner of the target pixel file.
             If 'center' (default) then the region closest to the center pixel
@@ -379,46 +411,61 @@ class MovingTargetTPF:
 
         Returns
         -------
+        aperture_mask : ndarray
+            Boolean numpy array containing `True` for pixels above the
+            threshold. Shape is (ntimes, nrows, ncols)
         """
-        if not hasattr(self, "flux"):
-            raise AttributeError("Must run `reshape_data()` before computing aperture.")
+        if (
+            not hasattr(self, "all_flux")
+            or not hasattr(self, "flux")
+            or not hasattr(self, "corr_flux")
+        ):
+            raise AttributeError(
+                "Must run `get_data()`, `reshape_data()` and `background_correction()` before."
+            )
 
         if reference_pixel == "center":
             reference_pixel = (self.shape[1] / 2, self.shape[0] / 2)
 
-        self.aperture_mask = np.zeros_like(self.flux).astype(bool)
-        diff = self.flux - self.bg
+        aperture_mask = np.zeros_like(self.flux).astype(bool)
+
+        # mask with value threshold
+        median = np.nanmedian(self.corr_flux)
+        mad = stats.median_abs_deviation(self.corr_flux.ravel())
 
         # iterate over frames
         for nt in range(len(self.time)):
-            # mask with value threshold
-            median = np.nanmedian(diff)
-            mad = stats.median_abs_deviation(diff.ravel())
             # Calculate the theshold value and mask
-            self.aperture_mask[nt] = diff[nt] >= (1.4826 * mad * threshold) + median
+            # std is estimated in a robust way by multiplying the MAD with 1.4826
+            aperture_mask[nt] = (
+                self.corr_flux[nt] >= (1.4826 * mad * threshold) + median
+            )
             # skip frames with zero mask
-            if self.aperture_mask[nt].sum() == 0:
+            if aperture_mask[nt].sum() == 0:
                 continue
             # keep all pixels above threhold if asked
             if reference_pixel is None:
                 continue
 
             # find mask patch closest to reference_pixel
-            labels = ndimage.label(self.aperture_mask[nt])[0]
+            # `label` assignd number labels to each contiguous `True`` values in the threshold
+            # mask, this is useful to find unique mask patches and isolate the one closer to
+            # `reference pixel`
+            labels = ndimage.label(aperture_mask[nt])[0]
             # For all pixels above threshold, compute distance to reference pixel:
             label_args = np.argwhere(labels > 0)
             distances = [
                 np.hypot(crd[0], crd[1])
                 for crd in label_args
-                - np.array([reference_pixel[1], reference_pixel[0]])
+                - np.array([reference_pixel[0], reference_pixel[1]])
             ]
             # Which label corresponds to the closest pixel
             closest_arg = label_args[np.argmin(distances)]
             closest_label = labels[closest_arg[0], closest_arg[1]]
             # update mask with closest patch
-            self.aperture_mask[nt] = labels == closest_label
+            aperture_mask[nt] = labels == closest_label
 
-        return
+        return aperture_mask
 
     def save_data(
         self,
