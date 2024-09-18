@@ -365,7 +365,7 @@ class MovingTargetTPF:
         Parameters
         ----------
         method : str
-            Method used for apertrue estimation. One of ['threshold', 'prf', 'ellipse'].
+            Method used for aperture estimation. One of ['threshold', 'prf', 'ellipse'].
         kwargs : dict
             Keywords arguments passed to aperture mask method, e.g
             `self._create_threshold_mask` takes `threshold` and `reference_pixel`.
@@ -373,11 +373,6 @@ class MovingTargetTPF:
         Returns
         -------
         """
-        if not hasattr(self, "all_flux") or not hasattr(self, "flux"):
-            raise AttributeError(
-                "Must run `get_data()` and `reshape_data()` before computing aperture mask."
-            )
-
         # Get mask via chosen method
         if method == "threshold":
             self.aperture_mask = self._create_threshold_mask(**kwargs)
@@ -386,7 +381,7 @@ class MovingTargetTPF:
             raise NotImplementedError(f"Method '{method}' not implemented yet.")
         else:
             raise ValueError(
-                f"`{method}` must be one of: ['threshold', 'prf', 'ellipse']"
+                f"Method must be one of: ['threshold', 'prf', 'ellipse']. Not '{method}'"
             )
 
     def _create_threshold_mask(
@@ -395,7 +390,14 @@ class MovingTargetTPF:
         reference_pixel: Union[str, Tuple[float, float]] = "center",
     ):
         """
-        Get aperture for LC extraction.
+        Creates an threshold aperture mask of shape [ntimes, nrows, ncols].
+        Pixels with flux values above the median flux value times threshold * MAD * 1.4826
+        are set to True, rest are out of the mask.
+        If the thresholding method yields multiple contiguous regions, then
+        only the region closest to the (col, row) coordinate specified by
+        `reference_pixel` is returned.
+
+        For more details see `lightkurve.TargetPixelFile.create_threshold_mask`.
 
         Parameters
         ----------
@@ -425,7 +427,7 @@ class MovingTargetTPF:
             )
 
         if reference_pixel == "center":
-            reference_pixel = (self.shape[1] / 2, self.shape[0] / 2)
+            reference_pixel = ((self.shape[0] - 1) / 2, (self.shape[1] - 1) / 2)
 
         aperture_mask = np.zeros_like(self.flux).astype(bool)
 
@@ -435,7 +437,7 @@ class MovingTargetTPF:
 
         # iterate over frames
         for nt in range(len(self.time)):
-            # Calculate the theshold value and mask
+            # Calculate the threshold value and mask
             # std is estimated in a robust way by multiplying the MAD with 1.4826
             aperture_mask[nt] = (
                 self.corr_flux[nt] >= (1.4826 * mad * threshold) + median
@@ -443,12 +445,12 @@ class MovingTargetTPF:
             # skip frames with zero mask
             if aperture_mask[nt].sum() == 0:
                 continue
-            # keep all pixels above threhold if asked
+            # keep all pixels above threshold if asked
             if reference_pixel is None:
                 continue
 
             # find mask patch closest to reference_pixel
-            # `label` assignd number labels to each contiguous `True`` values in the threshold
+            # `label` assigns number labels to each contiguous `True`` values in the threshold
             # mask, this is useful to find unique mask patches and isolate the one closer to
             # `reference pixel`
             labels = ndimage.label(aperture_mask[nt])[0]
