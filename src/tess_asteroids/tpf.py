@@ -551,7 +551,7 @@ class MovingTargetTPF:
         # >>>>> UPDATE IN FUTURE <<<<<
         time_corr = np.zeros_like(self.time)
 
-        # Define FITS columns
+        # Define SPOC-like FITS columns
         tform = str(self.corr_flux[0].size) + "E"
         dims = str(self.corr_flux[0].shape[::-1])
         cols = [
@@ -617,14 +617,6 @@ class MovingTargetTPF:
                 disp="B16.16",
                 array=self.quality,
             ),
-            # >>>>> UPDATE DEFINITION FOR PIXEL QUALITY <<<<<
-            fits.Column(
-                name="PIXEL_QUALITY",
-                format=str(self.corr_flux[0].size) + "J",
-                dim=dims,
-                disp="B16.16",
-                array=np.zeros_like(self.corr_flux),
-            ),
             fits.Column(
                 name="POS_CORR1",
                 format="E",
@@ -638,6 +630,34 @@ class MovingTargetTPF:
                 unit="pixel",
                 disp="E14.7",
                 array=pos_corr2,
+            ),
+        ]
+
+        # Create SPOC-like table HDU
+        table_hdu_spoc = fits.BinTableHDU.from_columns(
+            cols,
+            header=fits.Header(
+                [
+                    *self.cube.output_first_header.cards,
+                    *get_wcs_header_by_extension(wcs_header, ext=4).cards,
+                    *get_wcs_header_by_extension(wcs_header, ext=5).cards,
+                    *get_wcs_header_by_extension(wcs_header, ext=6).cards,
+                    *get_wcs_header_by_extension(wcs_header, ext=7).cards,
+                    *get_wcs_header_by_extension(wcs_header, ext=8).cards,
+                ]
+            ),
+        )
+        table_hdu_spoc.header["EXTNAME"] = "PIXELS"
+
+        # Define extra FITS columns (not in SPOC TPF)
+        cols = [
+            # >>>>> UPDATE DEFINITION FOR PIXEL QUALITY <<<<<
+            fits.Column(
+                name="PIXEL_QUALITY",
+                format=str(self.corr_flux[0].size) + "J",
+                dim=dims,
+                disp="B16.16",
+                array=np.zeros_like(self.corr_flux),
             ),
             # Original FFI column of lower-left pixel in TPF.
             fits.Column(
@@ -655,21 +675,9 @@ class MovingTargetTPF:
             ),
         ]
 
-        # Create table HDU
-        table_hdu = fits.BinTableHDU.from_columns(
-            cols,
-            header=fits.Header(
-                [
-                    *self.cube.output_first_header.cards,
-                    *get_wcs_header_by_extension(wcs_header, ext=4).cards,
-                    *get_wcs_header_by_extension(wcs_header, ext=5).cards,
-                    *get_wcs_header_by_extension(wcs_header, ext=6).cards,
-                    *get_wcs_header_by_extension(wcs_header, ext=7).cards,
-                    *get_wcs_header_by_extension(wcs_header, ext=8).cards,
-                ]
-            ),
-        )
-        table_hdu.header["EXTNAME"] = "PIXELS"
+        # Create table HDU for extra columns
+        table_hdu_extra = fits.BinTableHDU.from_columns(cols)
+        table_hdu_extra.header["EXTNAME"] = "PIXELS+"
 
         # Create aperture HDU
         # >>>>> UPDATE IN FUTURE WITH REAL APERTURE <<<<<
@@ -687,7 +695,7 @@ class MovingTargetTPF:
 
         # Create hdulist and save to file
         self.hdulist = fits.HDUList(
-            [self.cube.output_primary_ext, table_hdu, aperture_hdu]
+            [self.cube.output_primary_ext, table_hdu_spoc, table_hdu_extra, aperture_hdu]
         )
         self.hdulist.writeto(save_loc + file_name, overwrite=True)
         logger.info("Saved TPF to {0}".format(save_loc + file_name))
@@ -742,6 +750,18 @@ class MovingTargetTPF:
         wcs_header.set("CDELT2P", 1.0, "physical WCS axis 2 step")
 
         return wcs_header
+
+    def _make_pixel_quality(self):
+        """
+        Create 3D pixel quality mask.
+
+        Parameters
+        ----------
+
+        Returns
+        -------
+        """
+        raise NotImplementedError("_make_pixel_quality() is not yet implemented.")
 
     def _save_table(self):
         """
