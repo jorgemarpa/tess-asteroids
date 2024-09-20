@@ -64,6 +64,7 @@ class MovingTargetTPF:
         self,
         shape: Tuple[int, int] = (11, 11),
         bg_method: str = "rolling",
+        ap_method: str = "threshold",
         file_name: Optional[str] = None,
         save_loc: str = "",
         **kwargs,
@@ -79,6 +80,9 @@ class MovingTargetTPF:
         bg_method : str
             Method used for background correction.
             One of `rolling`.
+        ap_method : str
+            Method used to create aperture.
+            One of ['threshold', 'prf', 'ellipse'].
         file_name : str
             Name of saved TPF.
         save_loc : str
@@ -91,7 +95,7 @@ class MovingTargetTPF:
         self.get_data(shape=shape)
         self.reshape_data()
         self.background_correction(method=bg_method, **kwargs)
-        # >>>>> ADD GET_APERTURE() WHEN IMPLEMENTED <<<<<
+        self.create_aperture(method=ap_method, **kwargs)
         self.save_data(file_name_tpf=file_name, save_loc=save_loc, **kwargs)
 
     def refine_coordinates(self):
@@ -522,9 +526,10 @@ class MovingTargetTPF:
             not hasattr(self, "all_flux")
             or not hasattr(self, "flux")
             or not hasattr(self, "corr_flux")
+            or not hasattr(self,"aperture_mask")
         ):
             raise AttributeError(
-                "Must run `get_data()`, `reshape_data()` and `background_correction()` before saving TPF."
+                "Must run `get_data()`, `reshape_data()`, `background_correction()` and `create_aperture()` before saving TPF."
             )
 
         # Create default file name
@@ -649,16 +654,23 @@ class MovingTargetTPF:
         )
         table_hdu_spoc.header["EXTNAME"] = "PIXELS"
 
-        # Define extra FITS columns (not in SPOC TPF)
-        cols = [
-            # >>>>> UPDATE DEFINITION FOR PIXEL QUALITY <<<<<
-            fits.Column(
-                name="PIXEL_QUALITY",
-                format=str(self.corr_flux[0].size) + "J",
-                dim=dims,
-                disp="B16.16",
-                array=np.zeros_like(self.corr_flux),
+        # Create HDU containing average aperture
+        # Aperture is ndarray of values 0 and 2, where 0/2 indicates the pixel is outside/inside the aperture.
+        # This format is used to be consistent with the aperture HDU from SPOC.
+        aperture_hdu_average = fits.ImageHDU(
+            data=np.nanmedian(self.aperture_mask,axis=0).astype('int32')*2,
+            header=fits.Header(
+                [*self.cube.output_secondary_header.cards, *wcs_header.cards]
             ),
+        )
+        aperture_hdu_average.header["EXTNAME"] = "APERTURE"
+        aperture_hdu_average.header.set("NPIXSAP", None, "Number of pixels in optimal aperture")
+        aperture_hdu_average.header.set(
+            "NPIXMISS", None, "Number of op. aperture pixels not collected"
+        )
+
+        # Define extra FITS columns
+        cols = [
             # Original FFI column of lower-left pixel in TPF.
             fits.Column(
                 name="CORNER1",
@@ -673,29 +685,32 @@ class MovingTargetTPF:
                 unit="pixel",
                 array=self.corner[:, 0],
             ),
+            # >>>>> UPDATE DEFINITION FOR PIXEL QUALITY <<<<<
+            fits.Column(
+                name="PIXEL_QUALITY",
+                format=str(self.corr_flux[0].size) + "I",
+                dim=dims,
+                disp="B16.16",
+                array=np.zeros_like(self.corr_flux),
+            ),
+            # Aperture as a function of time
+            # Aperture is ndarray of values 0 and 2, where 0/2 indicates the pixel is outside/inside the aperture.
+            # This format is used to be consistent with the aperture HDU from SPOC.
+            fits.Column(
+                name="APERTURE",
+                format=str(self.corr_flux[0].size) + "J",
+                dim=dims,
+                array=self.aperture_mask.astype('int32')*2,
+            ),
         ]
 
         # Create table HDU for extra columns
         table_hdu_extra = fits.BinTableHDU.from_columns(cols)
-        table_hdu_extra.header["EXTNAME"] = "PIXELS+"
-
-        # Create aperture HDU
-        # >>>>> UPDATE IN FUTURE WITH REAL APERTURE <<<<<
-        aperture_hdu = fits.ImageHDU(
-            data=np.ones(self.shape),
-            header=fits.Header(
-                [*self.cube.output_secondary_header.cards, *wcs_header.cards]
-            ),
-        )
-        aperture_hdu.header["EXTNAME"] = "APERTURE"
-        aperture_hdu.header.set("NPIXSAP", None, "Number of pixels in optimal aperture")
-        aperture_hdu.header.set(
-            "NPIXMISS", None, "Number of op. aperture pixels not collected"
-        )
+        table_hdu_extra.header["EXTNAME"] = "EXTRAS"
 
         # Create hdulist and save to file
         self.hdulist = fits.HDUList(
-            [self.cube.output_primary_ext, table_hdu_spoc, table_hdu_extra, aperture_hdu]
+            [self.cube.output_primary_ext, table_hdu_spoc, aperture_hdu_average, table_hdu_extra]
         )
         self.hdulist.writeto(save_loc + file_name, overwrite=True)
         logger.info("Saved TPF to {0}".format(save_loc + file_name))
@@ -760,6 +775,13 @@ class MovingTargetTPF:
 
         Returns
         -------
+
+        # ATTRIBUTE CHECKS
+
+
+    
+
+
         """
         raise NotImplementedError("_make_pixel_quality() is not yet implemented.")
 
