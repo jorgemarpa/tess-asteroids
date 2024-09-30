@@ -1,5 +1,6 @@
 import logging
 from os import path
+
 import pandas as pd
 
 # Configure logging
@@ -14,4 +15,3 @@ from .movingtpf import MovingTPF  # noqa: E402
 
 __version__ = "0.3.0"
 __all__ = ["MovingTPF"]
-

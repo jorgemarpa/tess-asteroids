@@ -1,10 +1,10 @@
 import logging
 import os
 
+import lightkurve as lk
 import numpy as np
 import pandas as pd
 from astropy.io import fits
-import lightkurve as lk
 
 from tess_asteroids import MovingTPF
 
@@ -84,6 +84,7 @@ def test_data_logic(caplog):
     assert np.shape(target.corr_flux) == (len(target.time), *shape)
     assert np.shape(target.corr_flux_err) == (len(target.time), *shape)
 
+
 def test_create_threshold_mask():
     """
     Test threshold mask method that creates an aperture mask at each frame
@@ -103,14 +104,15 @@ def test_create_threshold_mask():
     assert aperture_mask.shape == test.flux.shape
     assert np.median(aperture_mask.reshape((test.time.shape[0], -1)).sum(axis=1)) == 7.0
 
+
 def test_pixel_quality():
     """
-    Test 3D pixel quality mask. Checks that the shape of the mask is the same as self.flux 
+    Test 3D pixel quality mask. Checks that the shape of the mask is the same as self.flux
     and that the values are as expected from a manual inspection.
     """
 
     # Create artificial track for a region that includes a saturated star, straps and non-science pixels.
-    # Note: the track must have length > 1, but we use two timestamps very close together so resulting 
+    # Note: the track must have length > 1, but we use two timestamps very close together so resulting
     # moving TPF only has one frame.
     time = np.linspace(2458328.50, 2458328.52, 2) - 2457000
     track = pd.DataFrame(
@@ -123,7 +125,7 @@ def test_pixel_quality():
             "row": np.linspace(2020, 2021, len(time)),
         }
     )
-    shape = (70,70)
+    shape = (70, 70)
     target = MovingTPF("simulated_track", track)
     target.get_data(shape=shape)
     target.reshape_data()
@@ -133,40 +135,41 @@ def test_pixel_quality():
     assert np.shape(target.pixel_quality) == (len(target.time), *shape)
 
     # Check that pixel quality mask has expected values.
-    # The expected values were determined manually using the first frame of the TPF and the strap table. 
+    # The expected values were determined manually using the first frame of the TPF and the strap table.
     pixels = np.zeros_like(target.flux[0])
 
     # Flag for non-science pixels
-    pixels[63:,:] += 1
+    pixels[63:, :] += 1
 
-    # Flag for straps 
-    pixels[:,11] += 2
-    pixels[:,12] += 2
-    pixels[:,15] += 2
-    pixels[:,16] += 2
-    pixels[:,19] += 2
-    pixels[:,20] += 2
+    # Flag for straps
+    pixels[:, 11] += 2
+    pixels[:, 12] += 2
+    pixels[:, 15] += 2
+    pixels[:, 16] += 2
+    pixels[:, 19] += 2
+    pixels[:, 20] += 2
 
     # Flag for saturation
-    pixels[31:41,33] += 4
-    pixels[24:45,34] += 4
-    pixels[33:38,35] += 4
+    pixels[31:41, 33] += 4
+    pixels[24:45, 34] += 4
+    pixels[33:38, 35] += 4
 
     # Flag for saturation buffer
-    pixels[31:41,32] += 8
-    pixels[41:45,33] += 8
-    pixels[24:31,33] += 8
-    pixels[23,34] += 8
-    pixels[45,34] += 8
-    pixels[24:33,35] += 8
-    pixels[38:45,35] += 8
-    pixels[33:38,36] += 8
+    pixels[31:41, 32] += 8
+    pixels[41:45, 33] += 8
+    pixels[24:31, 33] += 8
+    pixels[23, 34] += 8
+    pixels[45, 34] += 8
+    pixels[24:33, 35] += 8
+    pixels[38:45, 35] += 8
+    pixels[33:38, 36] += 8
 
     assert np.array_equal(pixels, target.pixel_quality[0])
 
+
 def test_make_tpf():
     """
-    Check that make_tpf() correctly saves the TPF, that the file has the expected attributes 
+    Check that make_tpf() correctly saves the TPF, that the file has the expected attributes
     and that it can be opened with lightkurve.
     """
 
@@ -179,18 +182,20 @@ def test_make_tpf():
 
     # Open the file with astropy and check attributes
     with fits.open("tests/tess-1998YT6-s0006-shape11x11-moving_tp.fits") as hdul:
-        assert "APERTURE" in hdul[3].columns.names 
+        assert "APERTURE" in hdul[3].columns.names
         assert "PIXEL_QUALITY" in hdul[3].columns.names
         assert "CORNER1" in hdul[3].columns.names
         assert "CORNER2" in hdul[3].columns.names
         assert len(hdul[3].data["APERTURE"]) == len(target.time)
-        assert np.array_equal(target.corr_flux,hdul[1].data["FLUX"])
+        assert np.array_equal(target.corr_flux, hdul[1].data["FLUX"])
 
     # Check the file can be opened with lightkurve
-    tpf = lk.read("tests/tess-1998YT6-s0006-shape11x11-moving_tp.fits",quality_bitmask="none")
+    tpf = lk.read(
+        "tests/tess-1998YT6-s0006-shape11x11-moving_tp.fits", quality_bitmask="none"
+    )
     assert hasattr(tpf, "pipeline_mask")
     assert len(tpf.time) == len(target.time)
-    assert np.array_equal(target.corr_flux,tpf.flux.value) 
+    assert np.array_equal(target.corr_flux, tpf.flux.value)
 
     # Delete the file
     os.remove("tests/tess-1998YT6-s0006-shape11x11-moving_tp.fits")

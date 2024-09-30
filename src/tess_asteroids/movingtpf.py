@@ -474,44 +474,40 @@ class MovingTPF:
 
         return aperture_mask
 
-    def create_pixel_quality(
-        self, 
-        sat_buffer_rad: int=1
-    ):
+    def create_pixel_quality(self, sat_buffer_rad: int = 1):
         """
-        Create 3D pixel quality mask. The mask is a bit-wise combination of 
+        Create 3D pixel quality mask. The mask is a bit-wise combination of
         the following flags:
-        
+
         Bit - Description
         ----------------
         1 - pixel is outside of science array
         2 - pixel is in a strap column
         3 - pixel is saturated
-        4 - pixel is within `sat_buffer_rad` pixels of a saturated pixel 
+        4 - pixel is within `sat_buffer_rad` pixels of a saturated pixel
 
         Parameters
         ----------
         sat_buffer_rad : int
-            Approximate radius of saturation buffer (in pixels) around each saturated pixel. 
+            Approximate radius of saturation buffer (in pixels) around each saturated pixel.
 
         Returns
         -------
         """
-        if (
-            not hasattr(self, "pixels")
-            or not hasattr(self, "flux")
-        ):
-            raise AttributeError("Must run `get_data()` and `reshape_data()` before creating pixel quality mask.")
+        if not hasattr(self, "pixels") or not hasattr(self, "flux"):
+            raise AttributeError(
+                "Must run `get_data()` and `reshape_data()` before creating pixel quality mask."
+            )
 
         # Pixel mask that identifies non-science pixels
         science_mask = ~np.logical_and(
-            np.logical_and(self.pixels.T[0] >= 1,self.pixels.T[0] <= 2048),
-            np.logical_and(self.pixels.T[1] >= 45,self.pixels.T[1] <= 2092)
-            )
-        
+            np.logical_and(self.pixels.T[0] >= 1, self.pixels.T[0] <= 2048),
+            np.logical_and(self.pixels.T[1] >= 45, self.pixels.T[1] <= 2092),
+        )
+
         # Pixel mask that identifies strap columns
         # Must add 44 to straps['Column'] because this is one-indexed from first science pixel.
-        strap_mask = np.isin(self.pixels.T[1],straps['Column']+44)
+        strap_mask = np.isin(self.pixels.T[1], straps["Column"] + 44)
 
         # Pixel mask that identifies saturated pixels
         sat_mask = self.flux > 1e5
@@ -526,28 +522,36 @@ class MovingTPF:
             masks = {
                 "science_mask": {
                     "bit": 1,
-                    "value": science_mask[self.target_mask[t]].reshape(self.shape)
+                    "value": science_mask[self.target_mask[t]].reshape(self.shape),
                 },
                 "strap_mask": {
                     "bit": 2,
-                    "value": strap_mask[self.target_mask[t]].reshape(self.shape)
+                    "value": strap_mask[self.target_mask[t]].reshape(self.shape),
                 },
-                "sat_mask": {
-                    "bit": 3,
-                    "value": sat_mask[t]
-                },
+                "sat_mask": {"bit": 3, "value": sat_mask[t]},
                 # Saturation buffer:
-                # Computes pixels that are 4-adjacent to a saturated pixel and repeats 
-                # `sat_buffer_rad` times such that the radius of the saturated buffer 
+                # Computes pixels that are 4-adjacent to a saturated pixel and repeats
+                # `sat_buffer_rad` times such that the radius of the saturated buffer
                 # mask is approximately `sat_buffer_rad` around each saturated pixel.
                 # Excludes saturated pixels themselves.
                 "sat_buffer_mask": {
                     "bit": 4,
-                    "value": ndimage.binary_dilation(sat_mask[t], iterations=sat_buffer_rad) & ~sat_mask[t]
-                }
+                    "value": ndimage.binary_dilation(
+                        sat_mask[t], iterations=sat_buffer_rad
+                    )
+                    & ~sat_mask[t],
+                },
             }
             # Compute bit-wise mask
-            pixel_quality.append(np.sum([(2**(masks[mask]["bit"]-1))*masks[mask]["value"] for mask in masks],axis=0).astype("int16"))
+            pixel_quality.append(
+                np.sum(
+                    [
+                        (2 ** (masks[mask]["bit"] - 1)) * masks[mask]["value"]
+                        for mask in masks
+                    ],
+                    axis=0,
+                ).astype("int16")
+            )
         self.pixel_quality = np.asarray(pixel_quality)
 
     def save_data(
@@ -603,8 +607,8 @@ class MovingTPF:
             not hasattr(self, "all_flux")
             or not hasattr(self, "flux")
             or not hasattr(self, "corr_flux")
-            or not hasattr(self,"aperture_mask")
-            or not hasattr(self,"pixel_quality")
+            or not hasattr(self, "aperture_mask")
+            or not hasattr(self, "pixel_quality")
         ):
             raise AttributeError(
                 "Must run `get_data()`, `reshape_data()`, `create_pixel_quality()`, `background_correction()` and `create_aperture()` before saving TPF."
@@ -736,13 +740,15 @@ class MovingTPF:
         # Aperture has values 0 and 2, where 0/2 indicates the pixel is outside/inside the aperture.
         # This format is used to be consistent with the aperture HDU from SPOC.
         aperture_hdu_average = fits.ImageHDU(
-            data=np.nanmedian(self.aperture_mask,axis=0).astype('int32')*2,
+            data=np.nanmedian(self.aperture_mask, axis=0).astype("int32") * 2,
             header=fits.Header(
                 [*self.cube.output_secondary_header.cards, *wcs_header.cards]
             ),
         )
         aperture_hdu_average.header["EXTNAME"] = "APERTURE"
-        aperture_hdu_average.header.set("NPIXSAP", None, "Number of pixels in optimal aperture")
+        aperture_hdu_average.header.set(
+            "NPIXSAP", None, "Number of pixels in optimal aperture"
+        )
         aperture_hdu_average.header.set(
             "NPIXMISS", None, "Number of op. aperture pixels not collected"
         )
@@ -778,7 +784,7 @@ class MovingTPF:
                 name="APERTURE",
                 format=str(self.corr_flux[0].size) + "J",
                 dim=dims,
-                array=self.aperture_mask.astype('int32')*2,
+                array=self.aperture_mask.astype("int32") * 2,
             ),
         ]
 
@@ -788,7 +794,12 @@ class MovingTPF:
 
         # Create hdulist and save to file
         self.hdulist = fits.HDUList(
-            [self.cube.output_primary_ext, table_hdu_spoc, aperture_hdu_average, table_hdu_extra]
+            [
+                self.cube.output_primary_ext,
+                table_hdu_spoc,
+                aperture_hdu_average,
+                table_hdu_extra,
+            ]
         )
         self.hdulist.writeto(save_loc + file_name, overwrite=True)
         logger.info("Saved TPF to {0}".format(save_loc + file_name))
