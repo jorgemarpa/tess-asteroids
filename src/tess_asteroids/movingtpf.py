@@ -871,7 +871,7 @@ class MovingTPF:
     @staticmethod
     def from_name(target: str, sector: int, time_step: float = 1.0):
         """
-        Initialises MovingTargetTPF from target name and TESS sector.
+        Initialises MovingTPF from target name and TESS sector.
 
         Parameters
         ----------
@@ -884,8 +884,8 @@ class MovingTPF:
 
         Returns
         -------
-        MovingTargetTPF :
-            Initialised MovingTargetTPF.
+        MovingTPF :
+            Initialised MovingTPF.
         df_ephem : DataFrame
             Target ephemeris with columns ['time','sector','camera','ccd','column','row'].
                 'time' : float with units (JD - 2457000).
@@ -909,4 +909,4 @@ class MovingTPF:
             ["time", "sector", "camera", "ccd", "column", "row"]
         ].reset_index(drop=True)
 
-        return MovingTargetTPF(target=target, ephem=df_ephem), df_ephem
+        return MovingTPF(target=target, ephem=df_ephem), df_ephem
