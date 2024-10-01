@@ -87,6 +87,9 @@ class MovingTPF:
             Name of saved TPF.
         save_loc : str
             Directory into which the files will be saved.
+        **kwargs
+            Keyword arguments to be passed to `create_pixel_quality()`, `background_correction()`, 
+            `create_aperture()` and `save_data()`.
 
         Returns
         -------
@@ -297,6 +300,8 @@ class MovingTPF:
         ----------
         method : str
             Method used for background correction. One of `rolling`.
+        **kwargs
+            Keyword arguments to be passed to `_bg_rolling_median()`.
 
         Returns
         -------
@@ -474,7 +479,7 @@ class MovingTPF:
 
         return aperture_mask
 
-    def create_pixel_quality(self, sat_buffer_rad: int = 1):
+    def create_pixel_quality(self, sat_level: float = 1e5, sat_buffer_rad: int = 1):
         """
         Create 3D pixel quality mask. The mask is a bit-wise combination of
         the following flags:
@@ -488,6 +493,8 @@ class MovingTPF:
 
         Parameters
         ----------
+        sat_level : float
+            Flux (e-/s) above which to consider a pixel saturated.
         sat_buffer_rad : int
             Approximate radius of saturation buffer (in pixels) around each saturated pixel.
 
@@ -510,7 +517,7 @@ class MovingTPF:
         strap_mask = np.isin(self.pixels.T[1], straps["Column"] + 44)
 
         # Pixel mask that identifies saturated pixels
-        sat_mask = self.flux > 1e5
+        sat_mask = self.flux > sat_level
 
         # >>>>> ADD A MASK FOR OTHER SATURATION FEATURES <<<<<
 
