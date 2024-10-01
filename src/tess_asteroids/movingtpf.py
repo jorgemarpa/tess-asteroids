@@ -88,7 +88,7 @@ class MovingTPF:
         save_loc : str
             Directory into which the files will be saved.
         **kwargs
-            Keyword arguments to be passed to `create_pixel_quality()`, `background_correction()`, 
+            Keyword arguments to be passed to `create_pixel_quality()`, `background_correction()`,
             `create_aperture()` and `save_data()`.
 
         Returns
