@@ -12,10 +12,10 @@ from tesscube import TESSCube
 from tesscube.fits import get_wcs_header_by_extension
 from tesscube.utils import _sync_call, convert_coordinates_to_runs
 
-from . import logger
+from . import logger, straps
 
 
-class MovingTargetTPF:
+class MovingTPF:
     """
     Create a TPF for a moving target (e.g. asteroid) from a TESS FFI.
 
@@ -64,6 +64,7 @@ class MovingTargetTPF:
         self,
         shape: Tuple[int, int] = (11, 11),
         bg_method: str = "rolling",
+        ap_method: str = "threshold",
         file_name: Optional[str] = None,
         save_loc: str = "",
         **kwargs,
@@ -79,10 +80,16 @@ class MovingTargetTPF:
         bg_method : str
             Method used for background correction.
             One of `rolling`.
+        ap_method : str
+            Method used to create aperture.
+            One of ['threshold', 'prf', 'ellipse'].
         file_name : str
             Name of saved TPF.
         save_loc : str
             Directory into which the files will be saved.
+        **kwargs
+            Keyword arguments to be passed to `create_pixel_quality()`, `background_correction()`,
+            `create_aperture()` and `save_data()`.
 
         Returns
         -------
@@ -90,8 +97,9 @@ class MovingTargetTPF:
         # >>>>> ADD REFINE_COORDINATES() WHEN IMPLEMENTED <<<<<
         self.get_data(shape=shape)
         self.reshape_data()
+        self.create_pixel_quality(**kwargs)
         self.background_correction(method=bg_method, **kwargs)
-        # >>>>> ADD GET_APERTURE() WHEN IMPLEMENTED <<<<<
+        self.create_aperture(method=ap_method, **kwargs)
         self.save_data(file_name_tpf=file_name, save_loc=save_loc, **kwargs)
 
     def refine_coordinates(self):
@@ -229,7 +237,7 @@ class MovingTargetTPF:
         )
 
         # Transform unique pixel indices back into (row,column)
-        pixels = np.asarray(
+        self.pixels = np.asarray(
             [
                 j
                 for i in [
@@ -253,8 +261,8 @@ class MovingTargetTPF:
         for t in range(len(self.time)):
             target_mask.append(
                 np.logical_and(
-                    np.isin(pixels.T[0], row[t].ravel()),
-                    np.isin(pixels.T[1], column[t].ravel()),
+                    np.isin(self.pixels.T[0], row[t].ravel()),
+                    np.isin(self.pixels.T[1], column[t].ravel()),
                 ),
             )
         self.target_mask = np.asarray(target_mask)
@@ -292,6 +300,8 @@ class MovingTargetTPF:
         ----------
         method : str
             Method used for background correction. One of `rolling`.
+        **kwargs
+            Keyword arguments to be passed to `_bg_rolling_median()`.
 
         Returns
         -------
@@ -423,7 +433,7 @@ class MovingTargetTPF:
             or not hasattr(self, "corr_flux")
         ):
             raise AttributeError(
-                "Must run `get_data()`, `reshape_data()` and `background_correction()` before."
+                "Must run `get_data()`, `reshape_data()` and `background_correction()` before creating aperture."
             )
 
         if reference_pixel == "center":
@@ -468,6 +478,88 @@ class MovingTargetTPF:
             aperture_mask[nt] = labels == closest_label
 
         return aperture_mask
+
+    def create_pixel_quality(self, sat_level: float = 1e5, sat_buffer_rad: int = 1):
+        """
+        Create 3D pixel quality mask. The mask is a bit-wise combination of
+        the following flags:
+
+        Bit - Description
+        ----------------
+        1 - pixel is outside of science array
+        2 - pixel is in a strap column
+        3 - pixel is saturated
+        4 - pixel is within `sat_buffer_rad` pixels of a saturated pixel
+
+        Parameters
+        ----------
+        sat_level : float
+            Flux (e-/s) above which to consider a pixel saturated.
+        sat_buffer_rad : int
+            Approximate radius of saturation buffer (in pixels) around each saturated pixel.
+
+        Returns
+        -------
+        """
+        if not hasattr(self, "pixels") or not hasattr(self, "flux"):
+            raise AttributeError(
+                "Must run `get_data()` and `reshape_data()` before creating pixel quality mask."
+            )
+
+        # Pixel mask that identifies non-science pixels
+        science_mask = ~np.logical_and(
+            np.logical_and(self.pixels.T[0] >= 1, self.pixels.T[0] <= 2048),
+            np.logical_and(self.pixels.T[1] >= 45, self.pixels.T[1] <= 2092),
+        )
+
+        # Pixel mask that identifies strap columns
+        # Must add 44 to straps['Column'] because this is one-indexed from first science pixel.
+        strap_mask = np.isin(self.pixels.T[1], straps["Column"] + 44)
+
+        # Pixel mask that identifies saturated pixels
+        sat_mask = self.flux > sat_level
+
+        # >>>>> ADD A MASK FOR OTHER SATURATION FEATURES <<<<<
+
+        # Combine masks
+        pixel_quality = []
+        for t in range(len(self.time)):
+            # Define dictionary containing each mask and corresponding binary digit.
+            # Masks are reshaped to (len(self.time), self.shape), if necessary
+            masks = {
+                "science_mask": {
+                    "bit": 1,
+                    "value": science_mask[self.target_mask[t]].reshape(self.shape),
+                },
+                "strap_mask": {
+                    "bit": 2,
+                    "value": strap_mask[self.target_mask[t]].reshape(self.shape),
+                },
+                "sat_mask": {"bit": 3, "value": sat_mask[t]},
+                # Saturation buffer:
+                # Computes pixels that are 4-adjacent to a saturated pixel and repeats
+                # `sat_buffer_rad` times such that the radius of the saturated buffer
+                # mask is approximately `sat_buffer_rad` around each saturated pixel.
+                # Excludes saturated pixels themselves.
+                "sat_buffer_mask": {
+                    "bit": 4,
+                    "value": ndimage.binary_dilation(
+                        sat_mask[t], iterations=sat_buffer_rad
+                    )
+                    & ~sat_mask[t],
+                },
+            }
+            # Compute bit-wise mask
+            pixel_quality.append(
+                np.sum(
+                    [
+                        (2 ** (masks[mask]["bit"] - 1)) * masks[mask]["value"]
+                        for mask in masks
+                    ],
+                    axis=0,
+                ).astype("int16")
+            )
+        self.pixel_quality = np.asarray(pixel_quality)
 
     def save_data(
         self,
@@ -522,9 +614,11 @@ class MovingTargetTPF:
             not hasattr(self, "all_flux")
             or not hasattr(self, "flux")
             or not hasattr(self, "corr_flux")
+            or not hasattr(self, "aperture_mask")
+            or not hasattr(self, "pixel_quality")
         ):
             raise AttributeError(
-                "Must run `get_data()`, `reshape_data()` and `background_correction()` before saving TPF."
+                "Must run `get_data()`, `reshape_data()`, `create_pixel_quality()`, `background_correction()` and `create_aperture()` before saving TPF."
             )
 
         # Create default file name
@@ -551,7 +645,7 @@ class MovingTargetTPF:
         # >>>>> UPDATE IN FUTURE <<<<<
         time_corr = np.zeros_like(self.time)
 
-        # Define FITS columns
+        # Define SPOC-like FITS columns
         tform = str(self.corr_flux[0].size) + "E"
         dims = str(self.corr_flux[0].shape[::-1])
         cols = [
@@ -617,14 +711,6 @@ class MovingTargetTPF:
                 disp="B16.16",
                 array=self.quality,
             ),
-            # >>>>> UPDATE DEFINITION FOR PIXEL QUALITY <<<<<
-            fits.Column(
-                name="PIXEL_QUALITY",
-                format=str(self.corr_flux[0].size) + "J",
-                dim=dims,
-                disp="B16.16",
-                array=np.zeros_like(self.corr_flux),
-            ),
             fits.Column(
                 name="POS_CORR1",
                 format="E",
@@ -639,6 +725,43 @@ class MovingTargetTPF:
                 disp="E14.7",
                 array=pos_corr2,
             ),
+        ]
+
+        # Create SPOC-like table HDU
+        table_hdu_spoc = fits.BinTableHDU.from_columns(
+            cols,
+            header=fits.Header(
+                [
+                    *self.cube.output_first_header.cards,
+                    *get_wcs_header_by_extension(wcs_header, ext=4).cards,
+                    *get_wcs_header_by_extension(wcs_header, ext=5).cards,
+                    *get_wcs_header_by_extension(wcs_header, ext=6).cards,
+                    *get_wcs_header_by_extension(wcs_header, ext=7).cards,
+                    *get_wcs_header_by_extension(wcs_header, ext=8).cards,
+                ]
+            ),
+        )
+        table_hdu_spoc.header["EXTNAME"] = "PIXELS"
+
+        # Create HDU containing average aperture
+        # Aperture has values 0 and 2, where 0/2 indicates the pixel is outside/inside the aperture.
+        # This format is used to be consistent with the aperture HDU from SPOC.
+        aperture_hdu_average = fits.ImageHDU(
+            data=np.nanmedian(self.aperture_mask, axis=0).astype("int32") * 2,
+            header=fits.Header(
+                [*self.cube.output_secondary_header.cards, *wcs_header.cards]
+            ),
+        )
+        aperture_hdu_average.header["EXTNAME"] = "APERTURE"
+        aperture_hdu_average.header.set(
+            "NPIXSAP", None, "Number of pixels in optimal aperture"
+        )
+        aperture_hdu_average.header.set(
+            "NPIXMISS", None, "Number of op. aperture pixels not collected"
+        )
+
+        # Define extra FITS columns
+        cols = [
             # Original FFI column of lower-left pixel in TPF.
             fits.Column(
                 name="CORNER1",
@@ -653,41 +776,37 @@ class MovingTargetTPF:
                 unit="pixel",
                 array=self.corner[:, 0],
             ),
+            # 3D pixel quality mask
+            fits.Column(
+                name="PIXEL_QUALITY",
+                format=str(self.corr_flux[0].size) + "I",
+                dim=dims,
+                disp="B16.16",
+                array=self.pixel_quality,
+            ),
+            # Aperture as a function of time.
+            # Aperture has values 0 and 2, where 0/2 indicates the pixel is outside/inside the aperture.
+            # This format is used to be consistent with the aperture HDU from SPOC.
+            fits.Column(
+                name="APERTURE",
+                format=str(self.corr_flux[0].size) + "J",
+                dim=dims,
+                array=self.aperture_mask.astype("int32") * 2,
+            ),
         ]
 
-        # Create table HDU
-        table_hdu = fits.BinTableHDU.from_columns(
-            cols,
-            header=fits.Header(
-                [
-                    *self.cube.output_first_header.cards,
-                    *get_wcs_header_by_extension(wcs_header, ext=4).cards,
-                    *get_wcs_header_by_extension(wcs_header, ext=5).cards,
-                    *get_wcs_header_by_extension(wcs_header, ext=6).cards,
-                    *get_wcs_header_by_extension(wcs_header, ext=7).cards,
-                    *get_wcs_header_by_extension(wcs_header, ext=8).cards,
-                ]
-            ),
-        )
-        table_hdu.header["EXTNAME"] = "PIXELS"
-
-        # Create aperture HDU
-        # >>>>> UPDATE IN FUTURE WITH REAL APERTURE <<<<<
-        aperture_hdu = fits.ImageHDU(
-            data=np.ones(self.shape),
-            header=fits.Header(
-                [*self.cube.output_secondary_header.cards, *wcs_header.cards]
-            ),
-        )
-        aperture_hdu.header["EXTNAME"] = "APERTURE"
-        aperture_hdu.header.set("NPIXSAP", None, "Number of pixels in optimal aperture")
-        aperture_hdu.header.set(
-            "NPIXMISS", None, "Number of op. aperture pixels not collected"
-        )
+        # Create table HDU for extra columns
+        table_hdu_extra = fits.BinTableHDU.from_columns(cols)
+        table_hdu_extra.header["EXTNAME"] = "EXTRAS"
 
         # Create hdulist and save to file
         self.hdulist = fits.HDUList(
-            [self.cube.output_primary_ext, table_hdu, aperture_hdu]
+            [
+                self.cube.output_primary_ext,
+                table_hdu_spoc,
+                aperture_hdu_average,
+                table_hdu_extra,
+            ]
         )
         self.hdulist.writeto(save_loc + file_name, overwrite=True)
         logger.info("Saved TPF to {0}".format(save_loc + file_name))
@@ -770,7 +889,7 @@ class MovingTargetTPF:
     @staticmethod
     def from_name(target: str, sector: int, time_step: float = 1.0):
         """
-        Initialises MovingTargetTPF from target name and TESS sector.
+        Initialises MovingTPF from target name and TESS sector.
 
         Parameters
         ----------
@@ -783,8 +902,8 @@ class MovingTargetTPF:
 
         Returns
         -------
-        MovingTargetTPF :
-            Initialised MovingTargetTPF.
+        MovingTPF :
+            Initialised MovingTPF.
         df_ephem : DataFrame
             Target ephemeris with columns ['time','sector','camera','ccd','column','row'].
                 'time' : float with units (JD - 2457000).
@@ -808,4 +927,4 @@ class MovingTargetTPF:
             ["time", "sector", "camera", "ccd", "column", "row"]
         ].reset_index(drop=True)
 
-        return MovingTargetTPF(target=target, ephem=df_ephem), df_ephem
+        return MovingTPF(target=target, ephem=df_ephem), df_ephem
