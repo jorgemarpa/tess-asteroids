@@ -887,9 +887,16 @@ class MovingTPF:
         raise NotImplementedError("animate_tpf() is not yet implemented.")
 
     @staticmethod
-    def from_name(target: str, sector: int, time_step: float = 1.0):
+    def from_name(
+        target: str,
+        sector: int,
+        camera: Optional[int] = None,
+        ccd: Optional[int] = None,
+        time_step: float = 1.0,
+    ):
         """
-        Initialises MovingTPF from target name and TESS sector.
+        Initialises MovingTPF from target name and TESS sector. Specifying a camera and
+        CCD will only use the ephemeris from that camera/ccd.
 
         Parameters
         ----------
@@ -897,6 +904,12 @@ class MovingTPF:
             JPL/Horizons target ID of e.g. asteroid, comet.
         sector : int
             TESS sector number.
+        camera : int
+            TESS camera. Must be defined alongside `ccd`.
+            If `None`, full ephemeris will be used to initialise MovingTPF.
+        ccd : int
+            TESS CCD. Must be defined alongside `camera`.
+            If `None`, full ephemeris will be used to initialise MovingTPF.
         time_step : float
             Resolution of ephemeris, in days.
 
@@ -919,6 +932,18 @@ class MovingTPF:
             raise ValueError(
                 "Target {} was not observed in sector {}.".format(target, sector)
             )
+
+        # Filter ephemeris using camera/ccd.
+        if camera is not None and ccd is not None:
+            df_ephem = df_ephem[
+                np.logical_and(df_ephem["camera"] == camera, df_ephem["ccd"] == ccd)
+            ]
+            if len(df_ephem) == 0:
+                raise ValueError(
+                    "Target {} was not observed in sector {}, camera {}, ccd {}.".format(
+                        target, sector, camera, ccd
+                    )
+                )
 
         # Add column for time in units (JD - 2457000)
         # >>>>> Note: tess-ephem returns time in JD, not BJD. <<<<<

@@ -11,7 +11,7 @@ from tess_asteroids import MovingTPF
 
 def test_from_name():
     """
-    Check that static method from_name() gives expected ephemeris for asteroid 1998 YT6.
+    Check that static method from_name() gives expected ephemeris for asteroids 1998 YT6 and 1994 EL3.
     """
     target, track = MovingTPF.from_name("1998 YT6", sector=6)
 
@@ -22,6 +22,12 @@ def test_from_name():
     # Bounds taken from tesswcs pointings.csv file for sector 6.
     assert min(track["time"]) >= 2458463.5 - 2457000
     assert max(track["time"]) <= 2458490.5 - 2457000
+
+    # Asteroid 1994 EL3 is observed by camera 1, CCDs 1 and 2 during sector 6.
+    target, track = MovingTPF.from_name("1994 EL3", sector=6, camera=1, ccd=1)
+    assert target.sector == 6
+    assert target.camera == 1
+    assert target.ccd == 1
 
 
 def test_data_logic(caplog):
