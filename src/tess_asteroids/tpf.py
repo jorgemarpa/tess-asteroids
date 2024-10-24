@@ -1,11 +1,14 @@
 import time
 from typing import Optional, Tuple, Union
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from astropy.coordinates import SkyCoord
 from astropy.io import fits
+from astropy.stats import sigma_clip
 from astropy.wcs.utils import fit_wcs_from_points
+from numpy.polynomial import Polynomial
 from scipy import ndimage, stats
 from tess_ephem import ephem
 from tesscube import TESSCube
@@ -13,6 +16,7 @@ from tesscube.fits import get_wcs_header_by_extension
 from tesscube.utils import _sync_call, convert_coordinates_to_runs
 
 from . import logger
+from .utils import compute_moments, inside_ellipse
 
 
 class MovingTargetTPF:
@@ -377,7 +381,9 @@ class MovingTargetTPF:
         if method == "threshold":
             self.aperture_mask = self._create_threshold_mask(**kwargs)
         # will add these methods in a future PR
-        elif method in ["prf", "ellipse"]:
+        elif method == "ellipse":
+            self.aperture_mask = self._ellipse_aperture(ellipse_params=False, **kwargs)
+        elif method in ["prf"]:
             raise NotImplementedError(f"Method '{method}' not implemented yet.")
         else:
             raise ValueError(
@@ -468,6 +474,134 @@ class MovingTargetTPF:
             aperture_mask[nt] = labels == closest_label
 
         return aperture_mask
+
+    def _ellipse_aperture(
+        self,
+        R: float = 3.0,
+        smooth: bool = True,
+        ellipse_params: bool = False,
+        plot: bool = False,
+    ):
+        """
+        It uses second-order moments to compute ellipse parameters semi-major and
+        semi-minor axes (A and B) and position angles (theta) and get an aperture mask
+        with pixels inside the ellipse.
+        Ref: https://astromatic.github.io/sextractor/Position.html#ellipse-iso-def
+
+        Parameters
+        ----------
+        R: float
+            Valut to scale the ellipse, the default is 3.0 which typically represents
+            well the isophotal limits of the object.
+        smooth: boolean
+            Weather to smooth the moments' array by fitting a 3rd-order polynomial.
+            This helps to remove outliers and keep ellipse parameters more stable.
+        ellipse_params: boolean
+            Return a ndarray with ellipse parameters computed from first and second
+            moments [X_cent, Y_cent, A, B, theta_deg].
+        plot: boolean
+            Plot moments vector.
+
+        Returns
+        -------
+        aperture_mask: ndarray
+            Boolean 3D mask array with pixels within the ellipse.
+        ellipse_parameters: ndarray
+            Ellipse parameters [X_cent, Y_cent, A, B, theta_deg] with shape (5, n_times).
+        """
+        # create a threshold mask to select pixels to use for moments
+        threshold_mask = self._create_threshold_mask(
+            threshold=4.0, reference_pixel="center"
+        )
+
+        X, Y, X2, Y2, XY = compute_moments(self.flux, threshold_mask)
+
+        if plot:
+            fig, ax = plt.subplots(2, 2, figsize=(9, 7))
+            fig.suptitle("Moments", y=0.94)
+            ax[0, 0].plot(
+                X + self.corner[:, 1], Y + self.corner[:, 0], label="Centroid"
+            )
+            ax[0, 0].plot(self.ephemeris[:, 1], self.ephemeris[:, 0], label="Ephem")
+            ax[0, 0].legend()
+            ax[0, 0].set_title("")
+            ax[0, 0].set_ylabel("Y")
+            ax[0, 0].set_xlabel("X")
+
+            ax[0, 1].plot(self.time, XY, c="tab:blue", lw=1)
+            ax[0, 1].set_ylabel("XY")
+            ax[0, 1].set_xlabel("Time")
+
+            ax[1, 0].plot(self.time, X2, c="tab:blue", lw=1)
+            ax[1, 0].set_ylabel("X2")
+            ax[1, 0].set_xlabel("Time")
+            ax[1, 1].plot(self.time, Y2, c="tab:blue", lw=1)
+            ax[1, 1].set_ylabel("Y2")
+            ax[1, 1].set_xlabel("Time")
+
+        # fit a 3rd deg polynomial to smooth X2, Y2 and XY
+        if smooth:
+            # mask zeros and outliers
+            mask = (Y2 != 0) | (X2 != 0)
+            mask &= ~sigma_clip(Y2, sigma=5).mask
+            mask &= ~sigma_clip(X2, sigma=5).mask
+            # fit and eval polinomials
+            Y2 = Polynomial.fit(self.time[mask], Y2[mask], deg=3)(self.time)
+            X2 = Polynomial.fit(self.time[mask], X2[mask], deg=3)(self.time)
+            XY = Polynomial.fit(self.time[mask], XY[mask], deg=3)(self.time)
+            if plot:
+                ax[0, 1].plot(self.time, XY, c="tab:blue", label="Smooth", lw=2)
+                ax[1, 0].plot(self.time, X2, c="tab:blue", label="Smooth", lw=2)
+                ax[1, 1].plot(self.time, Y2, c="tab:blue", label="Smooth", lw=2)
+                plt.show()
+
+        if ellipse_params:
+            # compute A, B, and theta
+            semi_sum = (Y2 + X2) / 2
+            semi_sub = (Y2 - X2) / 2
+            A = np.sqrt(semi_sum + np.sqrt(semi_sub**2 + XY**2))
+            B = np.sqrt(semi_sum - np.sqrt(semi_sub**2 + XY**2))
+            theta_rad = np.arctan(2 * XY / (X2 - Y2)) / 2
+
+            # convert theta to degrees and fix angle change when A and B swap
+            # due to change in track direction
+            theta_deg = np.rad2deg(theta_rad)
+            gradA = np.gradient(A)
+            idx = np.where(gradA[:-1] * gradA[1:] < 0)[0] + 1
+            theta_deg[idx[0] :] += 90
+
+        # compute CXX, CYY and CXY which is a better param for an ellipse
+        den = X2 * Y2 - XY**2
+        CXX = Y2 / den
+        CYY = X2 / den
+        CXY = (-2) * XY / den
+
+        # use CXX, CYY, CXY to create an elliptical mask of size R
+        aperture_mask = np.zeros_like(self.flux).astype(bool)
+        for nt in range(len(self.time)):
+            rr, cc = np.mgrid[
+                self.corner[nt, 0] : self.corner[nt, 0] + self.shape[0],
+                self.corner[nt, 1] : self.corner[nt, 1] + self.shape[1],
+            ]
+
+            aperture_mask[nt] = inside_ellipse(
+                cc,
+                rr,
+                CXX[nt],
+                CYY[nt],
+                CXY[nt],
+                x0=self.ephemeris[nt, 1],
+                # x0=self.corner[nt, 1] + X[nt],
+                y0=self.ephemeris[nt, 0],
+                # y0=self.corner[nt, 0] + Y[nt],
+                R=R,
+            )
+        if ellipse_params:
+            return aperture_mask, np.array(
+                [self.corner[:, 1] + X, self.corner[:, 0] + Y, A, B, theta_deg]
+            ).T
+        else:
+            return aperture_mask
 
     def save_data(
         self,

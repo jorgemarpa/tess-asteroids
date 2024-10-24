@@ -117,3 +117,29 @@ def test_create_threshold_mask():
 
     assert aperture_mask.shape == test.flux.shape
     assert np.median(aperture_mask.reshape((test.time.shape[0], -1)).sum(axis=1)) == 7.0
+
+
+def test_ellipse_aperture():
+    """
+    Test ellipse aperture. The ellipse is fitted by computing the first- and second-order
+    momentum from the flux image. The method returns a mask with pixels inside the
+    ellipse and the ellipse parameters (semi major and minor axis and rotation angle).
+    We test for array integrity and expected returned values.
+    """
+    # Make TPF for asteroid 1998 YT6
+    test, _ = MovingTargetTPF.from_name("1998 YT6", sector=6)
+    test.get_data(shape=(11, 11))
+    test.reshape_data()
+    test.background_correction(method="rolling")
+
+    ellip_mask, ell_params = test._ellipse_aperture(ellipse_params=True)
+
+    # aperture mask
+    assert ellip_mask.shape == test.flux.shape
+    assert np.median(ellip_mask.reshape((test.time.shape[0], -1)).sum(axis=1)) == 13
+    # ellipse parameters
+    assert ell_params.shape == (test.time.shape[0], 5)
+    assert np.isfinite(ell_params).all()
+    assert np.mean(ell_params[:, 0] - test.ephemeris[:, 1]) < 0.2
+    assert np.mean(ell_params[:, 1] - test.ephemeris[:, 0]) < 0.2
+    assert ((ell_params[:, 4] >= 0) & (ell_params[:, 4] <= 360)).all()
