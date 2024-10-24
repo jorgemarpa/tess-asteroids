@@ -1,25 +1,21 @@
 import time
 from typing import Optional, Tuple, Union
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from astropy.coordinates import SkyCoord
 from astropy.io import fits
-from astropy.stats import sigma_clip
 from astropy.wcs.utils import fit_wcs_from_points
-from numpy.polynomial import Polynomial
 from scipy import ndimage, stats
 from tess_ephem import ephem
 from tesscube import TESSCube
 from tesscube.fits import get_wcs_header_by_extension
 from tesscube.utils import _sync_call, convert_coordinates_to_runs
 
-from . import logger
-from .utils import compute_moments, inside_ellipse
+from . import logger, straps
 
 
-class MovingTargetTPF:
+class MovingTPF:
     """
     Create a TPF for a moving target (e.g. asteroid) from a TESS FFI.
 
@@ -68,6 +64,7 @@ class MovingTargetTPF:
         self,
         shape: Tuple[int, int] = (11, 11),
         bg_method: str = "rolling",
+        ap_method: str = "threshold",
         file_name: Optional[str] = None,
         save_loc: str = "",
         **kwargs,
@@ -83,10 +80,16 @@ class MovingTargetTPF:
         bg_method : str
             Method used for background correction.
             One of `rolling`.
+        ap_method : str
+            Method used to create aperture.
+            One of ['threshold', 'prf', 'ellipse'].
         file_name : str
             Name of saved TPF.
         save_loc : str
             Directory into which the files will be saved.
+        **kwargs
+            Keyword arguments to be passed to `create_pixel_quality()`, `background_correction()`,
+            `create_aperture()` and `save_data()`.
 
         Returns
         -------
@@ -94,8 +97,9 @@ class MovingTargetTPF:
         # >>>>> ADD REFINE_COORDINATES() WHEN IMPLEMENTED <<<<<
         self.get_data(shape=shape)
         self.reshape_data()
+        self.create_pixel_quality(**kwargs)
         self.background_correction(method=bg_method, **kwargs)
-        # >>>>> ADD GET_APERTURE() WHEN IMPLEMENTED <<<<<
+        self.create_aperture(method=ap_method, **kwargs)
         self.save_data(file_name_tpf=file_name, save_loc=save_loc, **kwargs)
 
     def refine_coordinates(self):
@@ -233,7 +237,7 @@ class MovingTargetTPF:
         )
 
         # Transform unique pixel indices back into (row,column)
-        pixels = np.asarray(
+        self.pixels = np.asarray(
             [
                 j
                 for i in [
@@ -257,8 +261,8 @@ class MovingTargetTPF:
         for t in range(len(self.time)):
             target_mask.append(
                 np.logical_and(
-                    np.isin(pixels.T[0], row[t].ravel()),
-                    np.isin(pixels.T[1], column[t].ravel()),
+                    np.isin(self.pixels.T[0], row[t].ravel()),
+                    np.isin(self.pixels.T[1], column[t].ravel()),
                 ),
             )
         self.target_mask = np.asarray(target_mask)
@@ -296,6 +300,8 @@ class MovingTargetTPF:
         ----------
         method : str
             Method used for background correction. One of `rolling`.
+        **kwargs
+            Keyword arguments to be passed to `_bg_rolling_median()`.
 
         Returns
         -------
@@ -381,9 +387,7 @@ class MovingTargetTPF:
         if method == "threshold":
             self.aperture_mask = self._create_threshold_mask(**kwargs)
         # will add these methods in a future PR
-        elif method == "ellipse":
-            self.aperture_mask = self._ellipse_aperture(ellipse_params=False, **kwargs)
-        elif method in ["prf"]:
+        elif method in ["prf", "ellipse"]:
             raise NotImplementedError(f"Method '{method}' not implemented yet.")
         else:
             raise ValueError(
@@ -429,7 +433,7 @@ class MovingTargetTPF:
             or not hasattr(self, "corr_flux")
         ):
             raise AttributeError(
-                "Must run `get_data()`, `reshape_data()` and `background_correction()` before."
+                "Must run `get_data()`, `reshape_data()` and `background_correction()` before creating aperture."
             )
 
         if reference_pixel == "center":
@@ -475,133 +479,87 @@ class MovingTargetTPF:
 
         return aperture_mask
 
-    def _ellipse_aperture(
-        self,
-        R: float = 3.0,
-        smooth: bool = True,
-        ellipse_params: bool = False,
-        plot: bool = False,
-    ):
+    def create_pixel_quality(self, sat_level: float = 1e5, sat_buffer_rad: int = 1):
         """
-        It uses second-order moments to compute ellipse parameters semi-major and
-        semi-minor axes (A and B) and position angles (theta) and get an aperture mask
-        with pixels inside the ellipse.
-        Ref: https://astromatic.github.io/sextractor/Position.html#ellipse-iso-def
+        Create 3D pixel quality mask. The mask is a bit-wise combination of
+        the following flags:
+
+        Bit - Description
+        ----------------
+        1 - pixel is outside of science array
+        2 - pixel is in a strap column
+        3 - pixel is saturated
+        4 - pixel is within `sat_buffer_rad` pixels of a saturated pixel
 
         Parameters
         ----------
-        R: float
-            Valut to scale the ellipse, the default is 3.0 which typically represents
-            well the isophotal limits of the object.
-        smooth: boolean
-            Weather to smooth the moments' array by fitting a 3rd-order polynomial.
-            This helps to remove outliers and keep ellipse parameters more stable.
-        ellipse_params: boolean
-            Return a ndarray with ellipse parameters computed from first and second
-            moments [X_cent, Y_cent, A, B, theta_deg].
-        plot: boolean
-            Plot moments vector.
+        sat_level : float
+            Flux (e-/s) above which to consider a pixel saturated.
+        sat_buffer_rad : int
+            Approximate radius of saturation buffer (in pixels) around each saturated pixel.
 
         Returns
         -------
-        aperture_mask: ndarray
-            Boolean 3D mask array with pixels within the ellipse.
-        ellipse_parameters: ndarray
-            Ellipse parameters [X_cent, Y_cent, A, B, theta_deg] with shape (5, n_times).
         """
-        # create a threshold mask to select pixels to use for moments
-        threshold_mask = self._create_threshold_mask(
-            threshold=4.0, reference_pixel="center"
+        if not hasattr(self, "pixels") or not hasattr(self, "flux"):
+            raise AttributeError(
+                "Must run `get_data()` and `reshape_data()` before creating pixel quality mask."
+            )
+
+        # Pixel mask that identifies non-science pixels
+        science_mask = ~np.logical_and(
+            np.logical_and(self.pixels.T[0] >= 1, self.pixels.T[0] <= 2048),
+            np.logical_and(self.pixels.T[1] >= 45, self.pixels.T[1] <= 2092),
         )
 
-        X, Y, X2, Y2, XY = compute_moments(self.flux, threshold_mask)
+        # Pixel mask that identifies strap columns
+        # Must add 44 to straps['Column'] because this is one-indexed from first science pixel.
+        strap_mask = np.isin(self.pixels.T[1], straps["Column"] + 44)
 
-        if plot:
-            fig, ax = plt.subplots(2, 2, figsize=(9, 7))
-            fig.suptitle("Moments", y=0.94)
-            ax[0, 0].plot(
-                X + self.corner[:, 1], Y + self.corner[:, 0], label="Centroid"
+        # Pixel mask that identifies saturated pixels
+        sat_mask = self.flux > sat_level
+
+        # >>>>> ADD A MASK FOR OTHER SATURATION FEATURES <<<<<
+
+        # Combine masks
+        pixel_quality = []
+        for t in range(len(self.time)):
+            # Define dictionary containing each mask and corresponding binary digit.
+            # Masks are reshaped to (len(self.time), self.shape), if necessary
+            masks = {
+                "science_mask": {
+                    "bit": 1,
+                    "value": science_mask[self.target_mask[t]].reshape(self.shape),
+                },
+                "strap_mask": {
+                    "bit": 2,
+                    "value": strap_mask[self.target_mask[t]].reshape(self.shape),
+                },
+                "sat_mask": {"bit": 3, "value": sat_mask[t]},
+                # Saturation buffer:
+                # Computes pixels that are 4-adjacent to a saturated pixel and repeats
+                # `sat_buffer_rad` times such that the radius of the saturated buffer
+                # mask is approximately `sat_buffer_rad` around each saturated pixel.
+                # Excludes saturated pixels themselves.
+                "sat_buffer_mask": {
+                    "bit": 4,
+                    "value": ndimage.binary_dilation(
+                        sat_mask[t], iterations=sat_buffer_rad
+                    )
+                    & ~sat_mask[t],
+                },
+            }
+            # Compute bit-wise mask
+            pixel_quality.append(
+                np.sum(
+                    [
+                        (2 ** (masks[mask]["bit"] - 1)) * masks[mask]["value"]
+                        for mask in masks
+                    ],
+                    axis=0,
+                ).astype("int16")
             )
-            ax[0, 0].plot(self.ephemeris[:, 1], self.ephemeris[:, 0], label="Ephem")
-            ax[0, 0].legend()
-            ax[0, 0].set_title("")
-            ax[0, 0].set_ylabel("Y")
-            ax[0, 0].set_xlabel("X")
-
-            ax[0, 1].plot(self.time, XY, c="tab:blue", lw=1)
-            ax[0, 1].set_ylabel("XY")
-            ax[0, 1].set_xlabel("Time")
-
-            ax[1, 0].plot(self.time, X2, c="tab:blue", lw=1)
-            ax[1, 0].set_ylabel("X2")
-            ax[1, 0].set_xlabel("Time")
-            ax[1, 1].plot(self.time, Y2, c="tab:blue", lw=1)
-            ax[1, 1].set_ylabel("Y2")
-            ax[1, 1].set_xlabel("Time")
-
-        # fit a 3rd deg polynomial to smooth X2, Y2 and XY
-        if smooth:
-            # mask zeros and outliers
-            mask = (Y2 != 0) | (X2 != 0)
-            mask &= ~sigma_clip(Y2, sigma=5).mask
-            mask &= ~sigma_clip(X2, sigma=5).mask
-            # fit and eval polinomials
-            Y2 = Polynomial.fit(self.time[mask], Y2[mask], deg=3)(self.time)
-            X2 = Polynomial.fit(self.time[mask], X2[mask], deg=3)(self.time)
-            XY = Polynomial.fit(self.time[mask], XY[mask], deg=3)(self.time)
-            if plot:
-                ax[0, 1].plot(self.time, XY, c="tab:blue", label="Smooth", lw=2)
-                ax[1, 0].plot(self.time, X2, c="tab:blue", label="Smooth", lw=2)
-                ax[1, 1].plot(self.time, Y2, c="tab:blue", label="Smooth", lw=2)
-                plt.show()
-
-        if ellipse_params:
-            # compute A, B, and theta
-            semi_sum = (Y2 + X2) / 2
-            semi_sub = (Y2 - X2) / 2
-            A = np.sqrt(semi_sum + np.sqrt(semi_sub**2 + XY**2))
-            B = np.sqrt(semi_sum - np.sqrt(semi_sub**2 + XY**2))
-            theta_rad = np.arctan(2 * XY / (X2 - Y2)) / 2
-
-            # convert theta to degrees and fix angle change when A and B swap
-            # due to change in track direction
-            theta_deg = np.rad2deg(theta_rad)
-            gradA = np.gradient(A)
-            idx = np.where(gradA[:-1] * gradA[1:] < 0)[0] + 1
-            theta_deg[idx[0] :] += 90
-
-        # compute CXX, CYY and CXY which is a better param for an ellipse
-        den = X2 * Y2 - XY**2
-        CXX = Y2 / den
-        CYY = X2 / den
-        CXY = (-2) * XY / den
-
-        # use CXX, CYY, CXY to create an elliptical mask of size R
-        aperture_mask = np.zeros_like(self.flux).astype(bool)
-        for nt in range(len(self.time)):
-            rr, cc = np.mgrid[
-                self.corner[nt, 0] : self.corner[nt, 0] + self.shape[0],
-                self.corner[nt, 1] : self.corner[nt, 1] + self.shape[1],
-            ]
-
-            aperture_mask[nt] = inside_ellipse(
-                cc,
-                rr,
-                CXX[nt],
-                CYY[nt],
-                CXY[nt],
-                x0=self.ephemeris[nt, 1],
-                # x0=self.corner[nt, 1] + X[nt],
-                y0=self.ephemeris[nt, 0],
-                # y0=self.corner[nt, 0] + Y[nt],
-                R=R,
-            )
-        if ellipse_params:
-            return aperture_mask, np.array(
-                [self.corner[:, 1] + X, self.corner[:, 0] + Y, A, B, theta_deg]
-            ).T
-        else:
-            return aperture_mask
+        self.pixel_quality = np.asarray(pixel_quality)
 
     def save_data(
         self,
@@ -656,9 +614,11 @@ class MovingTargetTPF:
             not hasattr(self, "all_flux")
             or not hasattr(self, "flux")
             or not hasattr(self, "corr_flux")
+            or not hasattr(self, "aperture_mask")
+            or not hasattr(self, "pixel_quality")
         ):
             raise AttributeError(
-                "Must run `get_data()`, `reshape_data()` and `background_correction()` before saving TPF."
+                "Must run `get_data()`, `reshape_data()`, `create_pixel_quality()`, `background_correction()` and `create_aperture()` before saving TPF."
             )
 
         # Create default file name
@@ -685,7 +645,7 @@ class MovingTargetTPF:
         # >>>>> UPDATE IN FUTURE <<<<<
         time_corr = np.zeros_like(self.time)
 
-        # Define FITS columns
+        # Define SPOC-like FITS columns
         tform = str(self.corr_flux[0].size) + "E"
         dims = str(self.corr_flux[0].shape[::-1])
         cols = [
@@ -751,14 +711,6 @@ class MovingTargetTPF:
                 disp="B16.16",
                 array=self.quality,
             ),
-            # >>>>> UPDATE DEFINITION FOR PIXEL QUALITY <<<<<
-            fits.Column(
-                name="PIXEL_QUALITY",
-                format=str(self.corr_flux[0].size) + "J",
-                dim=dims,
-                disp="B16.16",
-                array=np.zeros_like(self.corr_flux),
-            ),
             fits.Column(
                 name="POS_CORR1",
                 format="E",
@@ -773,6 +725,43 @@ class MovingTargetTPF:
                 disp="E14.7",
                 array=pos_corr2,
             ),
+        ]
+
+        # Create SPOC-like table HDU
+        table_hdu_spoc = fits.BinTableHDU.from_columns(
+            cols,
+            header=fits.Header(
+                [
+                    *self.cube.output_first_header.cards,
+                    *get_wcs_header_by_extension(wcs_header, ext=4).cards,
+                    *get_wcs_header_by_extension(wcs_header, ext=5).cards,
+                    *get_wcs_header_by_extension(wcs_header, ext=6).cards,
+                    *get_wcs_header_by_extension(wcs_header, ext=7).cards,
+                    *get_wcs_header_by_extension(wcs_header, ext=8).cards,
+                ]
+            ),
+        )
+        table_hdu_spoc.header["EXTNAME"] = "PIXELS"
+
+        # Create HDU containing average aperture
+        # Aperture has values 0 and 2, where 0/2 indicates the pixel is outside/inside the aperture.
+        # This format is used to be consistent with the aperture HDU from SPOC.
+        aperture_hdu_average = fits.ImageHDU(
+            data=np.nanmedian(self.aperture_mask, axis=0).astype("int32") * 2,
+            header=fits.Header(
+                [*self.cube.output_secondary_header.cards, *wcs_header.cards]
+            ),
+        )
+        aperture_hdu_average.header["EXTNAME"] = "APERTURE"
+        aperture_hdu_average.header.set(
+            "NPIXSAP", None, "Number of pixels in optimal aperture"
+        )
+        aperture_hdu_average.header.set(
+            "NPIXMISS", None, "Number of op. aperture pixels not collected"
+        )
+
+        # Define extra FITS columns
+        cols = [
             # Original FFI column of lower-left pixel in TPF.
             fits.Column(
                 name="CORNER1",
@@ -787,41 +776,37 @@ class MovingTargetTPF:
                 unit="pixel",
                 array=self.corner[:, 0],
             ),
+            # 3D pixel quality mask
+            fits.Column(
+                name="PIXEL_QUALITY",
+                format=str(self.corr_flux[0].size) + "I",
+                dim=dims,
+                disp="B16.16",
+                array=self.pixel_quality,
+            ),
+            # Aperture as a function of time.
+            # Aperture has values 0 and 2, where 0/2 indicates the pixel is outside/inside the aperture.
+            # This format is used to be consistent with the aperture HDU from SPOC.
+            fits.Column(
+                name="APERTURE",
+                format=str(self.corr_flux[0].size) + "J",
+                dim=dims,
+                array=self.aperture_mask.astype("int32") * 2,
+            ),
         ]
 
-        # Create table HDU
-        table_hdu = fits.BinTableHDU.from_columns(
-            cols,
-            header=fits.Header(
-                [
-                    *self.cube.output_first_header.cards,
-                    *get_wcs_header_by_extension(wcs_header, ext=4).cards,
-                    *get_wcs_header_by_extension(wcs_header, ext=5).cards,
-                    *get_wcs_header_by_extension(wcs_header, ext=6).cards,
-                    *get_wcs_header_by_extension(wcs_header, ext=7).cards,
-                    *get_wcs_header_by_extension(wcs_header, ext=8).cards,
-                ]
-            ),
-        )
-        table_hdu.header["EXTNAME"] = "PIXELS"
-
-        # Create aperture HDU
-        # >>>>> UPDATE IN FUTURE WITH REAL APERTURE <<<<<
-        aperture_hdu = fits.ImageHDU(
-            data=np.ones(self.shape),
-            header=fits.Header(
-                [*self.cube.output_secondary_header.cards, *wcs_header.cards]
-            ),
-        )
-        aperture_hdu.header["EXTNAME"] = "APERTURE"
-        aperture_hdu.header.set("NPIXSAP", None, "Number of pixels in optimal aperture")
-        aperture_hdu.header.set(
-            "NPIXMISS", None, "Number of op. aperture pixels not collected"
-        )
+        # Create table HDU for extra columns
+        table_hdu_extra = fits.BinTableHDU.from_columns(cols)
+        table_hdu_extra.header["EXTNAME"] = "EXTRAS"
 
         # Create hdulist and save to file
         self.hdulist = fits.HDUList(
-            [self.cube.output_primary_ext, table_hdu, aperture_hdu]
+            [
+                self.cube.output_primary_ext,
+                table_hdu_spoc,
+                aperture_hdu_average,
+                table_hdu_extra,
+            ]
         )
         self.hdulist.writeto(save_loc + file_name, overwrite=True)
         logger.info("Saved TPF to {0}".format(save_loc + file_name))
@@ -902,9 +887,16 @@ class MovingTargetTPF:
         raise NotImplementedError("animate_tpf() is not yet implemented.")
 
     @staticmethod
-    def from_name(target: str, sector: int, time_step: float = 1.0):
+    def from_name(
+        target: str,
+        sector: int,
+        camera: Optional[int] = None,
+        ccd: Optional[int] = None,
+        time_step: float = 1.0,
+    ):
         """
-        Initialises MovingTargetTPF from target name and TESS sector.
+        Initialises MovingTPF from target name and TESS sector. Specifying a camera and
+        CCD will only use the ephemeris from that camera/ccd.
 
         Parameters
         ----------
@@ -912,13 +904,19 @@ class MovingTargetTPF:
             JPL/Horizons target ID of e.g. asteroid, comet.
         sector : int
             TESS sector number.
+        camera : int
+            TESS camera. Must be defined alongside `ccd`.
+            If `None`, full ephemeris will be used to initialise MovingTPF.
+        ccd : int
+            TESS CCD. Must be defined alongside `camera`.
+            If `None`, full ephemeris will be used to initialise MovingTPF.
         time_step : float
             Resolution of ephemeris, in days.
 
         Returns
         -------
-        MovingTargetTPF :
-            Initialised MovingTargetTPF.
+        MovingTPF :
+            Initialised MovingTPF.
         df_ephem : DataFrame
             Target ephemeris with columns ['time','sector','camera','ccd','column','row'].
                 'time' : float with units (JD - 2457000).
@@ -935,6 +933,18 @@ class MovingTargetTPF:
                 "Target {} was not observed in sector {}.".format(target, sector)
             )
 
+        # Filter ephemeris using camera/ccd.
+        if camera is not None and ccd is not None:
+            df_ephem = df_ephem[
+                np.logical_and(df_ephem["camera"] == camera, df_ephem["ccd"] == ccd)
+            ]
+            if len(df_ephem) == 0:
+                raise ValueError(
+                    "Target {} was not observed in sector {}, camera {}, ccd {}.".format(
+                        target, sector, camera, ccd
+                    )
+                )
+
         # Add column for time in units (JD - 2457000)
         # >>>>> Note: tess-ephem returns time in JD, not BJD. <<<<<
         df_ephem["time"] = [t.value - 2457000 for t in df_ephem.index.values]
@@ -942,4 +952,4 @@ class MovingTargetTPF:
             ["time", "sector", "camera", "ccd", "column", "row"]
         ].reset_index(drop=True)
 
-        return MovingTargetTPF(target=target, ephem=df_ephem), df_ephem
+        return MovingTPF(target=target, ephem=df_ephem), df_ephem
