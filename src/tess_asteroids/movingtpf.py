@@ -504,7 +504,7 @@ class MovingTPF:
             Value to scale the ellipse, the default is 3.0 which typically represents
             well the isophotal limits of the object.
         smooth: boolean
-            Weather to smooth the moments' array by fitting a 3rd-order polynomial.
+            Whether to smooth the second-order moments by fitting a 3rd-order polynomial.
             This helps to remove outliers and keep ellipse parameters more stable.
         ellipse_params: boolean
             Return a ndarray with ellipse parameters computed from first and second
