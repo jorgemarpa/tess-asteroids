@@ -1,5 +1,5 @@
 """
-Utils functions
+Utility functions
 """
 
 import numpy as np
@@ -8,7 +8,9 @@ import numpy as np
 def inside_ellipse(x, y, cxx, cyy, cxy, x0=0, y0=0, R=1):
     """
     Returns a boolean mask indicating positions inside a specified ellipse.
-    The ellipse is defined by its center, the radii, and the quadratic coefficients.
+    The ellipse is defined by its center, the radius, and the quadratic coefficients
+    (cxx, cyy, cxy).
+    Pixels with distnace <= R^2 from the center (x0, y0) are considered inside the ellipse.
 
     Parameters
     ----------
@@ -35,20 +37,16 @@ def inside_ellipse(x, y, cxx, cyy, cxy, x0=0, y0=0, R=1):
         A boolean array of the same shape as x and y, where True indicates that the
         corresponding point (x, y) is inside the ellipse defined by the provided parameters.
     """
-    mask = cxx * (x - x0) ** 2 + cyy * (y - y0) ** 2 + cxy * (x - x0) * (y - y0) <= R**2
-    return mask
+    return cxx * (x - x0) ** 2 + cyy * (y - y0) ** 2 + cxy * (x - x0) * (y - y0) <= R**2
 
 
 def compute_moments(flux, mask=None):
     """
-    Computes first and second order momemnts from a 2d distribution
-    assuming a coordinate grid of same shape as `flux`.
-    First order moments are the centroid positions in the X, Y
-    coordinates. Second order moments are the spatial spread of the
-    distribution.
-    Both are computed in the X, Y coordinate relative to the 'flux'
-    spatial shape, e.g. `flux.shape = (nt, nrows, ncols)` X and Y are
-    in the 'ncols' and 'nrows' range respectively.
+    Computes first and second order moments of a 2d distribution over time
+    using a coordinate grid with the same shape as `flux` (nt, nrows, ncols).
+    First order moments (X,Y) are the centroid positions. The X,Y centroids are in
+    the range [0, 'ncols'), [0, 'nrows'), respectively i.e. they are zero-indexed.
+    Second order moments (X2, Y2, XY) represent the spatial spread of the distribution.
 
     Parameters
     ----------
@@ -69,7 +67,7 @@ def compute_moments(flux, mask=None):
     if mask is None:
         mask = np.ones_like(flux).astype(bool)
     # reshape 2D mask into 3D mask if necessary
-    if len(flux.shape) == 2:
+    if len(mask.shape) == 2:
         mask = np.repeat([mask], flux.shape[0], axis=0)
 
     X = np.zeros(flux.shape[0], dtype=float)
@@ -78,13 +76,13 @@ def compute_moments(flux, mask=None):
     Y2 = np.zeros(flux.shape[0], dtype=float)
     XY = np.zeros(flux.shape[0], dtype=float)
 
-    # compute 2nd-order moments at each frame
+    # compute moments for each frame
     for nt in range(flux.shape[0]):
         # skip frame if no pixels are used
         if mask[nt].sum() == 0:
             continue
         # dummy pixel grid
-        row, col = np.mgrid[0 : 0 + flux.shape[1], 0 : 0 + flux.shape[2]]
+        row, col = np.mgrid[0 : flux.shape[1], 0 : flux.shape[2]]
 
         # first order moments
         Y[nt] = np.average(row[mask[nt]], weights=flux[nt, mask[nt]])

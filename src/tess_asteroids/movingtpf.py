@@ -392,8 +392,10 @@ class MovingTPF:
             self.aperture_mask = self._create_threshold_mask(**kwargs)
         # will add these methods in a future PR
         elif method == "ellipse":
-            self.aperture_mask = self._ellipse_aperture(ellipse_params=False, **kwargs)
-        elif method in ["prf", "nn_pred"]:
+            self.aperture_mask = self._create_ellipse_aperture(
+                return_params=False, **kwargs
+            )
+        elif method in ["prf"]:
             raise NotImplementedError(f"Method '{method}' not implemented yet.")
         else:
             raise ValueError(
@@ -485,17 +487,20 @@ class MovingTPF:
 
         return aperture_mask
 
-    def _ellipse_aperture(
+    def _create_ellipse_aperture(
         self,
         R: float = 3.0,
         smooth: bool = True,
-        ellipse_params: bool = False,
+        return_params: bool = False,
         plot: bool = False,
     ):
         """
-        It uses second-order moments to compute ellipse parameters semi-major and
-        semi-minor axes (A and B) and position angles (theta) and get an aperture mask
-        with pixels inside the ellipse.
+        Uses second-order moments of 2d flux distribution to compute ellipse parameters
+        (cxx, cyy and cxy) and get an aperture mask with pixels inside the ellipse.
+        The function can also optionally return the x/y centroids and the ellipse
+        parameters (semi-major axis, A, semi-minor axis, B, and position angle, theta).
+        Pixels with distance <= R^2 from the pixel center to the asteroid position are
+        considered inside the aperture.
         Ref: https://astromatic.github.io/sextractor/Position.html#ellipse-iso-def
 
         Parameters
@@ -506,22 +511,23 @@ class MovingTPF:
         smooth: boolean
             Whether to smooth the second-order moments by fitting a 3rd-order polynomial.
             This helps to remove outliers and keep ellipse parameters more stable.
-        ellipse_params: boolean
+        return_params: boolean
             Return a ndarray with ellipse parameters computed from first and second
             moments [X_cent, Y_cent, A, B, theta_deg].
         plot: boolean
-            Plot moments vector.
+            Generate a diagnosti plot with first- and second-order moments.
 
         Returns
         -------
         aperture_mask: ndarray
             Boolean 3D mask array with pixels within the ellipse.
         ellipse_parameters: ndarray
-            Ellipse parameters [X_cent, Y_cent, A, B, theta_deg] with shape (5, n_times).
+            If `return_params`, will return centroid and ellipse parameters
+            [X_cent, Y_cent, A, B, theta_deg] with shape (5, n_times).
         """
         # create a threshold mask to select pixels to use for moments
         threshold_mask = self._create_threshold_mask(
-            threshold=4.0, reference_pixel="center"
+            threshold=3.0, reference_pixel="center"
         )
 
         X, Y, X2, Y2, XY = compute_moments(self.flux, threshold_mask)
@@ -538,7 +544,7 @@ class MovingTPF:
             ax[0, 0].set_ylabel("Y")
             ax[0, 0].set_xlabel("X")
 
-            ax[0, 1].plot(self.time, XY, c="tab:blue", lw=1)
+            ax[0, 1].plot(self.time, XY, c="tab:blue", lw=1, label="Moments")
             ax[0, 1].set_ylabel("XY")
             ax[0, 1].set_xlabel("Time")
 
@@ -548,27 +554,53 @@ class MovingTPF:
             ax[1, 1].plot(self.time, Y2, c="tab:blue", lw=1)
             ax[1, 1].set_ylabel("Y2")
             ax[1, 1].set_xlabel("Time")
+            if not smooth:
+                plt.show()
 
         # fit a 3rd deg polynomial to smooth X2, Y2 and XY
+        # due to asteroid orbit proyections, some tracks can show change in directions,
+        # a 3rd order polynomial can capture this.
         if smooth:
             # mask zeros and outliers
             mask = (Y2 != 0) | (X2 != 0)
             mask &= ~sigma_clip(Y2, sigma=5).mask
             mask &= ~sigma_clip(X2, sigma=5).mask
-            # fit and eval polinomials
+            mask &= ~sigma_clip(XY, sigma=5).mask
+            # fit and eval polynomials
             Y2 = Polynomial.fit(self.time[mask], Y2[mask], deg=3)(self.time)
             X2 = Polynomial.fit(self.time[mask], X2[mask], deg=3)(self.time)
             XY = Polynomial.fit(self.time[mask], XY[mask], deg=3)(self.time)
             if plot:
-                ax[0, 1].plot(self.time, XY, c="tab:blue", label="Smooth", lw=2)
-                ax[1, 0].plot(self.time, X2, c="tab:blue", label="Smooth", lw=2)
-                ax[1, 1].plot(self.time, Y2, c="tab:blue", label="Smooth", lw=2)
+                ax[0, 1].plot(
+                    self.time, XY, c="royalblue", label="Smooth (3rd-deg poly)", lw=1.5
+                )
+                ax[0, 1].scatter(
+                    self.time[~mask],
+                    XY[~mask],
+                    c="tab:red",
+                    label="Outliers",
+                    marker=".",
+                    lw=1,
+                )
+                ax[1, 0].plot(self.time, X2, c="royalblue", lw=1.5)
+                ax[1, 0].scatter(
+                    self.time[~mask], X2[~mask], c="tab:red", marker=".", lw=1
+                )
+                ax[1, 1].plot(self.time, Y2, c="royalblue", lw=1.5)
+                ax[1, 1].scatter(
+                    self.time[~mask],
+                    Y2[~mask],
+                    c="tab:red",
+                    marker=".",
+                    lw=1,
+                )
+                ax[0, 1].legend()
                 plt.show()
 
-        if ellipse_params:
+        if return_params:
             # compute A, B, and theta
-            semi_sum = (Y2 + X2) / 2
-            semi_sub = (Y2 - X2) / 2
+            semi_sum = (X2 + Y2) / 2
+            semi_sub = (X2 - Y2) / 2
             A = np.sqrt(semi_sum + np.sqrt(semi_sub**2 + XY**2))
             B = np.sqrt(semi_sum - np.sqrt(semi_sub**2 + XY**2))
             theta_rad = np.arctan(2 * XY / (X2 - Y2)) / 2
@@ -594,6 +626,13 @@ class MovingTPF:
                 self.corner[nt, 1] : self.corner[nt, 1] + self.shape[1],
             ]
 
+            # for the moment we center the ellipse on the ephemeris to avoid
+            # poorly constrained centroid in bad frames and when the background
+            # substraction has remaining artifacts.
+            # TODO:
+            # iterate in the centroiding on bad frames to remove contaminated pixels
+            # and refine solution. That will result in better centroid estimation
+            # usable for the ellipse mask center.
             aperture_mask[nt] = inside_ellipse(
                 cc,
                 rr,
@@ -606,7 +645,7 @@ class MovingTPF:
                 # y0=self.corner[nt, 0] + Y[nt],
                 R=R,
             )
-        if ellipse_params:
+        if return_params:
             return aperture_mask, np.array(
                 [self.corner[:, 1] + X, self.corner[:, 0] + Y, A, B, theta_deg]
             ).T

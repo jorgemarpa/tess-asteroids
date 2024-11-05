@@ -207,11 +207,11 @@ def test_make_tpf():
     os.remove("tests/tess-1998YT6-s0006-shape11x11-moving_tp.fits")
 
 
-def test_ellipse_aperture():
+def test_create_ellipse_aperture():
     """
-    Test ellipse aperture. The ellipse is fitted by computing the first- and second-order
-    momentum from the flux image. The method returns a mask with pixels inside the
-    ellipse and the ellipse parameters (semi major and minor axis and rotation angle).
+    Test ellipse aperture. The ellipse is calculated by computing the first- and second-order
+    moments from the flux image. The method returns a mask with pixels inside the
+    ellipse, x/y centroid and the ellipse parameters (semi-major/minor axis and rotation angle).
     We test for array integrity and expected returned values.
     """
     # Make TPF for asteroid 1998 YT6
@@ -220,14 +220,18 @@ def test_ellipse_aperture():
     test.reshape_data()
     test.background_correction(method="rolling")
 
-    ellip_mask, ell_params = test._ellipse_aperture(ellipse_params=True)
+    ellip_mask, params = test._create_ellipse_aperture(return_params=True)
 
     # aperture mask
+    # for the test source the median number of pixels across all frames is 16
     assert ellip_mask.shape == test.flux.shape
-    assert np.median(ellip_mask.reshape((test.time.shape[0], -1)).sum(axis=1)) == 13
+    assert np.median(ellip_mask.reshape((test.time.shape[0], -1)).sum(axis=1)) == 16
     # ellipse parameters
-    assert ell_params.shape == (test.time.shape[0], 5)
-    assert np.isfinite(ell_params).all()
-    assert np.mean(ell_params[:, 0] - test.ephemeris[:, 1]) < 0.2
-    assert np.mean(ell_params[:, 1] - test.ephemeris[:, 0]) < 0.2
-    assert ((ell_params[:, 4] >= 0) & (ell_params[:, 4] <= 360)).all()
+    # for the test source the centroid values should be within 0.2 pixels
+    # from the asteroid ephemeris
+    assert params.shape == (test.time.shape[0], 5)
+    assert np.isfinite(params).all()
+    assert np.mean(params[:, 0] - test.ephemeris[:, 1]) < 0.2
+    assert np.mean(params[:, 1] - test.ephemeris[:, 0]) < 0.2
+    # angle is meassure from the semi-major axis with + or - values
+    assert ((params[:, 4] >= -180) & (params[:, 4] <= 180)).all()
