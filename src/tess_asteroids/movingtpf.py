@@ -501,7 +501,7 @@ class MovingTPF:
         Parameters
         ----------
         R: float
-            Valut to scale the ellipse, the default is 3.0 which typically represents
+            Value to scale the ellipse, the default is 3.0 which typically represents
             well the isophotal limits of the object.
         smooth: boolean
             Weather to smooth the moments' array by fitting a 3rd-order polynomial.
