@@ -512,10 +512,10 @@ class MovingTPF:
             Whether to smooth the second-order moments by fitting a 3rd-order polynomial.
             This helps to remove outliers and keep ellipse parameters more stable.
         return_params: boolean
-            Return a ndarray with ellipse parameters computed from first and second
-            moments [X_cent, Y_cent, A, B, theta_deg].
+            Return a ndarray with x/y centroids and ellipse parameters computed from 
+            first- and second-order moments [X_cent, Y_cent, A, B, theta_deg].
         plot: boolean
-            Generate a diagnosti plot with first- and second-order moments.
+            Generate a diagnostic plot with first- and second-order moments.
 
         Returns
         -------
@@ -558,22 +558,16 @@ class MovingTPF:
                 plt.show()
 
         # fit a 3rd deg polynomial to smooth X2, Y2 and XY
-        # due to asteroid orbit proyections, some tracks can show change in directions,
+        # due to asteroid orbit projections, some tracks can show change in directions,
         # a 3rd order polynomial can capture this.
         if smooth:
             # mask zeros and outliers
-            mask = (Y2 != 0) | (X2 != 0)
+            mask = ~np.logical_and(Y2 == 0, X2 == 0, XY == 0)
             mask &= ~sigma_clip(Y2, sigma=5).mask
             mask &= ~sigma_clip(X2, sigma=5).mask
             mask &= ~sigma_clip(XY, sigma=5).mask
-            # fit and eval polynomials
-            Y2 = Polynomial.fit(self.time[mask], Y2[mask], deg=3)(self.time)
-            X2 = Polynomial.fit(self.time[mask], X2[mask], deg=3)(self.time)
-            XY = Polynomial.fit(self.time[mask], XY[mask], deg=3)(self.time)
             if plot:
-                ax[0, 1].plot(
-                    self.time, XY, c="royalblue", label="Smooth (3rd-deg poly)", lw=1.5
-                )
+                # we plot outliers before they are replaced by interp
                 ax[0, 1].scatter(
                     self.time[~mask],
                     XY[~mask],
@@ -582,11 +576,9 @@ class MovingTPF:
                     marker=".",
                     lw=1,
                 )
-                ax[1, 0].plot(self.time, X2, c="royalblue", lw=1.5)
                 ax[1, 0].scatter(
                     self.time[~mask], X2[~mask], c="tab:red", marker=".", lw=1
                 )
-                ax[1, 1].plot(self.time, Y2, c="royalblue", lw=1.5)
                 ax[1, 1].scatter(
                     self.time[~mask],
                     Y2[~mask],
@@ -594,6 +586,16 @@ class MovingTPF:
                     marker=".",
                     lw=1,
                 )
+            # fit and eval polynomials
+            Y2 = Polynomial.fit(self.time[mask], Y2[mask], deg=3)(self.time)
+            X2 = Polynomial.fit(self.time[mask], X2[mask], deg=3)(self.time)
+            XY = Polynomial.fit(self.time[mask], XY[mask], deg=3)(self.time)
+            if plot:
+                ax[0, 1].plot(
+                    self.time, XY, c="tab:orange", label="Smooth (3rd-deg poly)", lw=1.5
+                )
+                ax[1, 0].plot(self.time, X2, c="tab:orange", lw=1.5)
+                ax[1, 1].plot(self.time, Y2, c="tab:orange", lw=1.5)
                 ax[0, 1].legend()
                 plt.show()
 
@@ -628,7 +630,7 @@ class MovingTPF:
 
             # for the moment we center the ellipse on the ephemeris to avoid
             # poorly constrained centroid in bad frames and when the background
-            # substraction has remaining artifacts.
+            # subtraction has remaining artifacts.
             # TODO:
             # iterate in the centroiding on bad frames to remove contaminated pixels
             # and refine solution. That will result in better centroid estimation

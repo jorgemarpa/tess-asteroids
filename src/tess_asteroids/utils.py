@@ -10,7 +10,7 @@ def inside_ellipse(x, y, cxx, cyy, cxy, x0=0, y0=0, R=1):
     Returns a boolean mask indicating positions inside a specified ellipse.
     The ellipse is defined by its center, the radius, and the quadratic coefficients
     (cxx, cyy, cxy).
-    Pixels with distnace <= R^2 from the center (x0, y0) are considered inside the ellipse.
+    Pixels with distance <= R^2 from the center (x0, y0) are considered inside the ellipse.
 
     Parameters
     ----------
