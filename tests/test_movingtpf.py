@@ -205,3 +205,33 @@ def test_make_tpf():
 
     # Delete the file
     os.remove("tests/tess-1998YT6-s0006-shape11x11-moving_tp.fits")
+
+
+def test_create_ellipse_aperture():
+    """
+    Test ellipse aperture. The ellipse is calculated by computing the first- and second-order
+    moments from the flux image. The method returns a mask with pixels inside the
+    ellipse, x/y centroid and the ellipse parameters (semi-major/minor axis and rotation angle).
+    We test for array integrity and expected returned values.
+    """
+    # Make TPF for asteroid 1998 YT6
+    test, _ = MovingTPF.from_name("1998 YT6", sector=6)
+    test.get_data(shape=(11, 11))
+    test.reshape_data()
+    test.background_correction(method="rolling")
+
+    ellip_mask, params = test._create_ellipse_aperture(return_params=True)
+
+    # aperture mask
+    # for the test source the median number of pixels across all frames is 16
+    assert ellip_mask.shape == test.flux.shape
+    assert np.median(ellip_mask.reshape((test.time.shape[0], -1)).sum(axis=1)) == 16
+    # ellipse parameters
+    # for the test source the centroid values should be within 0.2 pixels
+    # from the asteroid ephemeris
+    assert params.shape == (test.time.shape[0], 5)
+    assert np.isfinite(params).all()
+    assert np.mean(params[:, 0] - test.ephemeris[:, 1]) < 0.2
+    assert np.mean(params[:, 1] - test.ephemeris[:, 0]) < 0.2
+    # angle is meassure from the semi-major axis with + or - values
+    assert ((params[:, 4] >= -180) & (params[:, 4] <= 180)).all()
