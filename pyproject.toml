@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "tess-asteroids"
-version = "0.4.0"
+version = "0.5.0"
 description = "Create TPFs and LCs for solar system asteroids observed by NASA's TESS mission."
 license = "MIT"
 authors = ["Amy Tuson <amy.l.tuson@nasa.gov>",
@@ -17,6 +17,7 @@ numpy = "^1.26.4"
 pandas = "^1.5.3"
 astropy = "^5.3.4"
 lkprf = "^1.1.1"
+matplotlib = "^3.9"
 
 [tool.poetry.group.dev.dependencies]
 mkdocs = "^1.6.0"
