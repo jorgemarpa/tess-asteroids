@@ -562,7 +562,7 @@ class MovingTPF:
         # a 3rd order polynomial can capture this.
         if smooth:
             # mask zeros and outliers
-            mask = ~np.logical_and(Y2 == 0, np.logical_and(X2 == 0, XY == 0))
+            mask = ~np.logical_or(Y2 == 0, np.logical_or(X2 == 0, XY == 0))
             mask &= ~sigma_clip(Y2, sigma=5).mask
             mask &= ~sigma_clip(X2, sigma=5).mask
             mask &= ~sigma_clip(XY, sigma=5).mask
