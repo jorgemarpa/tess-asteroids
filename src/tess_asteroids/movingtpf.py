@@ -608,7 +608,7 @@ class MovingTPF:
                 # First frame, use following PRF model.
                 if i == 0:
                     prf_model[i] = prf_model[i + 1]
-                    logger.info(
+                    logger.warning(
                         "The PRF model contained nans in the first frame (cadence number {0}). The model was replaced with that from the following frame (cadence number {1}).".format(
                             self.cadence_number[i], self.cadence_number[i + 1]
                         )
@@ -616,7 +616,7 @@ class MovingTPF:
                 # Last frame, use preceding PRF model.
                 elif i == len(prf_model) - 1:
                     prf_model[i] = prf_model[i - 1]
-                    logger.info(
+                    logger.warning(
                         "The PRF model contained nans in the last frame (cadence number {0}). The model was replaced with that from the preceding frame (cadence number {1}).".format(
                             self.cadence_number[i], self.cadence_number[i - 1]
                         )
