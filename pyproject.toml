@@ -16,6 +16,7 @@ tesscube = "^1.0.2dev"
 numpy = "^1.26.4"
 pandas = "^1.5.3"
 astropy = "^5.3.4"
+lkprf = "^1.1.1"
 
 [tool.poetry.group.dev.dependencies]
 mkdocs = "^1.6.0"
