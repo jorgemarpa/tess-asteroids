@@ -512,7 +512,7 @@ class MovingTPF:
             Whether to smooth the second-order moments by fitting a 3rd-order polynomial.
             This helps to remove outliers and keep ellipse parameters more stable.
         return_params: boolean
-            Return a ndarray with x/y centroids and ellipse parameters computed from 
+            Return a ndarray with x/y centroids and ellipse parameters computed from
             first- and second-order moments [X_cent, Y_cent, A, B, theta_deg].
         plot: boolean
             Generate a diagnostic plot with first- and second-order moments.
