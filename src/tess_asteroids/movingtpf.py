@@ -798,7 +798,6 @@ class MovingTPF:
         else:
             return aperture_mask
 
-
     def create_pixel_quality(self, sat_level: float = 1e5, sat_buffer_rad: int = 1):
         """
         Create 3D pixel quality mask. The mask is a bit-wise combination of
