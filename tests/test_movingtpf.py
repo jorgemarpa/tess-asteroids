@@ -91,7 +91,7 @@ def test_data_logic(caplog):
     assert np.shape(target.corr_flux_err) == (len(target.time), *shape)
 
 
-def test_create_threshold_mask():
+def test_create_threshold_aperture():
     """
     Test threshold mask method that creates an aperture mask at each frame
     of flux pixels > threshold * STD.
@@ -105,7 +105,7 @@ def test_create_threshold_mask():
     target.reshape_data()
     target.background_correction(method="rolling")
 
-    aperture_mask = target._create_threshold_mask(
+    aperture_mask = target._create_threshold_aperture(
         threshold=3.0, reference_pixel="center"
     )
 
@@ -117,8 +117,8 @@ def test_create_threshold_mask():
 
 def test_create_prf_aperture(caplog):
     """
-    Test the PRF aperture. When running _create_prf_mask(), it internally calls
-    _create_prf_model() first. These tests check the properties of both the model
+    Test the PRF aperture. When running `_create_prf_aperture()`, it internally calls
+    `_create_prf_model()` first. These tests check the properties of both the model
     and the aperture, including their shape and expected values.
     """
 
@@ -127,8 +127,8 @@ def test_create_prf_aperture(caplog):
     target.get_data(shape=(11, 11))
 
     # Make aperture from PRF model
-    with caplog.at_level(logging.INFO):
-        aperture_mask = target._create_prf_mask()
+    with caplog.at_level(logging.WARNING):
+        aperture_mask = target._create_prf_aperture()
 
     # Check shape of the PRF model and aperture
     assert target.prf_model.shape == (len(target.time), *target.shape)

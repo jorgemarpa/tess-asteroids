@@ -69,7 +69,7 @@ class MovingTPF:
         self,
         shape: Tuple[int, int] = (11, 11),
         bg_method: str = "rolling",
-        ap_method: str = "threshold",
+        ap_method: str = "prf",
         file_name: Optional[str] = None,
         save_loc: str = "",
         **kwargs,
@@ -378,7 +378,7 @@ class MovingTPF:
 
         return np.asarray(bg), np.asarray(bg_err)
 
-    def create_aperture(self, method: str = "threshold", **kwargs):
+    def create_aperture(self, method: str = "prf", **kwargs):
         """
         Creates an aperture mask using a method ['threshold', 'prf', 'ellipse'].
         It creates the `self.aperture_mask` attribute with the 3D mask.
@@ -396,9 +396,9 @@ class MovingTPF:
         """
         # Get mask via chosen method
         if method == "threshold":
-            self.aperture_mask = self._create_threshold_mask(**kwargs)
+            self.aperture_mask = self._create_threshold_aperture(**kwargs)
         elif method == "prf":
-            self.aperture_mask = self._create_prf_mask(**kwargs)
+            self.aperture_mask = self._create_prf_aperture(**kwargs)
         elif method == "ellipse":
             self.aperture_mask = self._create_ellipse_aperture(
                 return_params=False, **kwargs
@@ -408,7 +408,7 @@ class MovingTPF:
                 f"Method must be one of: ['threshold', 'prf', 'ellipse']. Not '{method}'"
             )
 
-    def _create_threshold_mask(
+    def _create_threshold_aperture(
         self,
         threshold: float = 3.0,
         reference_pixel: Union[str, Tuple[float, float]] = "center",
@@ -493,7 +493,7 @@ class MovingTPF:
 
         return aperture_mask
 
-    def _create_prf_mask(self, threshold: Union[str, float] = 0.01, **kwargs):
+    def _create_prf_aperture(self, threshold: Union[str, float] = 0.01, **kwargs):
         """
         Creates an aperture mask from the PRF model.
 
@@ -503,6 +503,8 @@ class MovingTPF:
             If float, must be in the range [0,1). Only pixels where the prf model >= `threshold`
             will be included in the aperture.
             If 'optimal', computes optimal value for threshold.
+        **kwargs
+            Keyword arguments to be passed to `_create_prf_model()`.
 
         Returns
         -------
@@ -529,18 +531,23 @@ class MovingTPF:
 
         return aperture_mask
 
-    def _create_prf_model(self, time_step: float = 1.0):
+    def _create_prf_model(self, time_step: Optional[float] = None):
         """
-        Creates a PRF model of the target as a function of time. Since the object is moving,
-        the PRF model is made by summing models on a high resolution time grid. It creates
-        the `self.prf_model` attribute. The PRF model has shape (ntimes, nrows, ncols),
-        each value represents the fraction of the total flux in that pixel at that time and
-        at each time all values sum to one.
+        Creates a PRF model of the target as a function of time, using the `lkprf` package.
+        Since the target is moving, the PRF model per time is made by summing models on a high
+        resolution time grid during the exposure. This function creates the `self.prf_model`
+        attribute. The PRF model has shape (ntimes, nrows, ncols), each value represents the
+        fraction of the total flux in that pixel at that time and at each time all values
+        sum to one.
 
         Parameters
         ----------
         time_step : float
-            Resolution of time grid used to build PRF model, in minutes.
+            Resolution of time grid used to build PRF model, in minutes. A smaller time_step
+            will increase the runtime, but the PRF model will better match the extended shape
+            of the moving target.
+            If `None`, a value will be computed based upon the average speed of the target
+            during the observation.
 
         Returns
         -------
@@ -551,6 +558,27 @@ class MovingTPF:
 
         # Initialise PRF - don't specify sector => uses post-sector4 models in all cases.
         prf = lkprf.TESSPRF(camera=self.camera, ccd=self.ccd)  # , sector=self.sector)
+
+        # If no time_step is given, compute a value based upon the average target speed.
+        # Note: some asteroids significantly change speed during the sector. Our tests
+        # have shown that defining time_step for the average speed does not signficiantly
+        # affect their PRF models.
+        if time_step is None:
+            # Average cadence, in minutes
+            cadence = np.nanmean(self.tstop - self.tstart) * 24 * 60
+            # Average target track length, in pixels
+            track_length = np.nanmedian(
+                np.sqrt(np.sum(np.diff(self.ephemeris, axis=0) ** 2, axis=1))
+            )
+            # Pixel resolution at which to evaluate PRF model
+            resolution = 0.1
+            # Time resolution at which to evaluate PRF model
+            time_step = (cadence / track_length) * resolution
+            logger.info(
+                "_create_prf_model() calculated a time_step of {0} minutes.".format(
+                    time_step
+                )
+            )
 
         # Use interpolation to get target row,column for high-resolution time grid
         high_res_time = np.linspace(
@@ -595,7 +623,7 @@ class MovingTPF:
                     shape=self.shape,
                 )
                 model = sum(model) / np.sum(model)
-            except Exception:
+            except ValueError:
                 model = np.full(self.shape, np.nan)
 
             prf_model.append(model)
@@ -643,7 +671,7 @@ class MovingTPF:
         (cxx, cyy and cxy) and get an aperture mask with pixels inside the ellipse.
         The function can also optionally return the x/y centroids and the ellipse
         parameters (semi-major axis, A, semi-minor axis, B, and position angle, theta).
-        Pixels with distance <= R^2 from the pixel center to the asteroid position are
+        Pixels with distance <= R^2 from the pixel center to the target position are
         considered inside the aperture.
         Ref: https://astromatic.github.io/sextractor/Position.html#ellipse-iso-def
 
@@ -670,7 +698,7 @@ class MovingTPF:
             [X_cent, Y_cent, A, B, theta_deg] with shape (5, n_times).
         """
         # create a threshold mask to select pixels to use for moments
-        threshold_mask = self._create_threshold_mask(
+        threshold_mask = self._create_threshold_aperture(
             threshold=3.0, reference_pixel="center"
         )
 
@@ -702,7 +730,7 @@ class MovingTPF:
                 plt.show()
 
         # fit a 3rd deg polynomial to smooth X2, Y2 and XY
-        # due to asteroid orbit projections, some tracks can show change in directions,
+        # due to orbit projections, some tracks can show change in directions,
         # a 3rd order polynomial can capture this.
         if smooth:
             # mask zeros and outliers
