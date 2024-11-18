@@ -970,8 +970,12 @@ class MovingTPF:
 
         # Create default file name
         if file_name is None:
-            file_name = "tess-{0}-s{1:04}-shape{2}x{3}-moving_tp.fits".format(
-                str(self.target).replace(" ", ""), self.sector, *self.shape
+            file_name = "tess-{0}-s{1:04}-{2}-{3}-shape{4}x{5}-moving_tp.fits".format(
+                str(self.target).replace(" ", ""),
+                self.sector,
+                self.camera,
+                self.ccd,
+                *self.shape,
             )
 
         if not file_name.endswith(".fits"):

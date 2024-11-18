@@ -43,7 +43,7 @@ The `make_tpf()` function is retrieving and reshaping the FFI data, performing a
 
 There are a few optional parameters in the `make_tpf()` function. This includes:
 - `shape` controls the shape of the TPF. Default : (11,11).
-- `file_name` is the name the TPF will be saved with. If one is not given, a default name will be generated. In the above example, the default name was `tess-example-s0018-shape11x11-moving_tp.fits`.
+- `file_name` is the name the TPF will be saved with. If one is not given, a default name will be generated. In the above example, the default name was `tess-example-s0018-3-2-shape11x11-moving_tp.fits`.
 - `save_loc` is the directory where the TPF will be saved. Note, the directory is not automatically created.
 
 These settings can be changed as follows:
@@ -59,7 +59,7 @@ Instead of inputting an ephemeris, you can also create a TPF using the name of a
 # Initialise for asteroid 1998 YT6 from TESS sector 6.
 target, ephem = MovingTPF.from_name("1998 YT6", sector=6)
 
-# Make TPF and save to file (tess-1998YT6-s0006-shape11x11-moving_tp.fits)
+# Make TPF and save to file (tess-1998YT6-s0006-1-1-shape11x11-moving_tp.fits)
 target.make_tpf()
 ```
 
@@ -70,7 +70,7 @@ The TPF has four HDUs:
 - "PIXELS" - a table with the same columns as a SPOC TPF. Note that "POS_CORR1" and "POS_CORR2" are defined as the offset between the center of the TPF and the expected position of the moving object given the input ephemeris.
 - "APERTURE" - an image HDU containing the average aperture across all times.
 - "EXTRAS" - a table HDU containing columns not found in a SPOC TPF. This includes "CORNER1"/"CORNER2" (original FFI column/row of the lower-left pixel in the TPF), "PIXEL_QUALITY" (3D pixel quality mask identifying e.g. strap columns, non-science pixels and saturation) and "APERTURE" (aperture as a function of time).
- 
+
 ### Plotting the TPF with `lightkurve`
 
 The TPFs that get created by `tess-asteroids` can be plotted using `lightkurve`, as follows:
@@ -80,7 +80,7 @@ import lightkurve as lk
 import matplotlib.pyplot as plt
 
 # Read in TPF without removing bad cadences
-tpf = lk.read("tess-1998YT6-s0006-shape11x11-moving_tp.fits", quality_bitmask="none")
+tpf = lk.read("tess-1998YT6-s0006-1-1-shape11x11-moving_tp.fits", quality_bitmask="none")
 
 # Plot TPF and aperture for a single frame
 aperture_mask = tpf.hdu[3].data["APERTURE"][200]
@@ -90,9 +90,9 @@ plt.show()
 
 # You can also animate the TPF and save as a gif.
 fig, ax = plt.subplots(1, figsize=(7,7))
-tpf._to_matplotlib_animation(ax=ax).save("tess-1998YT6-s0006-shape11x11-moving_tp.gif", writer="pillow")
+tpf._to_matplotlib_animation(ax=ax).save("tess-1998YT6-s0006-1-1-shape11x11-moving_tp.gif", writer="pillow")
 ```
 
-![Example asteroid TPF](./docs/tess-1998YT6-s0006-shape11x11-moving_tp.gif)
+![Example asteroid TPF](./docs/tess-1998YT6-s0006-1-1-shape11x11-moving_tp.gif)
 
 

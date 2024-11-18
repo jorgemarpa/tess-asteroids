@@ -258,10 +258,10 @@ def test_make_tpf():
     target.make_tpf(save_loc="tests")
 
     # Check the file exists
-    assert os.path.exists("tests/tess-1998YT6-s0006-shape11x11-moving_tp.fits")
+    assert os.path.exists("tests/tess-1998YT6-s0006-1-1-shape11x11-moving_tp.fits")
 
     # Open the file with astropy and check attributes
-    with fits.open("tests/tess-1998YT6-s0006-shape11x11-moving_tp.fits") as hdul:
+    with fits.open("tests/tess-1998YT6-s0006-1-1-shape11x11-moving_tp.fits") as hdul:
         assert "APERTURE" in hdul[3].columns.names
         assert "PIXEL_QUALITY" in hdul[3].columns.names
         assert "CORNER1" in hdul[3].columns.names
@@ -271,11 +271,11 @@ def test_make_tpf():
 
     # Check the file can be opened with lightkurve
     tpf = lk.read(
-        "tests/tess-1998YT6-s0006-shape11x11-moving_tp.fits", quality_bitmask="none"
+        "tests/tess-1998YT6-s0006-1-1-shape11x11-moving_tp.fits", quality_bitmask="none"
     )
     assert hasattr(tpf, "pipeline_mask")
     assert len(tpf.time) == len(target.time)
     assert np.array_equal(target.corr_flux, tpf.flux.value)
 
     # Delete the file
-    os.remove("tests/tess-1998YT6-s0006-shape11x11-moving_tp.fits")
+    os.remove("tests/tess-1998YT6-s0006-1-1-shape11x11-moving_tp.fits")
