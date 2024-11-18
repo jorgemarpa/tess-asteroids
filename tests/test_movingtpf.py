@@ -118,7 +118,7 @@ def test_create_threshold_aperture():
 def test_create_prf_aperture(caplog):
     """
     Test the PRF aperture. When running `_create_prf_aperture()`, it internally calls
-    `_create_prf_model()` first. These tests check the properties of both the model
+    `_create_target_prf_model()` first. These tests check the properties of both the model
     and the aperture, including their shape and expected values.
     """
 

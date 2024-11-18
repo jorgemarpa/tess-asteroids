@@ -504,7 +504,7 @@ class MovingTPF:
             will be included in the aperture.
             If 'optimal', computes optimal value for threshold.
         **kwargs
-            Keyword arguments to be passed to `_create_prf_model()`.
+            Keyword arguments to be passed to `_create_target_prf_model()`.
 
         Returns
         -------
@@ -515,7 +515,7 @@ class MovingTPF:
 
         # Create PRF model
         if not hasattr(self, "prf_model"):
-            self._create_prf_model(**kwargs)
+            self._create_target_prf_model(**kwargs)
 
         # Use PRF model to define aperture
         if threshold == "optimal":
@@ -531,7 +531,7 @@ class MovingTPF:
 
         return aperture_mask
 
-    def _create_prf_model(self, time_step: Optional[float] = None):
+    def _create_target_prf_model(self, time_step: Optional[float] = None):
         """
         Creates a PRF model of the target as a function of time, using the `lkprf` package.
         Since the target is moving, the PRF model per time is made by summing models on a high
@@ -575,7 +575,7 @@ class MovingTPF:
             # Time resolution at which to evaluate PRF model
             time_step = (cadence / track_length) * resolution
             logger.info(
-                "_create_prf_model() calculated a time_step of {0} minutes.".format(
+                "_create_target_prf_model() calculated a time_step of {0} minutes.".format(
                     time_step
                 )
             )
