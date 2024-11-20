@@ -189,9 +189,11 @@ class MovingTPF:
         self.quality = self.cube.quality[nan_mask][
             bound_mask
         ]  # SPOC quality flag of each frame in the data cube.
-        self.cadence_number = self.cube.cadence_number[nan_mask][
+        self.cadence_number = self.cube.cadence_number[
+            nan_mask
+        ][
             bound_mask
-        ]  # SPOC cadence number of each frame in the data cube.
+        ]  # Unique cadence number of each frame in the data cube, as defined by tesscube.
         self.ephemeris = np.asarray(
             [row_interp[bound_mask], column_interp[bound_mask]]
         ).T  # Predicted (row,column) of target.
@@ -571,7 +573,7 @@ class MovingTPF:
                 np.sqrt(np.sum(np.diff(self.ephemeris, axis=0) ** 2, axis=1))
             )
             # Pixel resolution at which to evaluate PRF model
-            resolution = 0.1
+            resolution = 0.1 if track_length > 0.1 else track_length
             # Time resolution at which to evaluate PRF model
             time_step = (cadence / track_length) * resolution
             logger.info(
