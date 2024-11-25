@@ -959,8 +959,8 @@ class MovingTPF:
                 )
             )
 
-            # Compute flux and bg flux inside aperture - sum of all pixels.
-            # (If mask is all False, these values will be nan.)
+            # Compute flux and bg flux inside aperture (sum of all pixels).
+            # (If no pixels in mask, these values will be nan.)
             ap_flux.append(np.nansum(self.corr_flux[t][mask[-1]]))
             ap_flux_err.append(np.sqrt(np.nansum(self.corr_flux_err[t][mask[-1]] ** 2)))
             ap_bg.append(np.nansum(self.bg[t][mask[-1]]))
@@ -980,6 +980,11 @@ class MovingTPF:
         col_cen, row_cen, col_cen_err, row_cen_err = compute_moments(
             self.corr_flux, np.asarray(mask), second_order=False, return_err=True
         )
+        # Replace zero with nan (i.e. no pixels in mask => no centroid measured)
+        col_cen[col_cen == 0] = np.nan
+        row_cen[row_cen == 0] = np.nan
+        col_cen_err[col_cen_err == 0] = np.nan
+        row_cen_err[row_cen_err == 0] = np.nan
 
         return (
             np.asarray(ap_flux),

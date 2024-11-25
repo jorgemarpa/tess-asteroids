@@ -83,12 +83,14 @@ def compute_moments(
     if len(mask.shape) == 2:
         mask = np.repeat([mask], flux.shape[0], axis=0)
 
-    # remove negative values in flux (possible artefact of bg subtraction)
+    # mask negative values in flux (possible artefact of bg subtraction)
     mask = np.logical_and(mask, flux >= 0)
+    # mask nans in flux
+    mask = np.logical_and(mask, np.isfinite(flux))
 
     X = np.zeros(flux.shape[0], dtype=float)
     Y = np.zeros(flux.shape[0], dtype=float)
-    if second_order:
+    if second_order or return_err:
         X2 = np.zeros(flux.shape[0], dtype=float)
         Y2 = np.zeros(flux.shape[0], dtype=float)
         XY = np.zeros(flux.shape[0], dtype=float)
@@ -144,6 +146,6 @@ def compute_moments(
     elif second_order and not return_err:
         return X, Y, X2, Y2, XY
     elif return_err and not second_order:
-        X, Y, XERR, YERR
+        return X, Y, XERR, YERR
     else:
-        X, Y
+        return X, Y
