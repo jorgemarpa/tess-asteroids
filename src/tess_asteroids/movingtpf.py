@@ -910,6 +910,88 @@ class MovingTPF:
             )
         self.pixel_quality = np.asarray(pixel_quality)
 
+    def _aperture_photometry(self, bad_bits: list = [1, 3]):
+        """
+        Gets flux and BG flux inside aperture and computes flux-weighted centroid.
+
+        Parameters
+        ----------
+        bad_bits : list
+            Bits to mask during computation of aperture flux, BG flux and centroid. These bits correspond
+            to the `self.pixel_quality` flags. By default, bits 1 (non-science pixel) and 3 (saturated pixel)
+            are masked.
+
+        Returns
+        -------
+        ap_flux, ap_flux_err, ap_bg, ap_bg_err, col_cen, row_cen, col_cen_err, row_cen_err : ndarrays
+            Sum of flux inside aperture and error (ap_flux, ap_flux_err), sum of background flux inside
+            aperture and error (ap_bg, ap_bg_err) and flux-weighted centroids inside aperture and errors
+            (col_cen, row_cen, col_cen_err, row_cen_err).
+        """
+
+        if (
+            not hasattr(self, "all_flux")
+            or not hasattr(self, "flux")
+            or not hasattr(self, "pixel_quality")
+            or not hasattr(self, "corr_flux")
+            or not hasattr(self, "aperture_mask")
+        ):
+            raise AttributeError(
+                "Must run `get_data()`, `reshape_data()`, `create_pixel_quality()`, `background_correction()` and `create_aperture()` before doing aperture photometry."
+            )
+
+        # Compute `value` to mask bad bits.
+        value = 0
+        for bit in bad_bits:
+            value += 2 ** (bit - 1)
+
+        mask = []
+        ap_flux = []
+        ap_flux_err = []
+        ap_bg = []
+        ap_bg_err = []
+
+        for t in range(len(self.time)):
+            # Combine aperture mask with masking of bad bits.
+            mask.append(
+                np.logical_and(
+                    self.aperture_mask[t], self.pixel_quality[t] & value == 0
+                )
+            )
+
+            # Compute flux and bg flux inside aperture - sum of all pixels.
+            # (If mask is all False, these values will be nan.)
+            ap_flux.append(np.nansum(self.corr_flux[t][mask[-1]]))
+            ap_flux_err.append(np.sqrt(np.nansum(self.corr_flux_err[t][mask[-1]] ** 2)))
+            ap_bg.append(np.nansum(self.bg[t][mask[-1]]))
+            ap_bg_err.append(np.sqrt(np.nansum(self.bg_err[t][mask[-1]] ** 2)))
+
+            # If all pixels in aperture have nan value, propagate nan:
+            if np.isnan(self.corr_flux[t][mask[-1]]).all():
+                ap_flux[-1] = np.nan
+            if np.isnan(self.corr_flux_err[t][mask[-1]]).all():
+                ap_flux_err[-1] = np.nan
+            if np.isnan(self.bg[t][mask[-1]]).all():
+                ap_bg[-1] = np.nan
+            if np.isnan(self.bg_err[t][mask[-1]]).all():
+                ap_bg_err[-1] = np.nan
+
+        # Compute flux-weighted centroid inside aperture
+        col_cen, row_cen, col_cen_err, row_cen_err = compute_moments(
+            self.corr_flux, np.asarray(mask), second_order=False, return_err=True
+        )
+
+        return (
+            np.asarray(ap_flux),
+            np.asarray(ap_flux_err),
+            np.asarray(ap_bg),
+            np.asarray(ap_bg_err),
+            col_cen,
+            row_cen,
+            col_cen_err,
+            row_cen_err,
+        )
+
     def save_data(
         self,
         save_tpf: bool = True,
