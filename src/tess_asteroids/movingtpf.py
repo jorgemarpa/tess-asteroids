@@ -396,6 +396,10 @@ class MovingTPF:
         Returns
         -------
         """
+        # Initialise mask that will flag NaNs in PRF model, only if PRF aperture is
+        # the most recent method run. This is used by _create_lc_quality().
+        self.prf_nan_mask = np.zeros_like(self.time, dtype=bool)
+
         # Get mask via chosen method
         if method == "threshold":
             self.aperture_mask = self._create_threshold_aperture(**kwargs)
@@ -516,8 +520,7 @@ class MovingTPF:
         """
 
         # Create PRF model
-        if not hasattr(self, "prf_model"):
-            self._create_target_prf_model(**kwargs)
+        self._create_target_prf_model(**kwargs)
 
         # Use PRF model to define aperture
         if threshold == "optimal":
@@ -633,6 +636,10 @@ class MovingTPF:
         # If first/last frame contains nans, replace PRF model with following/preceding frame.
         if np.isnan(prf_model).any():
             nan_ind = np.unique(np.where(np.isnan(prf_model))[0])
+
+            # Update mask of NaNs in PRF model.
+            if hasattr(self, "prf_nan_mask"):
+                self.prf_nan_mask[nan_ind] = True
 
             for i in nan_ind:
                 # First frame, use following PRF model.
@@ -910,6 +917,52 @@ class MovingTPF:
             )
         self.pixel_quality = np.asarray(pixel_quality)
 
+    def to_lightcurve(self, method: str = "aperture", **kwargs):
+        """
+        Extract lightcurve from the moving TPF, using either `aperture` or `prf` photometry.
+        This function creates the `self.lc` attribute, which stores the time series data.
+
+        Parameters
+        ----------
+        method : str
+            Method to extract lightcurve. One of `aperture` or `prf`.
+        kwargs : dict
+            Keyword arguments, e.g `self._aperture_photometry` takes `bad_bits`.
+
+        Returns
+        -------
+        """
+
+        # Initialise lightcurve dictionary
+        if not hasattr(self, "lc"):
+            self.lc = {}
+
+        # Get lightcurve and quality mask via aperture photometry
+        if method == "aperture":
+            flux, flux_err, bg, bg_err, col_cen, row_cen, col_cen_err, row_cen_err = (
+                self._aperture_photometry(**kwargs)
+            )
+            quality = self._create_lc_quality()
+            self.lc["aperture"] = {
+                "time": self.time,
+                "flux": flux,
+                "flux_err": flux_err,
+                "bg": bg,
+                "bg_err": bg_err,
+                "col_cen": col_cen,
+                "col_cen_err": col_cen_err,
+                "row_cen": row_cen,
+                "row_cen_err": row_cen_err,
+                "quality": quality,
+            }
+
+        elif method == "prf":
+            raise NotImplementedError("PSF photometry is not yet implemented.")
+        else:
+            raise ValueError(
+                f"Method must be one of: ['aperture', 'prf']. Not '{method}'"
+            )
+
     def _aperture_photometry(self, bad_bits: list = [1, 3]):
         """
         Gets flux and BG flux inside aperture and computes flux-weighted centroid.
@@ -941,9 +994,9 @@ class MovingTPF:
             )
 
         # Compute `value` to mask bad bits.
-        value = 0
+        self.bad_bit_value = 0
         for bit in bad_bits:
-            value += 2 ** (bit - 1)
+            self.bad_bit_value += 2 ** (bit - 1)
 
         mask = []
         ap_flux = []
@@ -955,11 +1008,12 @@ class MovingTPF:
             # Combine aperture mask with masking of bad bits.
             mask.append(
                 np.logical_and(
-                    self.aperture_mask[t], self.pixel_quality[t] & value == 0
+                    self.aperture_mask[t],
+                    self.pixel_quality[t] & self.bad_bit_value == 0,
                 )
             )
 
-            # Compute flux and bg flux inside aperture (sum of all pixels).
+            # Compute flux and bg flux inside aperture (sum values).
             # (If no pixels in mask, these values will be nan.)
             ap_flux.append(np.nansum(self.corr_flux[t][mask[-1]]))
             ap_flux_err.append(np.sqrt(np.nansum(self.corr_flux_err[t][mask[-1]] ** 2)))
@@ -996,6 +1050,127 @@ class MovingTPF:
             col_cen_err,
             row_cen_err,
         )
+
+    def _create_lc_quality(self, method: str = "aperture"):
+        """
+        Creates quality mask for lightcurve. This is defined independently of SPOC quality flags.
+        For `aperture` method, the mask is a bit-wise combination of the following flags:
+
+        Bit - Description
+        ----------------
+        1 - no pixels inside aperture.
+        2 - at least one non-science pixel inside aperture.
+        3 - at least one pixel inside aperture is in a strap column.
+        4 - at least one saturated pixel inside aperture.
+        5 - at least one pixel inside aperture is 4-adjacent to a saturated pixel.
+        6 - all pixels inside aperture are `bad_bits`.
+        7 - PRF model contained nans. Only relevant if `prf` aperture was used.
+
+        Parameters
+        ----------
+        method : str
+            Photometric extraction method. One of `aperture` or `prf`.
+
+        Returns
+        -------
+        lc_quality : ndarray
+            Lightcurve quality mask with length [ntimes].
+        """
+
+        if (
+            not hasattr(self, "all_flux")
+            or not hasattr(self, "flux")
+            or not hasattr(self, "pixel_quality")
+            or not hasattr(self, "corr_flux")
+        ):
+            raise AttributeError(
+                "Must run `get_data()`, `reshape_data()`, `create_pixel_quality()` and `background_correction()` before creating lightcurve quality."
+            )
+
+        if method == "aperture":
+            if not hasattr(self, "aperture_mask") or not hasattr(self, "bad_bit_value"):
+                raise AttributeError(
+                    "With `aperture` method, must run `create_aperture()` and `_aperture_photometry()` before creating lightcurve quality."
+                )
+
+            # Define masks
+            masks = {
+                # No pixels in aperture
+                "no_pixel_mask": {
+                    "bit": 1,
+                    "value": np.array(
+                        [self.aperture_mask[t].sum() for t in range(len(self.time))]
+                    )
+                    == 0,
+                },
+                # Non-science pixel in aperture
+                "science_mask": {
+                    "bit": 2,
+                    "value": [
+                        (self.pixel_quality[t][self.aperture_mask[t]] & 1 != 0).any()
+                        for t in range(len(self.time))
+                    ],
+                },
+                # Strap in aperture
+                "strap_mask": {
+                    "bit": 3,
+                    "value": [
+                        (self.pixel_quality[t][self.aperture_mask[t]] & 2 != 0).any()
+                        for t in range(len(self.time))
+                    ],
+                },
+                # Saturated pixel in aperture
+                "sat_mask": {
+                    "bit": 4,
+                    "value": [
+                        (self.pixel_quality[t][self.aperture_mask[t]] & 4 != 0).any()
+                        for t in range(len(self.time))
+                    ],
+                },
+                # Pixel in aperture is 4-adjacent to saturated pixel
+                "sat_buffer_mask": {
+                    "bit": 5,
+                    "value": [
+                        (self.pixel_quality[t][self.aperture_mask[t]] & 8 != 0).any()
+                        for t in range(len(self.time))
+                    ],
+                },
+                # All pixels in aperture are `bad_bits`, as defined by user in _aperture_photometry()
+                "bad_bit_mask": {
+                    "bit": 6,
+                    "value": [
+                        (
+                            self.pixel_quality[t][self.aperture_mask[t]]
+                            & self.bad_bit_value
+                            != 0
+                        ).any()
+                        for t in range(len(self.time))
+                    ],
+                },
+                # PRF model contained nans and was replaced with preceding/following frame.
+                # This will only be meaningful if the `prf` aperture was used.
+                "prf_nan_mask": {"bit": 7, "value": self.prf_nan_mask},
+                # Add flag for negative pixels in aperture?
+            }
+
+        elif method == "prf":
+            raise NotImplementedError("PSF photometry is not yet implemented.")
+
+        else:
+            raise ValueError(
+                f"Method must be one of: ['aperture', 'prf']. Not '{method}'"
+            )
+
+        # Compute bit-wise mask
+        lc_quality = np.sum(
+            [
+                (2 ** (masks[mask]["bit"] - 1)) * np.asarray(masks[mask]["value"])
+                for mask in masks
+            ],
+            axis=0,
+        ).astype("int16")
+
+        return np.asarray(lc_quality)
 
     def save_data(
         self,
