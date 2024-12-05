@@ -979,7 +979,9 @@ class MovingTPF:
         ap_flux, ap_flux_err, ap_bg, ap_bg_err, col_cen, row_cen, col_cen_err, row_cen_err : ndarrays
             Sum of flux inside aperture and error (ap_flux, ap_flux_err), sum of background flux inside
             aperture and error (ap_bg, ap_bg_err) and flux-weighted centroids inside aperture and errors
-            (col_cen, row_cen, col_cen_err, row_cen_err).
+            (col_cen, row_cen, col_cen_err, row_cen_err). The row and column centroids are zero-indexed,
+            where the lower left pixel in the TPF has the value (0,0). To transform this into the pixel
+            position in the full FFI, sum the centroids with `self.corner`.
         """
 
         if (
@@ -1031,6 +1033,8 @@ class MovingTPF:
                 ap_bg_err[-1] = np.nan
 
         # Compute flux-weighted centroid inside aperture
+        # These values are zero-indexed i.e. lower left pixel in TPF is (0,0).
+        # Sum with `self.corner` to get pixel position in full FFI.
         col_cen, row_cen, col_cen_err, row_cen_err = compute_moments(
             self.corr_flux, np.asarray(mask), second_order=False, return_err=True
         )
