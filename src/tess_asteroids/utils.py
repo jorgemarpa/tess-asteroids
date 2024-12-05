@@ -2,6 +2,7 @@
 Utility functions
 """
 
+import warnings
 from typing import Optional
 
 import numpy as np
@@ -73,13 +74,13 @@ def compute_moments(
     -------
     X, Y, XERR, YERR, X2, Y2, XY: ndarrays
         First (X, Y) and second (X2, Y2, XY) order moments, plus error on first order moments (XERR, YERR).
-        If `second_order` is False, X2,Y2,XY are not returned. If `return_err` is False, XERR,YERR are
+        If `second_order` is False, X2/Y2/XY are not returned. If `return_err` is False, XERR/YERR are
         not returned. Each array has shape (nt).
     """
     # check if mask is None
     if mask is None:
         mask = np.ones_like(flux).astype(bool)
-    # reshape 2D mask into 3D mask if necessary
+    # reshape 2D mask into 3D mask, if necessary
     if len(mask.shape) == 2:
         mask = np.repeat([mask], flux.shape[0], axis=0)
 
@@ -122,24 +123,29 @@ def compute_moments(
                 - X[nt] * Y[nt]
             )
         if return_err:
-            # error on first-order moments (assumes uncertainties on weights are similar)
-            # see eqn. 6 in https://seismo.berkeley.edu/~kirchner/Toolkits/Toolkit_12.pdf
-            XERR[nt] = np.sqrt(
-                X2[nt]
-                * (np.nansum(flux[nt, mask[nt]] ** 2))
-                / (
-                    np.nansum(flux[nt, mask[nt]]) ** 2
-                    - np.nansum(flux[nt, mask[nt]] ** 2)
+            # Error on first-order moments (assumes uncertainties on weights are similar).
+            # See eqn. 6 in https://seismo.berkeley.edu/~kirchner/Toolkits/Toolkit_12.pdf
+            # If only one non-zero pixel exists in mask, errors will be nan. Catch warning.
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore", message="invalid value encountered in scalar divide"
                 )
-            )
-            YERR[nt] = np.sqrt(
-                Y2[nt]
-                * (np.nansum(flux[nt, mask[nt]] ** 2))
-                / (
-                    np.nansum(flux[nt, mask[nt]]) ** 2
-                    - np.nansum(flux[nt, mask[nt]] ** 2)
+                XERR[nt] = np.sqrt(
+                    X2[nt]
+                    * (np.nansum(flux[nt, mask[nt]] ** 2))
+                    / (
+                        np.nansum(flux[nt, mask[nt]]) ** 2
+                        - np.nansum(flux[nt, mask[nt]] ** 2)
+                    )
                 )
-            )
+                YERR[nt] = np.sqrt(
+                    Y2[nt]
+                    * (np.nansum(flux[nt, mask[nt]] ** 2))
+                    / (
+                        np.nansum(flux[nt, mask[nt]]) ** 2
+                        - np.nansum(flux[nt, mask[nt]] ** 2)
+                    )
+                )
 
     if second_order and return_err:
         return X, Y, XERR, YERR, X2, Y2, XY
