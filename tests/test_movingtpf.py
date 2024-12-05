@@ -283,7 +283,7 @@ def test_make_tpf():
 
 def test_to_lightcurve():
     """
-    Test the to_lightcurve() function, with the method `aperture`.  This internally calls
+    Test the to_lightcurve() function with the method `aperture`.  This internally calls
     _aperture_photometry() and _create_lc_quality(). The tests check the expected length
     of the lightcurve, the expected value of the centroid and the expected values of the
     quality mask.
@@ -306,6 +306,7 @@ def test_to_lightcurve():
     assert len(target.lc["aperture"]["quality"]) == len(target.time)
 
     # Check the average centroid is within 1/2 a pixel of the center of the TPF.
+    # Remember: centroids are zero-indexed!
     assert (
         (np.nanmean(target.lc["aperture"]["row_cen"]) > 4.5)
         & (np.nanmean(target.lc["aperture"]["row_cen"]) < 5.5)
