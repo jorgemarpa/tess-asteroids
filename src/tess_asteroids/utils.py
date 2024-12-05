@@ -158,7 +158,7 @@ def plot_img_aperture(
     """
     if ax is None:
         fig, ax = plt.subplots()
-        fig.suptitle(f"Asteroid Tracks")
+        fig.suptitle("Asteroid Tracks")
 
     extent = (
         corner[1] - 0.5,
@@ -183,7 +183,7 @@ def plot_img_aperture(
     if cbar:
         plt.colorbar(im, location="right", shrink=0.8, label="Flux [-e/s]")
     if xy is not None:
-        dot = ax.scatter(xy[1], xy[0], marker="o", c="red", alpha=1, s=15)
+        ax.scatter(xy[1], xy[0], marker="o", c="red", alpha=1, s=15)
 
     ax.set_aspect("equal", "box")
     ax.set_title(title)
@@ -245,9 +245,9 @@ def animate_cube(
 
     track : list or tuple, optional, default=None
         A list or tuple of object positions to be displayed on the plot.
-        For proper display of object position, if corner is [0, 0] then track needs to be relative to corner. 
+        For proper display of object position, if corner is [0, 0] then track needs to be relative to corner.
         If corner is provided, track needs to be absolute.
-        If None, no tracking information is shown. 
+        If None, no tracking information is shown.
 
     cadenceno : int, optional, default=None
         The cadence number of the frames, used for information display.
