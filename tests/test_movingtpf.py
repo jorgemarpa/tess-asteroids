@@ -306,14 +306,13 @@ def test_to_lightcurve():
     assert len(target.lc["aperture"]["quality"]) == len(target.time)
 
     # Check the average centroid is within 1/2 a pixel of the center of the TPF.
-    # Remember: centroids are zero-indexed!
     assert (
-        (np.nanmean(target.lc["aperture"]["row_cen"]) > 4.5)
-        & (np.nanmean(target.lc["aperture"]["row_cen"]) < 5.5)
+        (np.nanmean(target.lc["aperture"]["row_cen"] - target.corner[:, 0]) > 4.5)
+        & (np.nanmean(target.lc["aperture"]["row_cen"] - target.corner[:, 0]) < 5.5)
     ).all()
     assert (
-        (np.nanmean(target.lc["aperture"]["col_cen"]) > 4.5)
-        & (np.nanmean(target.lc["aperture"]["col_cen"]) < 5.5)
+        (np.nanmean(target.lc["aperture"]["col_cen"] - target.corner[:, 1]) > 4.5)
+        & (np.nanmean(target.lc["aperture"]["col_cen"] - target.corner[:, 1]) < 5.5)
     ).all()
 
     # Check the pixel quality has been correctly accounted for in quality mask.
