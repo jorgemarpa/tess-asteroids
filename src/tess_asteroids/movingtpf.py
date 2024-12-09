@@ -17,7 +17,7 @@ from tesscube.fits import get_wcs_header_by_extension
 from tesscube.utils import _sync_call, convert_coordinates_to_runs
 
 from . import logger, straps
-from .utils import compute_moments, inside_ellipse
+from .utils import compute_moments, inside_ellipse, animate_cube
 
 
 class MovingTPF:
@@ -1225,17 +1225,55 @@ class MovingTPF:
         """
         raise NotImplementedError("_save_table() is not yet implemented.")
 
-    def animate_tpf(self):
+    def animate_tpf(
+        self,
+        show_aperture: bool = True,
+        show_position: bool = True,
+        interval: int = 200,
+        file_name: Optional[str] = None,
+    ):
         """
-        Plot animation of TPF data.
+        Plot animation of TPF data with optional information overlay.
 
-        Parameters
+        Parameters:
         ----------
+        show_aperture : bool, optional
+            If True, the aperture used for photometry is displayed in the animation. Default is True.
 
-        Returns
-        -------
+        show_position : bool, optional
+            If True, the position of the target is highlighted in the animation. Default is True.
+
+        interval : int, optional
+            The time interval (in milliseconds) between frames of the animation. Default is 200 ms.
+
+        file_name : str or None, optional
+            If provided, the animation will be saved to the specified file. The format of the file has to be GIF.
+            If None, the animation will not be saved. Default is None.
+
+        Returns:
+        --------
         """
-        raise NotImplementedError("animate_tpf() is not yet implemented.")
+        ani = animate_cube(
+            self.corr_flux,
+            aperture_mask=self.aperture_mask if show_aperture else None,
+            corner=self.corner,
+            track=self.ephemeris if show_position else None,
+            cadenceno=self.cadence_number,
+            time=self.time,
+            interval=interval,
+            repeat_delay=1000,
+            suptitle=f"Asteroid {self.target} in Sector {self.sector} Camera {self.camera} CCD {self.ccd}",
+        )
+        if file_name is not None and isinstance(file_name, str):
+            ani.save(file_name, writer="pillow")
+        try:
+            from IPython.display import HTML
+
+            return HTML(ani.to_jshtml())
+        except ModuleNotFoundError:
+            logger.error(
+                "ipython needs to be installed for animate() to work (e.g., `pip install ipython`)"
+            )
 
     @staticmethod
     def from_name(
