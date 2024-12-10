@@ -1,6 +1,7 @@
 """
 Utility functions
 """
+
 import warnings
 
 from typing import Optional, Tuple, Union
@@ -11,7 +12,16 @@ from astropy.visualization import simple_norm
 from matplotlib import animation, patches
 
 
-def inside_ellipse(x, y, cxx, cyy, cxy, x0=0, y0=0, R=1):
+def inside_ellipse(
+    x: np.ndarray,
+    y: np.ndarray,
+    cxx: float,
+    cyy: float,
+    cxy: float,
+    x0: Optional[float] = 0,
+    y0: Optional[float] = 0,
+    R: Optional[float]=1,
+):
     """
     Returns a boolean mask indicating positions inside a specified ellipse.
     The ellipse is defined by its center, the radius, and the quadratic coefficients
