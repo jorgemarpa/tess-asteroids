@@ -101,8 +101,8 @@ def compute_moments(
 
     # compute moments for each frame
     for nt in range(flux.shape[0]):
-        # skip frame if no pixels are used
-        if mask[nt].sum() == 0:
+        # skip frame if no pixels are used or fluxes sum to zero
+        if mask[nt].sum() == 0 or flux[nt, mask[nt]].sum() == 0:
             continue
         # dummy pixel grid
         row, col = np.mgrid[0 : flux.shape[1], 0 : flux.shape[2]]

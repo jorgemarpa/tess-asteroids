@@ -919,13 +919,13 @@ class MovingTPF:
 
     def to_lightcurve(self, method: str = "aperture", **kwargs):
         """
-        Extract lightcurve from the moving TPF, using either `aperture` or `prf` photometry.
+        Extract lightcurve from the moving TPF, using either `aperture` or `psf` photometry.
         This function creates the `self.lc` attribute, which stores the time series data.
 
         Parameters
         ----------
         method : str
-            Method to extract lightcurve. One of `aperture` or `prf`.
+            Method to extract lightcurve. One of `aperture` or `psf`.
         kwargs : dict
             Keyword arguments, e.g `self._aperture_photometry` takes `bad_bits`.
 
@@ -956,11 +956,11 @@ class MovingTPF:
                 "quality": quality,
             }
 
-        elif method == "prf":
+        elif method == "psf":
             raise NotImplementedError("PSF photometry is not yet implemented.")
         else:
             raise ValueError(
-                f"Method must be one of: ['aperture', 'prf']. Not '{method}'"
+                f"Method must be one of: ['aperture', 'psf']. Not '{method}'"
             )
 
     def _aperture_photometry(self, bad_bits: list = [1, 3]):
@@ -1075,7 +1075,7 @@ class MovingTPF:
         Parameters
         ----------
         method : str
-            Photometric extraction method. One of `aperture` or `prf`.
+            Photometric extraction method. One of `aperture` or `psf`.
 
         Returns
         -------
@@ -1159,12 +1159,12 @@ class MovingTPF:
                 # Add flag for negative pixels in aperture?
             }
 
-        elif method == "prf":
+        elif method == "psf":
             raise NotImplementedError("PSF photometry is not yet implemented.")
 
         else:
             raise ValueError(
-                f"Method must be one of: ['aperture', 'prf']. Not '{method}'"
+                f"Method must be one of: ['aperture', 'psf']. Not '{method}'"
             )
 
         # Compute bit-wise mask
