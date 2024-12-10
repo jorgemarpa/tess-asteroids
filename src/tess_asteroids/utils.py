@@ -2,11 +2,12 @@
 Utility functions
 """
 
+from typing import Optional, Tuple, Union
+
 import matplotlib.pyplot as plt
 import numpy as np
 from astropy.visualization import simple_norm
 from matplotlib import animation, patches
-from typing import Optional, Tuple, Union
 
 
 def inside_ellipse(x, y, cxx, cyy, cxy, x0=0, y0=0, R=1):
@@ -137,7 +138,7 @@ def plot_img_aperture(
         The (row, column) coordinates of the lower left corner of the image.
 
     marker : tuple of float, default=None
-        The (row, column) coordinates at which to plot a marker in the figure. 
+        The (row, column) coordinates at which to plot a marker in the figure.
         This can be used to plot the position of the moving object.
 
     title : str, default=None
@@ -223,13 +224,13 @@ def animate_cube(
     ephemeris: Optional[np.ndarray] = None,
     cadenceno: Optional[np.ndarray] = None,
     time: Optional[np.ndarray] = None,
-    interval: Optional[int]=200,
-    repeat_delay: Optional[int]=1000,
-    cnorm: Optional[bool]=False,
-    suptitle: Optional[str]="",
+    interval: Optional[int] = 200,
+    repeat_delay: Optional[int] = 1000,
+    cnorm: Optional[bool] = False,
+    suptitle: Optional[str] = "",
 ):
     """
-    Creates an animated visualization of a 3D image cube, with an optional aperture mask and 
+    Creates an animated visualization of a 3D image cube, with an optional aperture mask and
     other customization options.
 
     This function animates the slices of a 3D image cube, optionally overlaying an aperture mask,

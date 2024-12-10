@@ -1253,7 +1253,7 @@ class MovingTPF:
         Returns:
         --------
         """
-        
+
         if (
             not hasattr(self, "all_flux")
             or not hasattr(self, "flux")
