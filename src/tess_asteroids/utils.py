@@ -3,7 +3,6 @@ Utility functions
 """
 
 import warnings
-
 from typing import Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
@@ -20,7 +19,7 @@ def inside_ellipse(
     cxy: float,
     x0: Optional[float] = 0,
     y0: Optional[float] = 0,
-    R: Optional[float]=1,
+    R: Optional[float] = 1,
 ):
     """
     Returns a boolean mask indicating positions inside a specified ellipse.
