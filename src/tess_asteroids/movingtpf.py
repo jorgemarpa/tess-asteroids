@@ -17,7 +17,7 @@ from tesscube.fits import get_wcs_header_by_extension
 from tesscube.utils import _sync_call, convert_coordinates_to_runs
 
 from . import logger, straps
-from .utils import compute_moments, inside_ellipse, animate_cube
+from .utils import animate_cube, compute_moments, inside_ellipse
 
 
 class MovingTPF:
