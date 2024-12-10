@@ -1499,8 +1499,8 @@ class MovingTPF:
         self,
         show_aperture: bool = True,
         show_ephemeris: bool = True,
-        interval: int = 200,
         file_name: Optional[str] = None,
+        **kwargs,
     ):
         """
         Plot animation of TPF data with optional information overlay.
@@ -1513,12 +1513,12 @@ class MovingTPF:
         show_ephemeris : bool
             If True, the predicted position of the target is included in the animation. Default is True.
 
-        interval : int
-            The time interval (in milliseconds) between frames of the animation. Default is 200 ms.
-
         file_name : str or None
             If provided, the animation will be saved to the specified file. The format of the file has to be GIF.
             If None, the animation will not be saved. Default is None.
+
+        kwargs:
+            Keyword arguments passed to `utils.animate_cube` such as [`interval`, `repeat_delay`, `cnorm`].
 
         Returns:
         --------
@@ -1540,9 +1540,8 @@ class MovingTPF:
             ephemeris=self.ephemeris if show_ephemeris else None,
             cadenceno=self.cadence_number,
             time=self.time,
-            interval=interval,
-            repeat_delay=1000,
             suptitle=f"Asteroid {self.target} in Sector {self.sector} Camera {self.camera} CCD {self.ccd}",
+            **kwargs,
         )
         if file_name is not None and isinstance(file_name, str):
             ani.save(file_name, writer="pillow")

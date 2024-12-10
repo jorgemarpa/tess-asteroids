@@ -8,7 +8,7 @@ from typing import Optional, Tuple, Union
 import matplotlib.pyplot as plt
 import numpy as np
 from astropy.visualization import simple_norm
-from matplotlib import animation, patches
+from matplotlib import animation, colors, patches
 
 
 def inside_ellipse(
@@ -17,9 +17,9 @@ def inside_ellipse(
     cxx: float,
     cyy: float,
     cxy: float,
-    x0: Optional[float] = 0,
-    y0: Optional[float] = 0,
-    R: Optional[float] = 1,
+    x0: float = 0.0,
+    y0: float = 0.0,
+    R: float = 1.0,
 ):
     """
     Returns a boolean mask indicating positions inside a specified ellipse.
@@ -172,14 +172,14 @@ def compute_moments(
 def plot_img_aperture(
     img: np.ndarray,
     aperture_mask: Optional[np.ndarray] = None,
-    cbar: Optional[bool] = True,
+    cbar: bool = True,
     ax: Optional[plt.Axes] = None,
-    corner: Optional[list[int, int]] = [0, 0],
+    corner: Tuple[int, int] = (0, 0),
     marker: Optional[Tuple[float, float]] = None,
-    title: Optional[str] = None,
+    title: str = "",
     vmin: Optional[float] = None,
     vmax: Optional[float] = None,
-    cnorm: Optional[object] = None,
+    cnorm: Optional[colors.Normalize] = None,
 ):
     """
     Plots an image with an optional aperture mask overlay.
@@ -208,7 +208,7 @@ def plot_img_aperture(
         The (row, column) coordinates at which to plot a marker in the figure.
         This can be used to plot the position of the moving object.
 
-    title : str, default=None
+    title : str, default=""
         Title of the plot. If None, no title will be shown.
 
     vmin : float, optional, default=None
@@ -287,14 +287,14 @@ def plot_img_aperture(
 def animate_cube(
     cube: np.ndarray,
     aperture_mask: Optional[np.ndarray] = None,
-    corner: Optional[Union[list, np.ndarray]] = [0, 0],
+    corner: Union[Tuple, np.ndarray] = (0, 0),
     ephemeris: Optional[np.ndarray] = None,
     cadenceno: Optional[np.ndarray] = None,
     time: Optional[np.ndarray] = None,
-    interval: Optional[int] = 200,
-    repeat_delay: Optional[int] = 1000,
-    cnorm: Optional[bool] = False,
-    suptitle: Optional[str] = "",
+    interval: int = 200,
+    repeat_delay: int = 1000,
+    cnorm: bool = False,
+    suptitle: str = "",
 ):
     """
     Creates an animated visualization of a 3D image cube, with an optional aperture mask and
@@ -402,7 +402,8 @@ def animate_cube(
 
         return ()
 
-    plt.close(ax.figure)
+    # prevent second figure from showing up in interactive mode
+    plt.close(ax.figure)  # type: ignore
 
     # Create the animation
     ani = animation.FuncAnimation(
