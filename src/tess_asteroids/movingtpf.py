@@ -1228,7 +1228,7 @@ class MovingTPF:
     def animate_tpf(
         self,
         show_aperture: bool = True,
-        show_position: bool = True,
+        show_ephemeris: bool = True,
         interval: int = 200,
         file_name: Optional[str] = None,
     ):
@@ -1237,27 +1237,37 @@ class MovingTPF:
 
         Parameters:
         ----------
-        show_aperture : bool, optional
+        show_aperture : bool
             If True, the aperture used for photometry is displayed in the animation. Default is True.
 
-        show_position : bool, optional
-            If True, the position of the target is highlighted in the animation. Default is True.
+        show_ephemeris : bool
+            If True, the predicted position of the target is included in the animation. Default is True.
 
-        interval : int, optional
+        interval : int
             The time interval (in milliseconds) between frames of the animation. Default is 200 ms.
 
-        file_name : str or None, optional
+        file_name : str or None
             If provided, the animation will be saved to the specified file. The format of the file has to be GIF.
             If None, the animation will not be saved. Default is None.
 
         Returns:
         --------
         """
+        
+        if (
+            not hasattr(self, "all_flux")
+            or not hasattr(self, "flux")
+            or not hasattr(self, "corr_flux")
+            or not hasattr(self, "aperture_mask")
+        ):
+            raise AttributeError(
+                "Must run `get_data()`, `reshape_data()`, `background_correction()` and `create_aperture()` before animating."
+            )
         ani = animate_cube(
             self.corr_flux,
             aperture_mask=self.aperture_mask if show_aperture else None,
             corner=self.corner,
-            track=self.ephemeris if show_position else None,
+            ephemeris=self.ephemeris if show_ephemeris else None,
             cadenceno=self.cadence_number,
             time=self.time,
             interval=interval,
@@ -1271,6 +1281,8 @@ class MovingTPF:
 
             return HTML(ani.to_jshtml())
         except ModuleNotFoundError:
+            # To make installing the package easier, ipython is not a dependency,
+            # because we can assume it is installed when notebook-specific features are called
             logger.error(
                 "ipython needs to be installed for animate() to work (e.g., `pip install ipython`)"
             )
