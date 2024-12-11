@@ -271,7 +271,7 @@ def plot_img_aperture(
                         xy=(pj - 0.5, pi - 0.5),
                         width=1,
                         height=1,
-                        color="tab:red",
+                        color="deeppink",
                         fill=False,
                         # hatch="//",
                         alpha=0.8,
