@@ -17,6 +17,7 @@ from tesscube.utils import _sync_call, convert_coordinates_to_runs
 from . import logger, straps
 from .utils import animate_cube, compute_moments, inside_ellipse, make_wcs_header
 
+
 class MovingTPF:
     """
     Create a TPF for a moving target (e.g. asteroid) from a TESS FFI.
@@ -106,8 +107,10 @@ class MovingTPF:
         self.create_pixel_quality(**kwargs)
         self.background_correction(method=bg_method, **kwargs)
         self.create_aperture(method=ap_method, **kwargs)
-        self.to_fits(file_type="tpf", save=save, outdir=outdir, file_name=file_name, **kwargs)
-    
+        self.to_fits(
+            file_type="tpf", save=save, outdir=outdir, file_name=file_name, **kwargs
+        )
+
     def make_lc(
         self,
         method: str = "aperture",
@@ -137,7 +140,9 @@ class MovingTPF:
         -------
         """
         self.to_lightcurve(method=method, **kwargs)
-        self.to_fits(file_type="lc", save=save, outdir=outdir, file_name=file_name, **kwargs)
+        self.to_fits(
+            file_type="lc", save=save, outdir=outdir, file_name=file_name, **kwargs
+        )
 
     def refine_coordinates(self):
         """
@@ -1219,8 +1224,8 @@ class MovingTPF:
         file_name: Optional[str] = None,
     ):
         """
-        Convert the moving TPF or lightcurve data to FITS format. This function creates the 
-        `self.tpf_hdulist` or `self.lc_hdulist` attribute, which can be optionally saved 
+        Convert the moving TPF or lightcurve data to FITS format. This function creates the
+        `self.tpf_hdulist` or `self.lc_hdulist` attribute, which can be optionally saved
         to a file.
 
         Parameters
@@ -1230,7 +1235,7 @@ class MovingTPF:
         save : bool
             If True, write the HDUList to a file.
         overwrite : bool
-            If `save`, this determines whether to overwrite an exisitng file with the 
+            If `save`, this determines whether to overwrite an exisitng file with the
             same name.
         outdir : str
             If `save`, this is the directory into which the file will be saved.
@@ -1248,12 +1253,18 @@ class MovingTPF:
         elif file_type == "lc":
             self.lc_hdulist = self._make_lc_hdulist()
         else:
-            raise ValueError(f"`file_type` must be one of: ['tpf', 'lc']. Not '{file_type}'")
+            raise ValueError(
+                f"`file_type` must be one of: ['tpf', 'lc']. Not '{file_type}'"
+            )
 
         # Write HDUList to file
         if save:
-            self._save_hdulist(file_type=file_type, overwrite=overwrite, outdir=outdir, file_name=file_name)
-            
+            self._save_hdulist(
+                file_type=file_type,
+                overwrite=overwrite,
+                outdir=outdir,
+                file_name=file_name,
+            )
 
     def _make_tpf_hdulist(self):
         """
@@ -1466,9 +1477,10 @@ class MovingTPF:
         hdulist : astropy.io.fits.HDUList
             HDUList for lightcurve.
         """
+
     def _save_hdulist(
-        self, 
-        file_type : str,
+        self,
+        file_type: str,
         overwrite: bool = True,
         outdir: str = "",
         file_name: Optional[str] = None,
@@ -1501,18 +1513,20 @@ class MovingTPF:
         # Create default file name
         if file_name is None:
             file_name = "tess-{0}-s{1:04}-{2}-{3}-shape{4}x{5}".format(
-                    str(self.target).replace(" ", ""),
-                    self.sector,
-                    self.camera,
-                    self.ccd,
-                    *self.shape,
-                )
+                str(self.target).replace(" ", ""),
+                self.sector,
+                self.camera,
+                self.ccd,
+                *self.shape,
+            )
             if file_type == "tpf":
                 file_name += "-moving_tp.fits"
             elif file_type == "lc":
                 file_name += "_lc.fits"
             else:
-                raise ValueError(f"`file_type` must be one of: ['tpf', 'lc']. Not '{file_type}'")
+                raise ValueError(
+                    f"`file_type` must be one of: ['tpf', 'lc']. Not '{file_type}'"
+                )
 
         # Check format of file_name and outdir
         if not file_name.endswith(".fits"):
@@ -1528,9 +1542,11 @@ class MovingTPF:
         elif file_type == "lc":
             hdulist = self.lc_hdulist
         else:
-            raise ValueError(f"`file_type` must be one of: ['tpf', 'lc']. Not '{file_type}'")
+            raise ValueError(
+                f"`file_type` must be one of: ['tpf', 'lc']. Not '{file_type}'"
+            )
         hdulist.writeto(outdir + file_name, overwrite=overwrite)
-        logger.info("Created file: {0}".format(outdir + file_name))        
+        logger.info("Created file: {0}".format(outdir + file_name))
 
     def animate_tpf(
         self,
@@ -1587,14 +1603,15 @@ class MovingTPF:
             # Check format of file_name
             if not file_name.endswith(".gif"):
                 raise ValueError(
-                "`file_name` must be a .gif file. Not `{0}`".format(file_name)
+                    "`file_name` must be a .gif file. Not `{0}`".format(file_name)
                 )
             ani.save(file_name, writer="pillow")
-        
+
         # Return animation in HTML format.
         # If in notebook environment, this allows animation to be displayed.
         try:
             from IPython.display import HTML
+
             return HTML(ani.to_jshtml())
         except ModuleNotFoundError:
             # To make installing `tess-asteroids` easier, ipython is not a dependency

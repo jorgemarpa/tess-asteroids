@@ -8,9 +8,10 @@ from typing import Optional, Tuple, Union
 import matplotlib.pyplot as plt
 import numpy as np
 from astropy.coordinates import SkyCoord
-from astropy.wcs.utils import fit_wcs_from_points
 from astropy.visualization import simple_norm
+from astropy.wcs.utils import fit_wcs_from_points
 from matplotlib import animation, colors, patches
+
 
 def inside_ellipse(
     x: np.ndarray,
@@ -169,9 +170,10 @@ def compute_moments(
     else:
         return X, Y
 
+
 def make_wcs_header(shape: Tuple[int, int]):
     """
-    Make a dummy WCS header for a moving TPF. In reality, there is a WCS per 
+    Make a dummy WCS header for a moving TPF. In reality, there is a WCS per
     timestamp that needs to be accounted for.
 
     Parameters
@@ -219,6 +221,7 @@ def make_wcs_header(shape: Tuple[int, int]):
     wcs_header.set("CDELT2P", 1.0, "physical WCS axis 2 step")
 
     return wcs_header
+
 
 def plot_img_aperture(
     img: np.ndarray,
@@ -403,7 +406,7 @@ def animate_cube(
         cadenceno = np.repeat([None], len(cube), axis=0)
     if time is None:
         time = np.repeat([None], len(cube), axis=0)
-    
+
     if cnorm:
         norm = simple_norm(cube.ravel(), "asinh", percent=98)
     else:
