@@ -223,8 +223,8 @@ def plot_img_aperture(
 
     Returns:
     --------
-    fig : matplotlib.axes.Axes
-        The figure object containing the plot.
+    ax : matplotlib.axes.Axes
+        The axes object containing the plot.
     """
     if ax is None:
         fig, ax = plt.subplots()
