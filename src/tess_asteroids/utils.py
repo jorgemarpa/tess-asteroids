@@ -412,6 +412,7 @@ def animate_cube(
     else:
         lo, hi = np.nanpercentile(cube, [1, 99])
 
+    # If corner is list of two ints, repeat for all times.
     if len(corner) == 2:
         corner = np.repeat([corner], len(cube), axis=0)
 
