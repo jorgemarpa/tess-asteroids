@@ -374,7 +374,7 @@ class MovingTPF:
         self.corr_flux = self.flux - self.bg
         self.corr_flux_err = np.sqrt(self.flux_err**2 + self.bg_err**2)
 
-    def _bg_rolling_median(self, nframes: int = 25):
+    def _bg_rolling_median(self, nframes: int = 25, **kwargs):
         """
         Calculate the background using a rolling median of nearby frames.
 
@@ -455,6 +455,7 @@ class MovingTPF:
         self,
         threshold: float = 3.0,
         reference_pixel: Union[str, Tuple[float, float]] = "center",
+        **kwargs,
     ):
         """
         Creates an threshold aperture mask of shape [ntimes, nrows, ncols].
@@ -566,6 +567,12 @@ class MovingTPF:
             )
         elif isinstance(threshold, float) and threshold < 1 and threshold >= 0:
             aperture_mask = self.prf_model >= threshold  # type: ignore
+            # No pixels above threshold
+            if (~aperture_mask).all():
+                logger.warning(
+                    f"When computing the PRF aperture, none of the pixels in the PRF model were greater than the threshold ({threshold})."
+                )
+
         else:
             raise ValueError(
                 f"Threshold must be either 'optimal' or a float between 0 and 1. Not '{threshold}'"
@@ -573,7 +580,7 @@ class MovingTPF:
 
         return aperture_mask
 
-    def _create_target_prf_model(self, time_step: Optional[float] = None):
+    def _create_target_prf_model(self, time_step: Optional[float] = None, **kwargs):
         """
         Creates a PRF model of the target as a function of time, using the `lkprf` package.
         Since the target is moving, the PRF model per time is made by summing models on a high
@@ -711,6 +718,7 @@ class MovingTPF:
         smooth: bool = True,
         return_params: bool = False,
         plot: bool = False,
+        **kwargs,
     ):
         """
         Uses second-order moments of 2d flux distribution to compute ellipse parameters
@@ -872,7 +880,9 @@ class MovingTPF:
         else:
             return aperture_mask
 
-    def create_pixel_quality(self, sat_level: float = 1e5, sat_buffer_rad: int = 1):
+    def create_pixel_quality(
+        self, sat_level: float = 1e5, sat_buffer_rad: int = 1, **kwargs
+    ):
         """
         Create 3D pixel quality mask. The mask is a bit-wise combination of
         the following flags:
@@ -1000,7 +1010,7 @@ class MovingTPF:
                 f"Method must be one of: ['aperture', 'psf']. Not '{method}'"
             )
 
-    def _aperture_photometry(self, bad_bits: list = [1, 3]):
+    def _aperture_photometry(self, bad_bits: list = [1, 3], **kwargs):
         """
         Gets flux and BG flux inside aperture and computes flux-weighted centroid.
 
@@ -1222,6 +1232,7 @@ class MovingTPF:
         overwrite: bool = True,
         outdir: str = "",
         file_name: Optional[str] = None,
+        **kwargs,
     ):
         """
         Convert the moving TPF or lightcurve data to FITS format. This function creates the
@@ -1552,6 +1563,9 @@ class MovingTPF:
         self,
         show_aperture: bool = True,
         show_ephemeris: bool = True,
+        step: Optional[int] = None,
+        save: bool = False,
+        outdir: str = "",
         file_name: Optional[str] = None,
         **kwargs,
     ):
@@ -1564,11 +1578,19 @@ class MovingTPF:
             If True, the aperture used for photometry is displayed in the animation. Default is True.
         show_ephemeris : bool
             If True, the predicted position of the target is included in the animation. Default is True.
+        step : int or None
+            Spacing between frames, i.e. plot every nth frame.  If `None`, the spacing will be determined such
+            that about 50 frames are shown.
+        save : bool
+            If True, save the animation. Default is False.
+        outdir : str
+            If `save`, this is the directory into which the file will be saved.
         file_name : str or None
-            If provided, the animation will be saved to the specified file. The format of the file has to be GIF.
-            If None, the animation will not be saved. Default is None.
+            If `save`, this is the filename that will be used. Format must be `.gif`.
+            If no filename is given, a default one will be generated.
         kwargs:
-            Keyword arguments passed to `utils.animate_cube` such as [`interval`, `repeat_delay`, `cnorm`].
+            Keyword arguments passed to `utils.animate_cube` such as [`interval`, `repeat_delay`, `cnorm`,
+            `vmin`, `vmax`].
 
         Returns:
         --------
@@ -1586,6 +1608,10 @@ class MovingTPF:
                 "Must run `get_data()`, `reshape_data()`, `background_correction()` and `create_aperture()` before animating."
             )
 
+        # Compute default step
+        if step is None:
+            step = len(self.time) // 50 if len(self.time) >= 50 else 1
+
         # Create animation
         ani = animate_cube(
             self.corr_flux,
@@ -1594,18 +1620,33 @@ class MovingTPF:
             ephemeris=self.ephemeris if show_ephemeris else None,
             cadenceno=self.cadence_number,
             time=self.time,
+            step=step,
             suptitle=f"Asteroid {self.target} in Sector {self.sector} Camera {self.camera} CCD {self.ccd}",
             **kwargs,
         )
 
         # Save animation
-        if file_name is not None:
-            # Check format of file_name
+        if save:
+            # Create default file name
+            if file_name is None:
+                file_name = (
+                    "tess-{0}-s{1:04}-{2}-{3}-shape{4}x{5}-moving_tp.gif".format(
+                        str(self.target).replace(" ", ""),
+                        self.sector,
+                        self.camera,
+                        self.ccd,
+                        *self.shape,
+                    )
+                )
+            # Check format of file_name and outdir
             if not file_name.endswith(".gif"):
                 raise ValueError(
                     "`file_name` must be a .gif file. Not `{0}`".format(file_name)
                 )
-            ani.save(file_name, writer="pillow")
+            if len(outdir) > 0 and not outdir.endswith("/"):
+                outdir += "/"
+
+            ani.save(outdir + file_name, writer="pillow")
 
         # Return animation in HTML format.
         # If in notebook environment, this allows animation to be displayed.

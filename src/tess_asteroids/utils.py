@@ -259,9 +259,9 @@ def plot_img_aperture(
     title : str, default=""
         Title of the plot. If None, no title will be shown.
     vmin : float, optional, default=None
-        Minimum value for color scale. If None, the minimum value in the image is used.
+        Minimum value for color scale. If None, the 3%-percentile is used.
     vmax : float, optional, default=None
-        Maximum value for color scale. If None, the maximum value in the image is used.
+        Maximum value for color scale. If None, the 97%-percentile is used.
     cnorm : optional, default=None
         Color matplotlib normalization object (e.g. astropy.visualization.simple_norm). If provided,
         then `vmax` and `vmin` are not used.
@@ -343,6 +343,9 @@ def animate_cube(
     time: Optional[np.ndarray] = None,
     interval: int = 200,
     repeat_delay: int = 1000,
+    step: int = 1,
+    vmin: Optional[float] = None,
+    vmax: Optional[float] = None,
     cnorm: bool = False,
     suptitle: str = "",
 ):
@@ -375,10 +378,16 @@ def animate_cube(
         The time interval (in milliseconds) between each frame of the animation.
     repeat_delay : int, default=1000
         The time delay (in milliseconds) before the animation restarts once it finishes.
+    step : int
+        Spacing between frames, i.e. plot every nth frame.
+    vmin : float, optional, default=None
+        Minimum value for color scale. If None, the 3%-percentile is used.
+    vmax : float, optional, default=None
+        Maximum value for color scale. If None, the 97%-percentile is used.
     cnorm : optional, default=False
         Whether to use asinh color normalization (from astropy.visualization.simple_norm).
         This can be useful for cases when the moving object is too faint compared to other
-        features in the background.
+        features in the background. If provided, then `vmax` and `vmin` are not used.
     suptitle : str, optional, default=""
         A string to be used as the super title of the animation.
         It can be used to provide additional context or information about the animated data,
@@ -409,8 +418,8 @@ def animate_cube(
 
     if cnorm:
         norm = simple_norm(cube.ravel(), "asinh", percent=98)
-    else:
-        lo, hi = np.nanpercentile(cube, [1, 99])
+    elif vmin is None and vmax is None:
+        vmin, vmax = np.nanpercentile(cube, [3, 97])
 
     # If corner is list of two ints, repeat for all times.
     if len(corner) == 2:
@@ -426,24 +435,25 @@ def animate_cube(
         corner=corner[nt],
         marker=ephemeris[nt],
         title=f"CAD {cadenceno[nt]} | BTJD {time[nt]:.4f}",
-        vmin=lo if not cnorm else None,
-        vmax=hi if not cnorm else None,
+        vmin=vmin if not cnorm else None,
+        vmax=vmax if not cnorm else None,
         cnorm=norm if cnorm else None,
     )
 
     # Define function for animation
     def animate(nt):
+        frame = nt * step
         ax.clear()
         _ = plot_img_aperture(
-            cube[nt],
-            aperture_mask=aperture_mask[nt],
+            cube[frame],
+            aperture_mask=aperture_mask[frame],
             cbar=False,
             ax=ax,
-            corner=corner[nt],
-            marker=ephemeris[nt],
-            title=f"CAD {cadenceno[nt]} | BTJD {time[nt]:.4f}",
-            vmin=lo if not cnorm else None,
-            vmax=hi if not cnorm else None,
+            corner=corner[frame],
+            marker=ephemeris[frame],
+            title=f"CAD {cadenceno[frame]} | BTJD {time[frame]:.4f}",
+            vmin=vmin if not cnorm else None,
+            vmax=vmax if not cnorm else None,
             cnorm=norm if cnorm else None,
         )
 
@@ -456,7 +466,7 @@ def animate_cube(
     ani = animation.FuncAnimation(
         fig,
         animate,
-        frames=len(cube),
+        frames=len(cube) // step,
         interval=interval,
         blit=True,
         repeat_delay=repeat_delay,
