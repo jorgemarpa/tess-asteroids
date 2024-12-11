@@ -5,10 +5,8 @@ import lkprf
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from astropy.coordinates import SkyCoord
 from astropy.io import fits
 from astropy.stats import sigma_clip
-from astropy.wcs.utils import fit_wcs_from_points
 from numpy.polynomial import Polynomial
 from scipy import ndimage, stats
 from tess_ephem import ephem
@@ -17,7 +15,7 @@ from tesscube.fits import get_wcs_header_by_extension
 from tesscube.utils import _sync_call, convert_coordinates_to_runs
 
 from . import logger, straps
-from .utils import compute_moments, inside_ellipse
+from .utils import compute_moments, inside_ellipse, make_wcs_header
 
 
 class MovingTPF:
@@ -70,8 +68,9 @@ class MovingTPF:
         shape: Tuple[int, int] = (11, 11),
         bg_method: str = "rolling",
         ap_method: str = "prf",
+        save: bool = False,
+        outdir: str = "",
         file_name: Optional[str] = None,
-        save_loc: str = "",
         **kwargs,
     ):
         """
@@ -80,7 +79,7 @@ class MovingTPF:
         Parameters
         ----------
         shape : Tuple(int,int)
-            Defined as (row,column), in pixels.
+            Defined as (nrows,ncols), in pixels.
             Defines the pixels that will be retrieved, centred on the target, at each timestamp.
         bg_method : str
             Method used for background correction.
@@ -88,13 +87,16 @@ class MovingTPF:
         ap_method : str
             Method used to create aperture.
             One of ['threshold', 'prf', 'ellipse'].
+        save : bool, default=False
+            If True, save the TPF HDUList to a FITS file.
+        outdir : str
+            If `save`, this is the directory into which the file will be saved.
         file_name : str
-            Name of saved TPF.
-        save_loc : str
-            Directory into which the files will be saved.
+            If `save`, this is the filename that will be used. Format must be `.fits`.
+            If no filename is given, a default one will be generated.
         **kwargs
             Keyword arguments to be passed to `create_pixel_quality()`, `background_correction()`,
-            `create_aperture()` and `save_data()`.
+            `create_aperture()` and `to_fits()`.
 
         Returns
         -------
@@ -105,7 +107,38 @@ class MovingTPF:
         self.create_pixel_quality(**kwargs)
         self.background_correction(method=bg_method, **kwargs)
         self.create_aperture(method=ap_method, **kwargs)
-        self.save_data(file_name_tpf=file_name, save_loc=save_loc, **kwargs)
+        self.to_fits(file_type="tpf", save=save, outdir=outdir, file_name=file_name, **kwargs)
+    
+    def make_lc(
+        self,
+        method: str = "aperture",
+        save: bool = False,
+        file_name: Optional[str] = None,
+        outdir: str = "",
+        **kwargs,
+    ):
+        """
+        Performs all steps to create a lightcurve from the moving TPF, with the option to save.
+
+        Parameters
+        ----------
+        method : str
+            Method to extract lightcurve. One of `aperture` or `psf`.
+        save : bool
+            If True, save the lightcurve HDUList to a FITS file.
+        outdir : str
+            If `save`, this is the directory into which the file will be saved.
+        file_name : str
+            If `save`, this is the filename that will be used. Format must be `.fits`.
+            If no filename is given, a default one will be generated.
+        **kwargs
+            Keyword arguments to be passed to `to_lightcurve()` and `to_fits()`.
+
+        Returns
+        -------
+        """
+        self.to_lightcurve(method=method, **kwargs)
+        self.to_fits(file_type="lc", save=save, outdir=outdir, file_name=file_name, **kwargs)
 
     def refine_coordinates(self):
         """
@@ -126,13 +159,13 @@ class MovingTPF:
         Parameters
         ----------
         shape : Tuple(int,int)
-            Defined as (row,column), in pixels.
+            Defined as (nrows,ncols), in pixels.
             Defines the pixels that will be retrieved, centred on the target, at each timestamp.
 
         Returns
         -------
         """
-        # Shape needs to be >=3 in both dimensions, otherwise _make_wcs_header() errors.
+        # Shape needs to be >=3 in both dimensions, otherwise make_wcs_header() errors.
         self.shape = shape
 
         # Use interpolation to get target (row,column) at cube time.
@@ -1178,54 +1211,62 @@ class MovingTPF:
 
         return np.asarray(lc_quality)
 
-    def save_data(
+    def to_fits(
         self,
-        save_tpf: bool = True,
-        save_table: bool = False,
-        file_name_tpf: Optional[str] = None,
-        save_loc: str = "",
+        file_type: str,
+        save: bool = False,
+        overwrite: bool = True,
+        outdir: str = "",
+        file_name: Optional[str] = None,
     ):
         """
-        Save retrieved pixel data. Can either save all pixels at all times or save a TPF with the same
-        format produced by SPOC.
+        Convert the moving TPF or lightcurve data to FITS format. This function creates the 
+        `self.tpf_hdulist` or `self.lc_hdulist` attribute, which can be optionally saved 
+        to a file.
 
         Parameters
         ----------
-        save_tpf : bool
-            If True, save a SPOC-like TPF file where each frame is centred on the moving target.
-        save_table : bool
-            If True, save a table of all retrieved pixel fluxes at all times.
-        file_name_tpf : str
-            If save_tpf, this is the filename that will be used for the TPF.
-            If no filename is given, a default one will be generated.
-        save_loc : str
-            Directory into which the files will be saved.
-
-        Returns
-        -------
-        """
-        if save_tpf:
-            # Save TPF with SPOC format
-            self._save_tpf(file_name=file_name_tpf, save_loc=save_loc)
-
-        if save_table:
-            # Save table of all flux data
-            self._save_table()
-
-    def _save_tpf(self, file_name: Optional[str] = None, save_loc: str = ""):
-        """
-        Save data and aperture in format that matches SPOC TPFs.
-
-        Parameters
-        ----------
+        file_type : str
+            Type of file to be converted to FITS. One of ['tpf', 'lc'].
+        save : bool
+            If True, write the HDUList to a file.
+        overwrite : bool
+            If `save`, this determines whether to overwrite an exisitng file with the 
+            same name.
+        outdir : str
+            If `save`, this is the directory into which the file will be saved.
         file_name : str
-            This is the filename that will be used for the TPF.
+            If `save`, this is the filename that will be used. Format must be `.fits`.
             If no filename is given, a default one will be generated.
-        save_loc : str
-            Directory into which the TPF will be saved.
 
         Returns
         -------
+        """
+
+        # Make HDUList
+        if file_type == "tpf":
+            self.tpf_hdulist = self._make_tpf_hdulist()
+        elif file_type == "lc":
+            self.lc_hdulist = self._make_lc_hdulist()
+        else:
+            raise ValueError(f"`file_type` must be one of: ['tpf', 'lc']. Not '{file_type}'")
+
+        # Write HDUList to file
+        if save:
+            self._save_hdulist(file_type=file_type, overwrite=overwrite, outdir=outdir, file_name=file_name)
+            
+
+    def _make_tpf_hdulist(self):
+        """
+        Make HDUList for moving TPF, using similar format to SPOC.
+
+        Parameters
+        ----------
+
+        Returns
+        -------
+        hdulist : astropy.io.fits.HDUList
+            HDUList for moving TPF.
         """
         if (
             not hasattr(self, "all_flux")
@@ -1238,25 +1279,8 @@ class MovingTPF:
                 "Must run `get_data()`, `reshape_data()`, `create_pixel_quality()`, `background_correction()` and `create_aperture()` before saving TPF."
             )
 
-        # Create default file name
-        if file_name is None:
-            file_name = "tess-{0}-s{1:04}-{2}-{3}-shape{4}x{5}-moving_tp.fits".format(
-                str(self.target).replace(" ", ""),
-                self.sector,
-                self.camera,
-                self.ccd,
-                *self.shape,
-            )
-
-        if not file_name.endswith(".fits"):
-            raise ValueError(
-                "`file_name` must be a .fits file. Not `{0}`".format(file_name)
-            )
-        if len(save_loc) > 0 and not save_loc.endswith("/"):
-            save_loc += "/"
-
         # Compute WCS header
-        wcs_header = self._make_wcs_header()
+        wcs_header = make_wcs_header(self.shape)
 
         # Offset between expected target position and center of TPF
         pos_corr1 = self.ephemeris[:, 1] - self.corner[:, 1] - 0.5 * (self.shape[1] - 1)
@@ -1284,8 +1308,9 @@ class MovingTPF:
                 disp="E14.7",
                 array=time_corr,
             ),
+            # CADENCENO, as defined by tesscube.
             fits.Column(name="CADENCENO", format="I", array=self.cadence_number),
-            # This is included to give the files the same structure as the SPOC files
+            # RAW_CNTS is included to give the files the same structure as the SPOC files
             fits.Column(
                 name="RAW_CNTS",
                 format=tform,
@@ -1420,8 +1445,8 @@ class MovingTPF:
         table_hdu_extra = fits.BinTableHDU.from_columns(cols)
         table_hdu_extra.header["EXTNAME"] = "EXTRAS"
 
-        # Create hdulist and save to file
-        self.hdulist = fits.HDUList(
+        # Return hdulist
+        return fits.HDUList(
             [
                 self.cube.output_primary_ext,
                 table_hdu_spoc,
@@ -1429,71 +1454,84 @@ class MovingTPF:
                 table_hdu_extra,
             ]
         )
-        self.hdulist.writeto(save_loc + file_name, overwrite=True)
-        logger.info("Saved TPF to {0}".format(save_loc + file_name))
 
-    def _make_wcs_header(self):
+    def _make_lc_hdulist(self):
         """
-        Make a dummy WCS header for the TPF file. In reality, there is a WCS per timestamp
-        that needs to be accounted for.
+        Make HDUList for lightcurve.
 
         Parameters
         ----------
 
         Returns
         -------
-        wcs_header : astropy.io.fits.header.Header
-            Dummy WCS header to use in the TPF.
+        hdulist : astropy.io.fits.HDUList
+            HDUList for lightcurve.
         """
-        if not hasattr(self, "shape"):
-            raise AttributeError("Must run `get_data()` before making WCS header.")
-
-        # TPF corner (row,column)
-        corner = (1, 1)
-
-        # Make a dummy WCS where each pixel in TPF is assigned coordinates 1,1
-        row, column = np.meshgrid(
-            np.arange(corner[0], corner[0] + self.shape[0]),
-            np.arange(corner[1], corner[1] + self.shape[1]),
-        )
-        coord = SkyCoord(np.full([len(row.ravel()), 2], (1, 1)), unit="deg")
-        wcs = fit_wcs_from_points((column.ravel(), row.ravel()), coord)
-
-        # Turn WCS into header
-        wcs_header = wcs.to_header(relax=True)
-
-        # Add the physical WCS keywords
-        wcs_header.set("CRVAL1P", corner[1], "value at reference CCD column")
-        wcs_header.set("CRVAL2P", corner[0], "value at reference CCD row")
-
-        wcs_header.set(
-            "WCSNAMEP", "PHYSICAL", "name of world coordinate system alternate P"
-        )
-        wcs_header.set("WCSAXESP", 2, "number of WCS physical axes")
-
-        wcs_header.set("CTYPE1P", "RAWX", "physical WCS axis 1 type CCD col")
-        wcs_header.set("CUNIT1P", "PIXEL", "physical WCS axis 1 unit")
-        wcs_header.set("CRPIX1P", 1, "reference CCD column")
-        wcs_header.set("CDELT1P", 1.0, "physical WCS axis 1 step")
-
-        wcs_header.set("CTYPE2P", "RAWY", "physical WCS axis 2 type CCD col")
-        wcs_header.set("CUNIT2P", "PIXEL", "physical WCS axis 2 unit")
-        wcs_header.set("CRPIX2P", 1, "reference CCD row")
-        wcs_header.set("CDELT2P", 1.0, "physical WCS axis 2 step")
-
-        return wcs_header
-
-    def _save_table(self):
+    def _save_hdulist(
+        self, 
+        file_type : str,
+        overwrite: bool = True,
+        outdir: str = "",
+        file_name: Optional[str] = None,
+    ):
         """
-        Save all data in table.
+        Write HDUList to a FITS file.
 
         Parameters
         ----------
+        file_type : str
+            Type of file to be saved. One of ['tpf', 'lc'].
+        overwrite : bool
+            Whether to overwrite an exisitng file of the same name.
+        outdir : str
+            Directory into which the file will be saved.
+        file_name : str
+            Filename that will be used. Format must be `.fits`.
+            If no filename is given, a default one will be generated.
 
         Returns
         -------
         """
-        raise NotImplementedError("_save_table() is not yet implemented.")
+
+        # Attribute checks
+        if file_type == "tpf" and not hasattr(self, "tpf_hdulist"):
+            raise AttributeError("Must run `_make_tpf_hdulist()` before saving file.")
+        elif file_type == "lc" and not hasattr(self, "lc_hdulist"):
+            raise AttributeError("Must run `_make_lc_hdulist()` before saving file.")
+
+        # Create default file name
+        if file_name is None:
+            file_name = "tess-{0}-s{1:04}-{2}-{3}-shape{4}x{5}".format(
+                    str(self.target).replace(" ", ""),
+                    self.sector,
+                    self.camera,
+                    self.ccd,
+                    *self.shape,
+                )
+            if file_type == "tpf":
+                file_name += "-moving_tp.fits"
+            elif file_type == "lc":
+                file_name += "_lc.fits"
+            else:
+                raise ValueError(f"`file_type` must be one of: ['tpf', 'lc']. Not '{file_type}'")
+
+        # Check format of file_name and outdir
+        if not file_name.endswith(".fits"):
+            raise ValueError(
+                "`file_name` must be a .fits file. Not `{0}`".format(file_name)
+            )
+        if len(outdir) > 0 and not outdir.endswith("/"):
+            outdir += "/"
+
+        # Write hdulist to file
+        if file_type == "tpf":
+            hdulist = self.tpf_hdulist
+        elif file_type == "lc":
+            hdulist = self.lc_hdulist
+        else:
+            raise ValueError(f"`file_type` must be one of: ['tpf', 'lc']. Not '{file_type}'")
+        hdulist.writeto(outdir + file_name, overwrite=overwrite)
+        logger.info("Created file: {0}".format(outdir + file_name))        
 
     def animate_tpf(self):
         """

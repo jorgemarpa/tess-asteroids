@@ -6,7 +6,8 @@ import warnings
 from typing import Optional
 
 import numpy as np
-
+from astropy.coordinates import SkyCoord
+from astropy.wcs.utils import fit_wcs_from_points
 
 def inside_ellipse(x, y, cxx, cyy, cxy, x0=0, y0=0, R=1):
     """
@@ -155,3 +156,54 @@ def compute_moments(
         return X, Y, XERR, YERR
     else:
         return X, Y
+
+def make_wcs_header(shape: Tuple[int, int]):
+    """
+    Make a dummy WCS header for a moving TPF. In reality, there is a WCS per 
+    timestamp that needs to be accounted for.
+
+    Parameters
+    ----------
+    shape : Tuple(int,int)
+        Shape of the TPF. Defined as (nrows,ncols) in pixels.
+
+    Returns
+    -------
+    wcs_header : astropy.io.fits.header.Header
+        Dummy WCS header to use in the TPF.
+    """
+
+    # TPF corner (row,column)
+    corner = (1, 1)
+
+    # Make a dummy WCS where each pixel in TPF is assigned coordinates 1,1
+    row, column = np.meshgrid(
+        np.arange(corner[0], corner[0] + shape[0]),
+        np.arange(corner[1], corner[1] + shape[1]),
+    )
+    coord = SkyCoord(np.full([len(row.ravel()), 2], (1, 1)), unit="deg")
+    wcs = fit_wcs_from_points((column.ravel(), row.ravel()), coord)
+
+    # Turn WCS into header
+    wcs_header = wcs.to_header(relax=True)
+
+    # Add the physical WCS keywords
+    wcs_header.set("CRVAL1P", corner[1], "value at reference CCD column")
+    wcs_header.set("CRVAL2P", corner[0], "value at reference CCD row")
+
+    wcs_header.set(
+        "WCSNAMEP", "PHYSICAL", "name of world coordinate system alternate P"
+    )
+    wcs_header.set("WCSAXESP", 2, "number of WCS physical axes")
+
+    wcs_header.set("CTYPE1P", "RAWX", "physical WCS axis 1 type CCD col")
+    wcs_header.set("CUNIT1P", "PIXEL", "physical WCS axis 1 unit")
+    wcs_header.set("CRPIX1P", 1, "reference CCD column")
+    wcs_header.set("CDELT1P", 1.0, "physical WCS axis 1 step")
+
+    wcs_header.set("CTYPE2P", "RAWY", "physical WCS axis 2 type CCD col")
+    wcs_header.set("CUNIT2P", "PIXEL", "physical WCS axis 2 unit")
+    wcs_header.set("CRPIX2P", 1, "reference CCD row")
+    wcs_header.set("CDELT2P", 1.0, "physical WCS axis 2 step")
+
+    return wcs_header
