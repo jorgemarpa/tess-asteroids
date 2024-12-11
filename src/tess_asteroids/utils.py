@@ -334,7 +334,7 @@ def animate_cube(
         The time delay (in milliseconds) before the animation restarts once it finishes.
 
     cnorm : optional, default=False
-        Weather to use asinh color normalization (from astropy.visualization.simple_norm).
+        Whether to use asinh color normalization (from astropy.visualization.simple_norm).
         This can be useful for cases when the moving object is too faint compared to other
         features in the background.
 
