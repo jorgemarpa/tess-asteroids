@@ -199,7 +199,7 @@ def plot_img_aperture(
         Whether to display a color bar alongside the plot.
 
     ax : matplotlib.axes.Axes, default=None
-        The axes object where the plot will be drawn. If not provided, the current axes will be used.
+        The axes object where the plot will be drawn. If not provided, a new axes will be created.
 
     corner : list of two ints, default=[0, 0]
         The (row, column) coordinates of the lower left corner of the image.
