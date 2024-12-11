@@ -1546,21 +1546,20 @@ class MovingTPF:
         ----------
         show_aperture : bool
             If True, the aperture used for photometry is displayed in the animation. Default is True.
-
         show_ephemeris : bool
             If True, the predicted position of the target is included in the animation. Default is True.
-
         file_name : str or None
             If provided, the animation will be saved to the specified file. The format of the file has to be GIF.
             If None, the animation will not be saved. Default is None.
-
         kwargs:
             Keyword arguments passed to `utils.animate_cube` such as [`interval`, `repeat_delay`, `cnorm`].
 
         Returns:
         --------
+        Animation in HTML format. If in notebook environment, this allows animation to be displayed.
         """
 
+        # Attribute checks
         if (
             not hasattr(self, "all_flux")
             or not hasattr(self, "flux")
@@ -1570,6 +1569,8 @@ class MovingTPF:
             raise AttributeError(
                 "Must run `get_data()`, `reshape_data()`, `background_correction()` and `create_aperture()` before animating."
             )
+
+        # Create animation
         ani = animate_cube(
             self.corr_flux,
             aperture_mask=self.aperture_mask if show_aperture else None,
@@ -1580,15 +1581,24 @@ class MovingTPF:
             suptitle=f"Asteroid {self.target} in Sector {self.sector} Camera {self.camera} CCD {self.ccd}",
             **kwargs,
         )
-        if file_name is not None and isinstance(file_name, str):
+
+        # Save animation
+        if file_name is not None:
+            # Check format of file_name
+            if not file_name.endswith(".gif"):
+                raise ValueError(
+                "`file_name` must be a .gif file. Not `{0}`".format(file_name)
+                )
             ani.save(file_name, writer="pillow")
+        
+        # Return animation in HTML format.
+        # If in notebook environment, this allows animation to be displayed.
         try:
             from IPython.display import HTML
-
             return HTML(ani.to_jshtml())
         except ModuleNotFoundError:
-            # To make installing the package easier, ipython is not a dependency,
-            # because we can assume it is installed when notebook-specific features are called
+            # To make installing `tess-asteroids` easier, ipython is not a dependency
+            # because we can assume it is installed when notebook-specific features are called.
             logger.error(
                 "ipython needs to be installed for animate() to work (e.g., `pip install ipython`)"
             )

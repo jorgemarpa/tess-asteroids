@@ -242,32 +242,23 @@ def plot_img_aperture(
     -----------
     img : 2D array
         The image data to be plotted, typically a 2D array or matrix representing pixel values.
-
     aperture_mask : 2D array, default=None
         A binary mask (same shape as `img`) indicating the aperture region to be overlaid on the image.
-
     cbar : bool, default=True
         Whether to display a color bar alongside the plot.
-
     ax : matplotlib.axes.Axes, default=None
         The axes object where the plot will be drawn. If not provided, a new axes will be created.
-
     corner : list of two ints, default=[0, 0]
         The (row, column) coordinates of the lower left corner of the image.
-
     marker : tuple of float, default=None
         The (row, column) coordinates at which to plot a marker in the figure.
         This can be used to plot the position of the moving object.
-
     title : str, default=""
         Title of the plot. If None, no title will be shown.
-
     vmin : float, optional, default=None
         Minimum value for color scale. If None, the minimum value in the image is used.
-
     vmax : float, optional, default=None
         Maximum value for color scale. If None, the maximum value in the image is used.
-
     cnorm : optional, default=None
         Color matplotlib normalization object (e.g. astropy.visualization.simple_norm). If provided,
         then `vmax` and `vmin` are not used.
@@ -277,10 +268,12 @@ def plot_img_aperture(
     ax : matplotlib.axes.Axes
         The axes object containing the plot.
     """
-    if ax is None:
-        fig, ax = plt.subplots()
 
-    # define the x and y axis tick labels when using plt.imshow() using `corner`
+    # Initialise ax
+    if ax is None:
+        _, ax = plt.subplots()
+
+    # Define the x and y axis tick labels when using plt.imshow() using `corner`
     # and the image shape
     extent = (
         corner[1] - 0.5,
@@ -289,9 +282,11 @@ def plot_img_aperture(
         corner[0] + img.shape[0] - 0.5,
     )
 
+    # Define vmin and vmax
     if vmin is None and vmax is None and cnorm is None:
         vmin, vmax = np.nanpercentile(img.ravel(), [3, 97])
 
+    # Plot image, colorbar and marker
     im = ax.imshow(
         img,
         cmap="viridis",
@@ -310,6 +305,7 @@ def plot_img_aperture(
     ax.set_aspect("equal", "box")
     ax.set_title(title)
 
+    # Plot aperture mask
     if aperture_mask is not None:
         row, col = np.mgrid[
             corner[0] : corner[0] + img.shape[0], corner[1] : corner[1] + img.shape[1]
@@ -358,37 +354,28 @@ def animate_cube(
     -----------
     cube : 3D array
         A 3D array representing the image cube (e.g., a stack of 2D images over time).
-
     aperture_mask : 2D or 3D array, optional
         A binary mask (same shape or a 2D slice of `cube`) to overlay on each frame of the animation.
         If a 2D mask is passed, it will be repeated for all times.
-
     corner : list of two ints or 2D array, default=[0, 0]
         The (row, column) coordinates of the lower left corner of the image.
-
     ephemeris : 2D array, optional, default=None
         A 2D array of object positions (row, column) to be displayed on the plot.
         For proper display of object position, if corner is [0, 0] then track needs to be relative to corner.
         If corner is provided, track needs to be absolute.
         If None, no tracking information is shown.
-
     cadenceno : int, optional, default=None
         The cadence number of the frames, used for information display.
-
     time : array-like, optional, default=None
         Array of time values corresponding to the slices in the cube.
-
     interval : int, default=200
         The time interval (in milliseconds) between each frame of the animation.
-
     repeat_delay : int, default=1000
         The time delay (in milliseconds) before the animation restarts once it finishes.
-
     cnorm : optional, default=False
         Whether to use asinh color normalization (from astropy.visualization.simple_norm).
         This can be useful for cases when the moving object is too faint compared to other
         features in the background.
-
     suptitle : str, optional, default=""
         A string to be used as the super title of the animation.
         It can be used to provide additional context or information about the animated data,
@@ -400,11 +387,13 @@ def animate_cube(
         The animation object that can be displayed or saved.
     """
 
+    # Initialise figure and set title
     fig, ax = plt.subplots()
     fig.suptitle(suptitle)
 
     if aperture_mask is None:
         aperture_mask = np.repeat([None], len(cube), axis=0)
+    # If aperture_mask is 2D, repeat for all times.
     elif aperture_mask.shape == cube.shape[1:]:
         aperture_mask = np.repeat([aperture_mask], len(cube), axis=0)
 
@@ -414,6 +403,7 @@ def animate_cube(
         cadenceno = np.repeat([None], len(cube), axis=0)
     if time is None:
         time = np.repeat([None], len(cube), axis=0)
+    
     if cnorm:
         norm = simple_norm(cube.ravel(), "asinh", percent=98)
     else:
@@ -422,6 +412,7 @@ def animate_cube(
     if len(corner) == 2:
         corner = np.repeat([corner], len(cube), axis=0)
 
+    # Plot first image in cube.
     nt = 0
     ax = plot_img_aperture(
         cube[nt],
@@ -436,6 +427,7 @@ def animate_cube(
         cnorm=norm if cnorm else None,
     )
 
+    # Define function for animation
     def animate(nt):
         ax.clear()
         _ = plot_img_aperture(
@@ -453,7 +445,7 @@ def animate_cube(
 
         return ()
 
-    # prevent second figure from showing up in interactive mode
+    # Prevent second figure from showing up in interactive mode
     plt.close(ax.figure)  # type: ignore
 
     # Create the animation
