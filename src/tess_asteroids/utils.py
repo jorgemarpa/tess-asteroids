@@ -354,7 +354,7 @@ def animate_cube(
 
     if aperture_mask is None:
         aperture_mask = np.repeat([None], len(cube), axis=0)
-    if aperture_mask.shape == cube.shape[1:]:
+    elif aperture_mask.shape == cube.shape[1:]:
         aperture_mask = np.repeat([aperture_mask], len(cube), axis=0)
 
     if ephemeris is None:
