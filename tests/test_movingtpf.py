@@ -13,18 +13,18 @@ def test_from_name():
     """
     Check that static method from_name() gives expected ephemeris for asteroids 1998 YT6 and 1994 EL3.
     """
-    target, track = MovingTPF.from_name("1998 YT6", sector=6)
+    target = MovingTPF.from_name("1998 YT6", sector=6)
 
     assert target.sector == 6
     assert target.camera == 1
     assert target.ccd == 1
 
     # Bounds taken from tesswcs pointings.csv file for sector 6.
-    assert min(track["time"]) >= 2458463.5 - 2457000
-    assert max(track["time"]) <= 2458490.5 - 2457000
+    assert min(target.ephem["time"]) >= 2458463.5 - 2457000
+    assert max(target.ephem["time"]) <= 2458490.5 - 2457000
 
     # Asteroid 1994 EL3 is observed by camera 1, CCDs 1 and 2 during sector 6.
-    target, track = MovingTPF.from_name("1994 EL3", sector=6, camera=1, ccd=1)
+    target = MovingTPF.from_name("1994 EL3", sector=6, camera=1, ccd=1)
     assert target.sector == 6
     assert target.camera == 1
     assert target.ccd == 1
@@ -70,6 +70,7 @@ def test_data_logic(caplog):
         and len(target.corner) == len(target.time)
         and len(target.ephemeris) == len(target.time)
         and len(target.target_mask) == len(target.time)
+        and len(target.coords) == len(target.time)
     )
 
     # Check the ephemeris and corner have expected shape
@@ -100,7 +101,7 @@ def test_create_threshold_aperture():
     is a fixed numer (7).
     """
     # Make TPF for asteroid 1998 YT6
-    target, _ = MovingTPF.from_name("1998 YT6", sector=6)
+    target = MovingTPF.from_name("1998 YT6", sector=6)
     target.get_data(shape=(11, 11))
     target.reshape_data()
     target.background_correction(method="rolling")
@@ -123,7 +124,7 @@ def test_create_prf_aperture(caplog):
     """
 
     # Make TPF for asteroid 1998 YT6
-    target, _ = MovingTPF.from_name("1998 YT6", sector=6)
+    target = MovingTPF.from_name("1998 YT6", sector=6)
     target.get_data(shape=(11, 11))
 
     # Make aperture from PRF model
@@ -163,7 +164,7 @@ def test_create_ellipse_aperture():
     We test for array integrity and expected returned values.
     """
     # Make TPF for asteroid 1998 YT6
-    target, _ = MovingTPF.from_name("1998 YT6", sector=6)
+    target = MovingTPF.from_name("1998 YT6", sector=6)
     target.get_data(shape=(11, 11))
     target.reshape_data()
     target.background_correction(method="rolling")
@@ -254,8 +255,8 @@ def test_make_tpf():
     """
 
     # Make TPF for asteroid 1998 YT6
-    target, _ = MovingTPF.from_name("1998 YT6", sector=6)
-    target.make_tpf(save_loc="tests")
+    target = MovingTPF.from_name("1998 YT6", sector=6)
+    target.make_tpf(save=True, outdir="tests")
 
     # Check the file exists
     assert os.path.exists("tests/tess-1998YT6-s0006-1-1-shape11x11-moving_tp.fits")
@@ -266,6 +267,8 @@ def test_make_tpf():
         assert "PIXEL_QUALITY" in hdul[3].columns.names
         assert "CORNER1" in hdul[3].columns.names
         assert "CORNER2" in hdul[3].columns.names
+        assert "RA" in hdul[3].columns.names
+        assert "DEC" in hdul[3].columns.names
         assert len(hdul[3].data["APERTURE"]) == len(target.time)
         assert np.array_equal(target.corr_flux, hdul[1].data["FLUX"])
 
@@ -290,20 +293,17 @@ def test_to_lightcurve():
     """
 
     # Make TPF for asteroid 1998 YT6.
-    target, _ = MovingTPF.from_name("1998 YT6", sector=6)
-    target.get_data()
-    target.reshape_data()
-    target.create_pixel_quality()
-    target.background_correction()
+    target = MovingTPF.from_name("1998 YT6", sector=6)
+    target.make_tpf()
 
     # Use aperture photometry to extract lightcurve from TPF.
-    target.create_aperture()
     target.to_lightcurve(method="aperture")
 
     # Check the lightcurve has the same length as target.time
     assert len(target.lc["aperture"]["time"]) == len(target.time)
     assert len(target.lc["aperture"]["flux"]) == len(target.time)
     assert len(target.lc["aperture"]["quality"]) == len(target.time)
+    assert len(target.lc["aperture"]["flux_fraction"]) == len(target.time)
 
     # Check the average centroid is within 1/2 a pixel of the center of the TPF.
     assert (
@@ -319,3 +319,7 @@ def test_to_lightcurve():
     for t in range(len(target.time)):
         if target.pixel_quality[t][target.aperture_mask[t]].any() != 0:
             assert target.lc["aperture"]["quality"][t] > 0
+
+    # Check flux fraction has expected values
+    assert (target.lc["aperture"]["flux_fraction"] < 1).all()
+    assert np.isfinite(target.lc["aperture"]["flux_fraction"]).all()
