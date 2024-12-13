@@ -1717,18 +1717,18 @@ class MovingTPF:
             # Sum of flux inside aperture and err
             fits.Column(
                 name="FLUX",
-                format="E",
+                format="D",
                 unit="e-/s",
-                disp="E14.7",
+                disp="D14.7",
                 array=self.lc["aperture"]["flux"]
                 if "aperture" in self.lc
                 else np.full(len(self.time), np.nan),
             ),
             fits.Column(
                 name="FLUX_ERR",
-                format="E",
+                format="D",
                 unit="e-/s",
-                disp="E14.7",
+                disp="D14.7",
                 array=self.lc["aperture"]["flux_err"]
                 if "aperture" in self.lc
                 else np.full(len(self.time), np.nan),
@@ -1736,18 +1736,18 @@ class MovingTPF:
             # Sum of BG flux inside aperture and err
             fits.Column(
                 name="FLUX_BKG",
-                format="E",
+                format="D",
                 unit="e-/s",
-                disp="E14.7",
+                disp="D14.7",
                 array=self.lc["aperture"]["bg"]
                 if "aperture" in self.lc
                 else np.full(len(self.time), np.nan),
             ),
             fits.Column(
                 name="FLUX_BKG_ERR",
-                format="E",
+                format="D",
                 unit="e-/s",
-                disp="E14.7",
+                disp="D14.7",
                 array=self.lc["aperture"]["bg_err"]
                 if "aperture" in self.lc
                 else np.full(len(self.time), np.nan),
@@ -1814,18 +1814,18 @@ class MovingTPF:
             # Flux and err
             fits.Column(
                 name="PSF_FLUX",
-                format="E",
+                format="D",
                 unit="e-/s",
-                disp="E14.7",
+                disp="D14.7",
                 array=self.lc["psf"]["flux"]
                 if "psf" in self.lc
                 else np.full(len(self.time), np.nan),
             ),
             fits.Column(
                 name="PSF_FLUX_ERR",
-                format="E",
+                format="D",
                 unit="e-/s",
-                disp="E14.7",
+                disp="D14.7",
                 array=self.lc["psf"]["flux_err"]
                 if "psf" in self.lc
                 else np.full(len(self.time), np.nan),

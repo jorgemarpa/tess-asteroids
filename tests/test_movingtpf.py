@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 from astropy.io import fits
 
-from tess_asteroids import MovingTPF
+from tess_asteroids import MovingTPF, __version__
 
 
 def test_from_name():
@@ -263,6 +263,12 @@ def test_make_tpf():
 
     # Open the file with astropy and check attributes
     with fits.open("tests/tess-1998YT6-s0006-1-1-shape11x11-moving_tp.fits") as hdul:
+        assert "BAD_BITS" not in hdul[0].header.keys()
+        assert hdul[0].header["PROCVER"].strip() == __version__
+        assert hdul[0].header["AP_TYPE"].strip() == "prf"
+        assert hdul[0].header["BG_CORR"].strip() == "rolling"
+        assert hdul[0].header["VMAG"] > 0
+        assert "SPOCDATE" in hdul[0].header.keys()
         assert "APERTURE" in hdul[3].columns.names
         assert "PIXEL_QUALITY" in hdul[3].columns.names
         assert "CORNER1" in hdul[3].columns.names
@@ -323,3 +329,46 @@ def test_to_lightcurve():
     # Check flux fraction has expected values
     assert (target.lc["aperture"]["flux_fraction"] < 1).all()
     assert np.isfinite(target.lc["aperture"]["flux_fraction"]).all()
+
+
+def test_make_lc():
+    """
+    Check that make_lc() correctly saves the LCF, that the file has the expected attributes
+    and that it can be opened with lightkurve.
+    """
+
+    # Make TPF for asteroid 1998 YT6
+    target = MovingTPF.from_name("1998 YT6", sector=6)
+    target.make_tpf()
+    target.make_lc(save=True, outdir="tests")
+
+    # Check the file exists
+    assert os.path.exists("tests/tess-1998YT6-s0006-1-1-shape11x11_lc.fits")
+
+    # Open the file with astropy and check some attributes
+    with fits.open("tests/tess-1998YT6-s0006-1-1-shape11x11_lc.fits") as hdul:
+        assert "BAD_BITS" in hdul[0].header.keys()
+        assert hdul[0].header["PROCVER"].strip() == __version__
+        assert hdul[0].header["AP_TYPE"].strip() == "prf"
+        assert hdul[0].header["BG_CORR"].strip() == "rolling"
+        assert hdul[0].header["VMAG"] > 0
+        assert "SPOCDATE" in hdul[0].header.keys()
+        assert "TIME" in hdul[1].columns.names
+        assert "FLUX" in hdul[1].columns.names
+        assert np.isnan(hdul[1].data["PSF_FLUX"]).all()
+        assert "MOM_CENTR1" in hdul[1].columns.names
+        assert "RA" in hdul[1].columns.names
+        assert "EPHEM1" in hdul[1].columns.names
+
+    # Check the file can be opened with lightkurve
+    lc = lk.read(
+        "tests/tess-1998YT6-s0006-1-1-shape11x11_lc.fits",
+        quality_bitmask="none",
+        flux_column="FLUX",
+    )
+    assert len(lc.time) == len(target.time)
+    assert np.array_equal(target.lc["aperture"]["flux"], lc.flux.value)
+    assert np.array_equal(target.lc["aperture"]["flux_err"], lc.flux_err.value)
+
+    # Delete the file
+    os.remove("tests/tess-1998YT6-s0006-1-1-shape11x11_lc.fits")
