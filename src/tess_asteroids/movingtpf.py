@@ -317,6 +317,19 @@ class MovingTPF:
             )
         self.target_mask = np.asarray(target_mask)
 
+        # Convert (row,column) ephemeris to (ra,dec) using WCS per timestamp. 
+        # Note: if MovingTPF was initialised from_name, then tess-ephem
+        # internally converted (ra,dec) to (row,column) using the average WCS
+        # from the observing sector. `self.coords` does not recover these original values.
+        wcss = []
+        for i in range(len(self.cube.wcss)):
+            wcss.append(self.cube.wcss[i])
+        wcss = np.asarray(wcss)[nan_mask][bound_mask]
+        # Compute (ra,dec): 
+        # - pixel_to_world() assumes zero-indexing so subtract one from (row,col).
+        # - for a few timestamps, WCS is None => use average WCS in these cases. 
+        self.coords = np.asarray([(wcss[i] if wcss[i] is not None else self.cube.wcs).pixel_to_world(self.ephemeris[i, 1]-1, self.ephemeris[i, 0]-1) for i in range(len(wcss))])
+
     def reshape_data(self):
         """
         Reshape flux data into cube with shape (len(self.time), self.shape).
@@ -373,6 +386,8 @@ class MovingTPF:
         # Apply background correction
         self.corr_flux = self.flux - self.bg
         self.corr_flux_err = np.sqrt(self.flux_err**2 + self.bg_err**2)
+
+        self.bg_method = method
 
     def _bg_rolling_median(self, nframes: int = 25, **kwargs):
         """
@@ -450,6 +465,8 @@ class MovingTPF:
             raise ValueError(
                 f"Method must be one of: ['threshold', 'prf', 'ellipse']. Not '{method}'"
             )
+
+        self.ap_method = method
 
     def _create_threshold_aperture(
         self,
@@ -572,7 +589,6 @@ class MovingTPF:
                 logger.warning(
                     f"When computing the PRF aperture, none of the pixels in the PRF model were greater than the threshold ({threshold})."
                 )
-
         else:
             raise ValueError(
                 f"Threshold must be either 'optimal' or a float between 0 and 1. Not '{threshold}'"
@@ -610,7 +626,7 @@ class MovingTPF:
 
         # If no time_step is given, compute a value based upon the average target speed.
         # Note: some asteroids significantly change speed during the sector. Our tests
-        # have shown that defining time_step for the average speed does not signficiantly
+        # have shown that defining time_step for the average speed does not significantly
         # affect their PRF models.
         if time_step is None:
             # Average cadence, in minutes
@@ -986,7 +1002,7 @@ class MovingTPF:
 
         # Get lightcurve and quality mask via aperture photometry
         if method == "aperture":
-            flux, flux_err, bg, bg_err, col_cen, row_cen, col_cen_err, row_cen_err = (
+            flux, flux_err, bg, bg_err, col_cen, row_cen, col_cen_err, row_cen_err, flux_fraction = (
                 self._aperture_photometry(**kwargs)
             )
             quality = self._create_lc_quality()
@@ -1001,6 +1017,7 @@ class MovingTPF:
                 "row_cen": row_cen,
                 "row_cen_err": row_cen_err,
                 "quality": quality,
+                "flux_fraction": flux_fraction,
             }
 
         elif method == "psf":
@@ -1051,6 +1068,7 @@ class MovingTPF:
         ap_flux_err = []
         ap_bg = []
         ap_bg_err = []
+        flux_fraction = []
 
         for t in range(len(self.time)):
             # Combine aperture mask with masking of bad bits.
@@ -1078,6 +1096,15 @@ class MovingTPF:
             if np.isnan(self.bg_err[t][mask[-1]]).all():
                 ap_bg_err[-1] = np.nan
 
+            # Compute fraction of PRF model flux inside aperture, excluding bad_bits. 
+            # If aperture method is not `prf`, this will be nan.
+            if self.ap_method == "prf":
+                flux_fraction.append(np.nansum(self.prf_model[t][mask[-1]], axis=0))
+                if np.isnan(self.prf_model[t][mask[-1]]).all():
+                    flux_fraction[-1] = np.nan
+            else:
+                flux_fraction.append(np.nan)
+
         # Compute flux-weighted centroid inside aperture
         # These values are zero-indexed i.e. lower left pixel in TPF is (0,0).
         col_cen, row_cen, col_cen_err, row_cen_err = compute_moments(
@@ -1102,6 +1129,7 @@ class MovingTPF:
             row_cen,
             col_cen_err,
             row_cen_err,
+            np.asarray(flux_fraction),
         )
 
     def _create_lc_quality(self, method: str = "aperture"):
@@ -1246,7 +1274,7 @@ class MovingTPF:
         save : bool
             If True, write the HDUList to a file.
         overwrite : bool
-            If `save`, this determines whether to overwrite an exisitng file with the
+            If `save`, this determines whether to overwrite an existing file with the
             same name.
         outdir : str
             If `save`, this is the directory into which the file will be saved.
@@ -1329,7 +1357,7 @@ class MovingTPF:
                 disp="E14.7",
                 array=time_corr,
             ),
-            # CADENCENO, as defined by tesscube.
+            # Cadence number, as defined by tesscube.
             fits.Column(name="CADENCENO", format="I", array=self.cadence_number),
             # RAW_CNTS is included to give the files the same structure as the SPOC files
             fits.Column(
@@ -1429,6 +1457,21 @@ class MovingTPF:
 
         # Define extra FITS columns
         cols = [
+            # Predicted position of target in world coordinates.
+            fits.Column(
+                name="RA",
+                format="E",
+                unit="deg",
+                disp="E14.7",
+                array=[coord.ra.value for coord in self.coords],
+            ),
+            fits.Column(
+                name="DEC",
+                format="E",
+                unit="deg",
+                disp="E14.7",
+                array=[coord.dec.value for coord in self.coords],
+            ),
             # Original FFI column of lower-left pixel in TPF.
             fits.Column(
                 name="CORNER1",
@@ -1459,7 +1502,7 @@ class MovingTPF:
                 format=str(self.corr_flux[0].size) + "J",
                 dim=dims,
                 array=self.aperture_mask.astype("int32") * 2,
-            ),
+            ), 
         ]
 
         # Create table HDU for extra columns
@@ -1489,6 +1532,218 @@ class MovingTPF:
             HDUList for lightcurve.
         """
 
+        # Attribute checks
+        if not hasattr(self, "lc") or len(self.lc) == 0:
+            raise AttributeError("Must run `to_lightcurve()` before saving LC.")
+
+        # Define columns for lightcurve
+        cols = [
+            fits.Column(
+                name="TIME",
+                format="D",
+                unit="BJD - 2457000, days",
+                disp="D14.7",
+                array=self.time,
+            ),
+            # Cadence number, as defined by tesscube.
+            fits.Column(
+                name="CADENCENO",
+                format="I", 
+                array=self.cadence_number
+            ),
+            # SPOC quality flag
+            fits.Column(
+                name="QUALITY",
+                format="J",
+                disp="B16.16",
+                array=self.quality,
+            ),
+            # --------------
+            # Aperture photometry
+            # Sum of flux inside aperture and err
+            fits.Column(
+                name="FLUX",
+                format="E",
+                unit="e-/s",
+                disp="E14.7",
+                array= self.lc['aperture']['flux'] if "aperture" in self.lc else np.full(len(self.time), np.nan),
+            ),  
+            fits.Column(
+                name="FLUX_ERR",
+                format="E",
+                unit="e-/s",
+                disp="E14.7",
+                array=self.lc['aperture']['flux_err'] if "aperture" in self.lc else np.full(len(self.time), np.nan),
+            ),
+            # Sum of BG flux inside aperture and err
+            fits.Column(
+                name="FLUX_BKG",
+                format="E",
+                unit="e-/s",
+                disp="E14.7",
+                array=self.lc['aperture']['bg'] if "aperture" in self.lc else np.full(len(self.time), np.nan),
+            ),  
+            fits.Column(
+                name="FLUX_BKG_ERR",
+                format="E",
+                unit="e-/s",
+                disp="E14.7",
+                array=self.lc['aperture']['bg_err'] if "aperture" in self.lc else np.full(len(self.time), np.nan),
+            ),
+            # Column centroid and err
+            fits.Column(
+                name="MOM_CENTR1",
+                format="E",
+                unit="pixel",
+                disp="E14.7",
+                array=self.lc['aperture']['col_cen'] if "aperture" in self.lc else np.full(len(self.time), np.nan),
+            ),
+            fits.Column(
+                name="MOM_CENTR1_ERR",
+                format="E",
+                unit="pixel",
+                disp="E14.7",
+                array=self.lc['aperture']['col_cen_err'] if "aperture" in self.lc else np.full(len(self.time), np.nan),
+            ),
+            # Row centroid and err
+            fits.Column(
+                name="MOM_CENTR2",
+                format="E",
+                unit="pixel",
+                disp="E14.7",
+                array=self.lc['aperture']['row_cen'] if "aperture" in self.lc else np.full(len(self.time), np.nan),
+            ),
+            fits.Column(
+                name="MOM_CENTR2_ERR",
+                format="E",
+                unit="pixel",
+                disp="E14.7",
+                array=self.lc['aperture']['row_cen_err'] if "aperture" in self.lc else np.full(len(self.time), np.nan),
+            ),
+            # Quality from _create_lc_quality()
+            fits.Column(
+                name="AP_QUALITY",
+                format="I" if "aperture" in self.lc else "E",
+                disp="B16.16",
+                array=self.lc['aperture']['quality'] if "aperture" in self.lc else np.full(len(self.time), np.nan),
+            ),    
+            # Fraction of PRF model flux inside aperture. If `prf` 
+            # aperture was not used, this will be nan.
+            fits.Column(
+                name="FLUX_FRACTION",
+                format="E",
+                disp="E14.7",
+                array=self.lc['aperture']['flux_fraction'] if "aperture" in self.lc else np.full(len(self.time), np.nan),
+            ),            
+            # --------------
+            # PSF photometry
+            # Flux and err
+            fits.Column(
+                name="PSF_FLUX",
+                format="E",
+                unit="e-/s",
+                disp="E14.7",
+                array=self.lc['psf']['flux'] if "psf" in self.lc else np.full(len(self.time), np.nan),
+            ),  
+            fits.Column(
+                name="PSF_FLUX_ERR",
+                format="E",
+                unit="e-/s",
+                disp="E14.7",
+                array=self.lc['psf']['flux_err'] if "psf" in self.lc else np.full(len(self.time), np.nan),
+            ),
+            # Column centroid and err
+            fits.Column(
+                name="PSF_CENTR1",
+                format="E",
+                unit="pixel",
+                disp="E14.7",
+                array=self.lc['psf']['col_cen'] if "psf" in self.lc else np.full(len(self.time), np.nan),
+            ),
+            fits.Column(
+                name="PSF_CENTR1_ERR",
+                format="E",
+                unit="pixel",
+                disp="E14.7",
+                array=self.lc['psf']['col_cen_err'] if "psf" in self.lc else np.full(len(self.time), np.nan),
+            ),
+            # Row centroid and err
+            fits.Column(
+                name="PSF_CENTR2",
+                format="E",
+                unit="pixel",
+                disp="E14.7",
+                array=self.lc['psf']['row_cen'] if "psf" in self.lc else np.full(len(self.time), np.nan),
+            ),
+            fits.Column(
+                name="PSF_CENTR2_ERR",
+                format="E",
+                unit="pixel",
+                disp="E14.7",
+                array=self.lc['psf']['row_cen_err'] if "psf" in self.lc else np.full(len(self.time), np.nan),
+            ),
+            # Quality from _create_lc_quality()
+            fits.Column(
+                name="PSF_QUALITY",
+                format="I" if "psf" in self.lc else "E",
+                disp="B16.16",
+                array=self.lc['psf']['quality'] if "psf" in self.lc else np.full(len(self.time), np.nan),
+            ),
+            # --------------
+            # Original FFI column of lower-left pixel in TPF.
+            fits.Column(
+                name="CORNER1",
+                format="I",
+                unit="pixel",
+                array=self.corner[:, 1],
+            ),
+            # Original FFI row of lower-left pixel in TPF.
+            fits.Column(
+                name="CORNER2",
+                format="I",
+                unit="pixel",
+                array=self.corner[:, 0],
+            ),
+            # Predicted position of target in pixel coordinates. Corresponds 
+            # to position in full FFI.
+            fits.Column(
+                name="EPHEM1",
+                format="E",
+                unit="pixel",
+                disp="E14.7",
+                array=self.ephemeris[:, 1],
+            ),
+            fits.Column(
+                name="EPHEM2",
+                format="E",
+                unit="pixel",
+                disp="E14.7",
+                array=self.ephemeris[:, 0],
+            ),
+            # Predicted position of target in world coordinates.
+            fits.Column(
+                name="RA",
+                format="E",
+                unit="deg",
+                disp="E14.7",
+                array=[coord.ra.value for coord in self.coords],
+            ),
+            fits.Column(
+                name="DEC",
+                format="E",
+                unit="deg",
+                disp="E14.7",
+                array=[coord.dec.value for coord in self.coords],
+            ),
+        ]
+
+        # Create table HDU
+        table_hdu = fits.BinTableHDU.from_columns(cols)
+        table_hdu.header["EXTNAME"] = "LIGHTCURVE"
+
+        # Return hdulist
+        return fits.HDUList([self.cube.output_primary_ext,table_hdu])
+
     def _save_hdulist(
         self,
         file_type: str,
@@ -1504,7 +1759,7 @@ class MovingTPF:
         file_type : str
             Type of file to be saved. One of ['tpf', 'lc'].
         overwrite : bool
-            Whether to overwrite an exisitng file of the same name.
+            Whether to overwrite an existing file of the same name.
         outdir : str
             Directory into which the file will be saved.
         file_name : str
