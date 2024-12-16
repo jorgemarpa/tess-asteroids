@@ -4,18 +4,83 @@
 
 # tess-asteroids
 
-`tess-asteroids` allows you to make TPFs and LCs for any object that moves through the TESS field of view, for example solar system asteroids, comets or minor planets.
+`tess-asteroids` allows you to make Target Pixel Files (TPFs) and Light Curve Files (LCFs) for any object that moves through the TESS field of view, for example solar system asteroids, comets or minor planets.
 
-## Example use
+## Installation
+
+The easiest way to install `tess-asteroids` and all of its dependencies is to run the following command in a terminal window:
+
+```bash
+python -m pip install tess-asteroids
+
+```
+
+## Quickstart
+
+You can easily make and save a TPF and LCF for any object in the JPL Small-Body Database that has been observed by TESS. For example,
+
+```python
+from tess_asteroids import MovingTPF
+
+# Initialise MovingTPF for asteroid 1998 YT6 in TESS sector 6
+target = MovingTPF.from_name("1998 YT6", sector=6)
+
+# Make TPF and save to file (tess-1998YT6-s0006-1-1-shape11x11-moving_tp.fits)
+target.make_tpf(save=True)
+
+# Make LC and save to file (tess-1998YT6-s0006-1-1-shape11x11_lc.fits)
+target.make_lc(save=True)
+
+```
+
+![Example TPF](./docs/tess-1998YT6-s0006-1-1-shape11x11-moving_tp.gif) ![Example LC](./docs/tess-1998YT6-s0006-1-1-shape11x11_lc.pdf)
+
+## Tutorial
 
 ### Making a TPF
 
-You can create a TPF that tracks a moving object by providing an ephemeris, as follows:
+You can create a TPF that tracks a moving object from the JPL Small-Body Database by providing the object's name and TESS sector:
 
 ```python
+from tess_asteroids import MovingTPF
+
+# Initialise MovingTPF for asteroid 1998 YT6 in TESS sector 6
+target = MovingTPF.from_name("1998 YT6", sector=6)
+
+# Make TPF and save to file (tess-1998YT6-s0006-1-1-shape11x11-moving_tp.fits)
+target.make_tpf(save=True)
+
+```
+
+The `make_tpf()` function is retrieving and reshaping the FFI data, performing a background correction, computing an aperture and saving a SPOC-like TPF. There are a few optional parameters in the `make_tpf()` function. This includes:
+- `shape` controls the shape (nrows,ncols) of the TPF. Default : (11,11).
+- `bg_method` defines the method used to correct the background flux. Default: `rolling`.
+- `ap_method` defines the method used to create the aperture. Default: `prf`.
+- `save` determines whether or not the TPF will be saved as a FITS file. Default: `False`.
+- `outdir` is the directory where the TPF will be saved. Note, the directory is not automatically created.
+- `file_name` is the name the TPF will be saved with. If one is not given, a default name will be generated.
+
+These settings can be changed as follows:
+
+```python
+# Make TPF and save to file - change default settings
+target.make_tpf(shape=(20,10), ap_method="threshold", save=True, file_name="test.fits", outdir="movingTPF")
+```
+
+A TPF can only be created for a single combination of sector/camera/CCD at a time. If the object crosses multiple cameras or CCDs during a sector, then the camera/CCD must also be specified when initialising `MovingTPF()`:
+
+```python
+# Initialise MovingTPF for asteroid 2013 OS3 in TESS sector 20
+target = MovingTPF.from_name("2013 OS3", sector=20, camera=2, ccd=3)
+
+```
+
+You can also initialise `MovingTPF()` with your own ephemeris:
+
+```python
+from tess_asteroids import MovingTPF
 import numpy as np
 import pandas as pd
-from tess_asteroids import MovingTPF
 
 # Create an artificial ephemeris
 time = np.linspace(1790.5, 1795.5, 100)
@@ -28,71 +93,90 @@ ephem = pd.DataFrame({
             "row": np.linspace(1000, 900, len(time)),
         })
 
-# Initialise
+# Initialise MovingTPF
 target = MovingTPF("example", ephem)
 
-# Make TPF and save to file
+# Make TPF, but do not save to file
 target.make_tpf()
 
 ```
 
-The `make_tpf()` function is retrieving and reshaping the FFI data, performing a background correction, computing the aperture and saving a SPOC-like TPF as a fits file. A few things to note about the format of the ephemeris:
+A few things to note about the format of the ephemeris:
 - `time` must have units BTJD = BJD - 2457000.
 - `sector`, `camera`, `ccd` must each have one unique value.
 - `column`, `row` must be one-indexed, where the lower left pixel of the FFI has value (1,1).
 
-There are a few optional parameters in the `make_tpf()` function. This includes:
-- `shape` controls the shape of the TPF. Default : (11,11).
-- `file_name` is the name the TPF will be saved with. If one is not given, a default name will be generated. In the above example, the default name was `tess-example-s0018-3-2-shape11x11-moving_tp.fits`.
-- `save_loc` is the directory where the TPF will be saved. Note, the directory is not automatically created.
+### Animating the TPF
 
-These settings can be changed as follows:
+`animate_tpf()` is a built-in helper function to plot the TPF and aperture over time:
 
 ```python
-# Make TPF and save to file - changed default settings
-target.make_tpf(shape=(20,10), file_name="test.fits", save_loc="movingTPF")
+from tess_asteroids import MovingTPF
+
+# Initialise MovingTPF for asteroid 1998 YT6 in TESS sector 6
+target = MovingTPF.from_name("1998 YT6", sector=6)
+
+# Make TPF, but do not save to file
+target.make_tpf()
+
+# Animate TPF and save to file (tess-1998YT6-s0006-1-1-shape11x11-moving_tp.gif)
+target.animate_tpf(save=True)
+
 ```
 
-Instead of inputting an ephemeris, you can also create a TPF using the name of an object from the JPL/Horizons database and the TESS sector. This will use `tess-ephem` to compute the ephemeris for you.
+![Example TPF](./docs/tess-1998YT6-s0006-1-1-shape11x11-moving_tp.gif)
+
+### Making a LC
+
+You can extract a LC from the TPF, using aperture or PSF photometry, as follows:
 
 ```python
-# Initialise for asteroid 1998 YT6 from TESS sector 6.
-target, ephem = MovingTPF.from_name("1998 YT6", sector=6)
+from tess_asteroids import MovingTPF
+
+# Initialise MovingTPF for asteroid 1998 YT6 in TESS sector 6
+target = MovingTPF.from_name("1998 YT6", sector=6)
 
 # Make TPF and save to file (tess-1998YT6-s0006-1-1-shape11x11-moving_tp.fits)
-target.make_tpf()
+target.make_tpf(save=True)
+
+# Make LC and save to file (tess-1998YT6-s0006-1-1-shape11x11_lc.fits)
+target.make_lc(save=True)
+
 ```
 
-### Understanding the TPF
+The `make_lc()` function extracts the lightcurve, creates a quality mask and optionally saves the LCF. There are a few optional parameters in the `make_lc()` function. This includes:
+- `method` defines the method used to perform photometry. Default: `aperture`.
+- `save` determines whether or not the LCF will be saved as a FITS file. Default: `False`.
+- `outdir` is the directory where the LCF will be saved. Note, the directory is not automatically created.
+- `file_name` is the name the LCF will be saved with. If one is not given, a default name will be generated.
+
+### Understanding the TPF and LCF
 
 The TPF has four HDUs: 
 - "PRIMARY" - a primary HDU containing only a header.
 - "PIXELS" - a table with the same columns as a SPOC TPF. Note that "POS_CORR1" and "POS_CORR2" are defined as the offset between the center of the TPF and the expected position of the moving object given the input ephemeris.
 - "APERTURE" - an image HDU containing the average aperture across all times.
-- "EXTRAS" - a table HDU containing columns not found in a SPOC TPF. This includes "CORNER1"/"CORNER2" (original FFI column/row of the lower-left pixel in the TPF), "PIXEL_QUALITY" (3D pixel quality mask identifying e.g. strap columns, non-science pixels and saturation) and "APERTURE" (aperture as a function of time).
+- "EXTRAS" - a table HDU containing columns not found in a SPOC TPF. This includes "RA"/"DEC" (expected position of target in world coordinates), "CORNER1"/"CORNER2" (original FFI column/row of the lower-left pixel in the TPF), "PIXEL_QUALITY" (3D pixel quality mask identifying e.g. strap columns, non-science pixels and saturation) and "APERTURE" (aperture as a function of time).
 
-### Plotting the TPF with `lightkurve`
+The LCF has two HDUs: 
+- "PRIMARY" - a primary HDU containing only a header.
+- "LIGHTCURVE" - a table HDU with columns including "TIME" (timestamps in BTJD), "FLUX"/"FLUX_ERR" (flux and error from aperture photometry) and "PSF_FLUX"/"PSF_FLUX_ERR" (flux and error from PSF photometry).
 
-The TPFs that get created by `tess-asteroids` can be plotted using `lightkurve`, as follows:
+### Compatibility with `lightkurve`
+
+The TPFs and LCFs that get created by `tess-asteroids` can be opened with `lightkurve`, as follows:
 
 ```python
 import lightkurve as lk
 import matplotlib.pyplot as plt
 
-# Read in TPF without removing bad cadences
-tpf = lk.read("tess-1998YT6-s0006-1-1-shape11x11-moving_tp.fits", quality_bitmask="none")
+# Read in TPF and LCF, without removing bad cadences
+tpf = lk.TessTargetPixelFile("tess-1998YT6-s0006-1-1-shape11x11-moving_tp.fits", quality_bitmask="none")
+lc = lk.io.tess.read_tess_lightcurve("tess-1998YT6-s0006-1-1-shape11x11_lc.fits", quality_bitmask="none")
 
 # Plot TPF and aperture for a single frame
-aperture_mask = tpf.hdu[3].data["APERTURE"][200]
-fig, ax = plt.subplots(1, figsize=(7,7))
-tpf.plot(ax=ax, aperture_mask=aperture_mask, frame=200, title="Target: 1998 YT6")
-plt.show()
+tpf.plot(aperture_mask=tpf.hdu[3].data["APERTURE"][200], frame=200)
 
-# You can also animate the TPF and save as a gif.
-fig, ax = plt.subplots(1, figsize=(7,7))
-tpf._to_matplotlib_animation(ax=ax).save("tess-1998YT6-s0006-1-1-shape11x11-moving_tp.gif", writer="pillow")
+# Plot LC
+lc.plot()
 ```
-
-![Example asteroid TPF](./docs/tess-1998YT6-s0006-1-1-shape11x11-moving_tp.gif)
-
-
