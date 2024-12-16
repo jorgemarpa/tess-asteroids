@@ -36,7 +36,7 @@ target.make_lc(save=True)
 <p align="center">
   <img alt="Example TPF" src="./docs/tess-1998YT6-s0006-1-1-shape11x11-moving_tp.gif" width="45%">
 &nbsp; &nbsp; &nbsp; &nbsp;
-  <img alt="Example LC" src="./docs/tess-1998YT6-s0006-1-1-shape11x11_lc.png" width="50%">
+  <img alt="Example LC" src="./docs/tess-1998YT6-s0006-1-1-shape11x11_lc.png" width="52%">
 </p>
 
 ## Tutorial
@@ -128,8 +128,6 @@ target.animate_tpf(save=True)
 
 ```
 
-![Example TPF](./docs/tess-1998YT6-s0006-1-1-shape11x11-moving_tp.gif)
-
 ### Making a LC
 
 You can extract a LC from the TPF, using aperture or PSF photometry, as follows:
@@ -172,7 +170,6 @@ The TPFs and LCFs that get created by `tess-asteroids` can be opened with `light
 
 ```python
 import lightkurve as lk
-import matplotlib.pyplot as plt
 
 # Read in TPF and LCF, without removing bad cadences
 tpf = lk.TessTargetPixelFile("tess-1998YT6-s0006-1-1-shape11x11-moving_tp.fits", quality_bitmask="none")
