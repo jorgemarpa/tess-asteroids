@@ -11,7 +11,7 @@
 The easiest way to install `tess-asteroids` and all of its dependencies is to run the following command in a terminal window:
 
 ```bash
-python -m pip install tess-asteroids
+pip install tess-asteroids
 
 ```
 
