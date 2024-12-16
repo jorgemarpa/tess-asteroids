@@ -33,7 +33,7 @@ target.make_lc(save=True)
 
 ```
 
-![Example TPF](./docs/tess-1998YT6-s0006-1-1-shape11x11-moving_tp.gif) ![Example LC](./docs/tess-1998YT6-s0006-1-1-shape11x11_lc.png)
+![Example TPF](./docs/tess-1998YT6-s0006-1-1-shape11x11-moving_tp.gif =20%x) ![Example LC](./docs/tess-1998YT6-s0006-1-1-shape11x11_lc.png =75%x)
 
 ## Tutorial
 
