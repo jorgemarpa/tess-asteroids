@@ -442,16 +442,15 @@ def animate_cube(
 
     # Define function for animation
     def animate(nt):
-        frame = nt * step
         ax.clear()
         _ = plot_img_aperture(
-            cube[frame],
-            aperture_mask=aperture_mask[frame],
+            cube[nt],
+            aperture_mask=aperture_mask[nt],
             cbar=False,
             ax=ax,
-            corner=corner[frame],
-            marker=ephemeris[frame],
-            title=f"CAD {cadenceno[frame]} | BTJD {time[frame]:.4f}",
+            corner=corner[nt],
+            marker=ephemeris[nt],
+            title=f"CAD {cadenceno[nt]} | BTJD {time[nt]:.4f}",
             vmin=vmin if not cnorm else None,
             vmax=vmax if not cnorm else None,
             cnorm=norm if cnorm else None,
@@ -466,7 +465,7 @@ def animate_cube(
     ani = animation.FuncAnimation(
         fig,
         animate,
-        frames=len(cube) // step,
+        frames=range(0, len(cube), step),
         interval=interval,
         blit=True,
         repeat_delay=repeat_delay,

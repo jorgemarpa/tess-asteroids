@@ -2023,7 +2023,8 @@ class MovingTPF:
             If True, the predicted position of the target is included in the animation. Default is True.
         step : int or None
             Spacing between frames, i.e. plot every nth frame.  If `None`, the spacing will be determined such
-            that about 50 frames are shown.
+            that about 50 frames are shown. Showing more frames will increase the runtime and, if `save`, the
+            file size.
         save : bool
             If True, save the animation. Default is False.
         outdir : str

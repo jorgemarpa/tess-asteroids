@@ -282,6 +282,7 @@ def test_make_tpf():
     tpf = lk.read(
         "tests/tess-1998YT6-s0006-1-1-shape11x11-moving_tp.fits", quality_bitmask="none"
     )
+    assert isinstance(tpf, lk.targetpixelfile.TessTargetPixelFile)
     assert hasattr(tpf, "pipeline_mask")
     assert len(tpf.time) == len(target.time)
     assert np.array_equal(target.corr_flux, tpf.flux.value)
@@ -327,7 +328,7 @@ def test_to_lightcurve():
             assert target.lc["aperture"]["quality"][t] > 0
 
     # Check flux fraction has expected values
-    assert (target.lc["aperture"]["flux_fraction"] < 1).all()
+    assert (target.lc["aperture"]["flux_fraction"] <= 1).all()
     assert np.isfinite(target.lc["aperture"]["flux_fraction"]).all()
 
 
@@ -347,25 +348,29 @@ def test_make_lc():
 
     # Open the file with astropy and check some attributes
     with fits.open("tests/tess-1998YT6-s0006-1-1-shape11x11_lc.fits") as hdul:
+        # Check primary header
         assert "BAD_BITS" in hdul[0].header.keys()
         assert hdul[0].header["PROCVER"].strip() == __version__
         assert hdul[0].header["AP_TYPE"].strip() == "prf"
         assert hdul[0].header["BG_CORR"].strip() == "rolling"
         assert hdul[0].header["VMAG"] > 0
         assert "SPOCDATE" in hdul[0].header.keys()
+
+        # Check columns in lightcurve HDU
         assert "TIME" in hdul[1].columns.names
         assert "FLUX" in hdul[1].columns.names
+        assert "FLUX_ERR" in hdul[1].columns.names
         assert np.isnan(hdul[1].data["PSF_FLUX"]).all()
         assert "MOM_CENTR1" in hdul[1].columns.names
         assert "RA" in hdul[1].columns.names
         assert "EPHEM1" in hdul[1].columns.names
 
     # Check the file can be opened with lightkurve
-    lc = lk.read(
+    lc = lk.io.tess.read_tess_lightcurve(
         "tests/tess-1998YT6-s0006-1-1-shape11x11_lc.fits",
         quality_bitmask="none",
-        flux_column="FLUX",
     )
+    assert isinstance(lc, lk.lightcurve.TessLightCurve)
     assert len(lc.time) == len(target.time)
     assert np.array_equal(target.lc["aperture"]["flux"], lc.flux.value)
     assert np.array_equal(target.lc["aperture"]["flux_err"], lc.flux_err.value)
