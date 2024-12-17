@@ -1251,7 +1251,7 @@ class MovingTPF:
                             self.pixel_quality[t][self.aperture_mask[t]]
                             & self.bad_bit_value
                             != 0
-                        ).any()
+                        ).all()
                         for t in range(len(self.time))
                     ],
                 },
