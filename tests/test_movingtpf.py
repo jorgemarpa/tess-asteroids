@@ -6,25 +6,25 @@ import numpy as np
 import pandas as pd
 from astropy.io import fits
 
-from tess_asteroids import MovingTPF
+from tess_asteroids import MovingTPF, __version__
 
 
 def test_from_name():
     """
     Check that static method from_name() gives expected ephemeris for asteroids 1998 YT6 and 1994 EL3.
     """
-    target, track = MovingTPF.from_name("1998 YT6", sector=6)
+    target = MovingTPF.from_name("1998 YT6", sector=6)
 
     assert target.sector == 6
     assert target.camera == 1
     assert target.ccd == 1
 
     # Bounds taken from tesswcs pointings.csv file for sector 6.
-    assert min(track["time"]) >= 2458463.5 - 2457000
-    assert max(track["time"]) <= 2458490.5 - 2457000
+    assert min(target.ephem["time"]) >= 2458463.5 - 2457000
+    assert max(target.ephem["time"]) <= 2458490.5 - 2457000
 
     # Asteroid 1994 EL3 is observed by camera 1, CCDs 1 and 2 during sector 6.
-    target, track = MovingTPF.from_name("1994 EL3", sector=6, camera=1, ccd=1)
+    target = MovingTPF.from_name("1994 EL3", sector=6, camera=1, ccd=1)
     assert target.sector == 6
     assert target.camera == 1
     assert target.ccd == 1
@@ -70,6 +70,7 @@ def test_data_logic(caplog):
         and len(target.corner) == len(target.time)
         and len(target.ephemeris) == len(target.time)
         and len(target.target_mask) == len(target.time)
+        and len(target.coords) == len(target.time)
     )
 
     # Check the ephemeris and corner have expected shape
@@ -100,7 +101,7 @@ def test_create_threshold_aperture():
     is a fixed numer (7).
     """
     # Make TPF for asteroid 1998 YT6
-    target, _ = MovingTPF.from_name("1998 YT6", sector=6)
+    target = MovingTPF.from_name("1998 YT6", sector=6)
     target.get_data(shape=(11, 11))
     target.reshape_data()
     target.background_correction(method="rolling")
@@ -123,7 +124,7 @@ def test_create_prf_aperture(caplog):
     """
 
     # Make TPF for asteroid 1998 YT6
-    target, _ = MovingTPF.from_name("1998 YT6", sector=6)
+    target = MovingTPF.from_name("1998 YT6", sector=6)
     target.get_data(shape=(11, 11))
 
     # Make aperture from PRF model
@@ -163,7 +164,7 @@ def test_create_ellipse_aperture():
     We test for array integrity and expected returned values.
     """
     # Make TPF for asteroid 1998 YT6
-    target, _ = MovingTPF.from_name("1998 YT6", sector=6)
+    target = MovingTPF.from_name("1998 YT6", sector=6)
     target.get_data(shape=(11, 11))
     target.reshape_data()
     target.background_correction(method="rolling")
@@ -254,18 +255,26 @@ def test_make_tpf():
     """
 
     # Make TPF for asteroid 1998 YT6
-    target, _ = MovingTPF.from_name("1998 YT6", sector=6)
-    target.make_tpf(save_loc="tests")
+    target = MovingTPF.from_name("1998 YT6", sector=6)
+    target.make_tpf(save=True, outdir="tests")
 
     # Check the file exists
     assert os.path.exists("tests/tess-1998YT6-s0006-1-1-shape11x11-moving_tp.fits")
 
     # Open the file with astropy and check attributes
     with fits.open("tests/tess-1998YT6-s0006-1-1-shape11x11-moving_tp.fits") as hdul:
+        assert "BAD_BITS" not in hdul[0].header.keys()
+        assert hdul[0].header["PROCVER"].strip() == __version__
+        assert hdul[0].header["AP_TYPE"].strip() == "prf"
+        assert hdul[0].header["BG_CORR"].strip() == "rolling"
+        assert hdul[0].header["VMAG"] > 0
+        assert "SPOCDATE" in hdul[0].header.keys()
         assert "APERTURE" in hdul[3].columns.names
         assert "PIXEL_QUALITY" in hdul[3].columns.names
         assert "CORNER1" in hdul[3].columns.names
         assert "CORNER2" in hdul[3].columns.names
+        assert "RA" in hdul[3].columns.names
+        assert "DEC" in hdul[3].columns.names
         assert len(hdul[3].data["APERTURE"]) == len(target.time)
         assert np.array_equal(target.corr_flux, hdul[1].data["FLUX"])
 
@@ -273,6 +282,7 @@ def test_make_tpf():
     tpf = lk.read(
         "tests/tess-1998YT6-s0006-1-1-shape11x11-moving_tp.fits", quality_bitmask="none"
     )
+    assert isinstance(tpf, lk.targetpixelfile.TessTargetPixelFile)
     assert hasattr(tpf, "pipeline_mask")
     assert len(tpf.time) == len(target.time)
     assert np.array_equal(target.corr_flux, tpf.flux.value)
@@ -290,20 +300,17 @@ def test_to_lightcurve():
     """
 
     # Make TPF for asteroid 1998 YT6.
-    target, _ = MovingTPF.from_name("1998 YT6", sector=6)
-    target.get_data()
-    target.reshape_data()
-    target.create_pixel_quality()
-    target.background_correction()
+    target = MovingTPF.from_name("1998 YT6", sector=6)
+    target.make_tpf()
 
     # Use aperture photometry to extract lightcurve from TPF.
-    target.create_aperture()
     target.to_lightcurve(method="aperture")
 
     # Check the lightcurve has the same length as target.time
     assert len(target.lc["aperture"]["time"]) == len(target.time)
     assert len(target.lc["aperture"]["flux"]) == len(target.time)
     assert len(target.lc["aperture"]["quality"]) == len(target.time)
+    assert len(target.lc["aperture"]["flux_fraction"]) == len(target.time)
 
     # Check the average centroid is within 1/2 a pixel of the center of the TPF.
     assert (
@@ -319,3 +326,54 @@ def test_to_lightcurve():
     for t in range(len(target.time)):
         if target.pixel_quality[t][target.aperture_mask[t]].any() != 0:
             assert target.lc["aperture"]["quality"][t] > 0
+
+    # Check flux fraction has expected values
+    assert (target.lc["aperture"]["flux_fraction"] <= 1).all()
+    assert np.isfinite(target.lc["aperture"]["flux_fraction"]).all()
+
+
+def test_make_lc():
+    """
+    Check that make_lc() correctly saves the LCF, that the file has the expected attributes
+    and that it can be opened with lightkurve.
+    """
+
+    # Make TPF for asteroid 1998 YT6
+    target = MovingTPF.from_name("1998 YT6", sector=6)
+    target.make_tpf()
+    target.make_lc(save=True, outdir="tests")
+
+    # Check the file exists
+    assert os.path.exists("tests/tess-1998YT6-s0006-1-1-shape11x11_lc.fits")
+
+    # Open the file with astropy and check some attributes
+    with fits.open("tests/tess-1998YT6-s0006-1-1-shape11x11_lc.fits") as hdul:
+        # Check primary header
+        assert "BAD_BITS" in hdul[0].header.keys()
+        assert hdul[0].header["PROCVER"].strip() == __version__
+        assert hdul[0].header["AP_TYPE"].strip() == "prf"
+        assert hdul[0].header["BG_CORR"].strip() == "rolling"
+        assert hdul[0].header["VMAG"] > 0
+        assert "SPOCDATE" in hdul[0].header.keys()
+
+        # Check columns in lightcurve HDU
+        assert "TIME" in hdul[1].columns.names
+        assert "FLUX" in hdul[1].columns.names
+        assert "FLUX_ERR" in hdul[1].columns.names
+        assert np.isnan(hdul[1].data["PSF_FLUX"]).all()
+        assert "MOM_CENTR1" in hdul[1].columns.names
+        assert "RA" in hdul[1].columns.names
+        assert "EPHEM1" in hdul[1].columns.names
+
+    # Check the file can be opened with lightkurve
+    lc = lk.io.tess.read_tess_lightcurve(
+        "tests/tess-1998YT6-s0006-1-1-shape11x11_lc.fits",
+        quality_bitmask="none",
+    )
+    assert isinstance(lc, lk.lightcurve.TessLightCurve)
+    assert len(lc.time) == len(target.time)
+    assert np.array_equal(target.lc["aperture"]["flux"], lc.flux.value)
+    assert np.array_equal(target.lc["aperture"]["flux_err"], lc.flux_err.value)
+
+    # Delete the file
+    os.remove("tests/tess-1998YT6-s0006-1-1-shape11x11_lc.fits")
