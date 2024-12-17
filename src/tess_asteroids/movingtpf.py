@@ -327,23 +327,18 @@ class MovingTPF:
             )
         self.target_mask = np.asarray(target_mask)
 
-        # Convert (row,column) ephemeris to (ra,dec) using WCS per timestamp.
+        # Convert (row,column) ephemeris to (ra,dec) using average WCS from observing sector.
         # Note: if MovingTPF was initialised from_name, then tess-ephem
         # internally converted (ra,dec) to (row,column) using the average WCS
-        # from the observing sector. `self.coords` does not recover these original values.
-        wcss = []
-        for i in range(len(self.cube.wcss)):
-            wcss.append(self.cube.wcss[i])
-        wcss = np.asarray(wcss)[nan_mask][bound_mask]
-        # Compute (ra,dec):
-        # - pixel_to_world() assumes zero-indexing so subtract one from (row,col).
-        # - for a few timestamps, WCS is None => use average WCS in these cases.
+        # from the observing sector. `self.coords` does not recover these original values
+        # because the ephemeris has been interpolated.
+        # Note: pixel_to_world() assumes zero-indexing so subtract one from (row,col).
         self.coords = np.asarray(
             [
-                (wcss[i] if wcss[i] is not None else self.cube.wcs).pixel_to_world(
+                self.cube.wcs.pixel_to_world(
                     self.ephemeris[i, 1] - 1, self.ephemeris[i, 0] - 1
                 )
-                for i in range(len(wcss))
+                for i in range(len(self.time))
             ]
         )
 
