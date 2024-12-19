@@ -1,6 +1,7 @@
 [![pytest](https://github.com/altuson/tess-asteroids/actions/workflows/test.yml/badge.svg)](https://github.com/altuson/tess-asteroids/actions/workflows/test.yml)
 [![mypy](https://github.com/altuson/tess-asteroids/actions/workflows/mypy.yml/badge.svg)](https://github.com/altuson/tess-asteroids/actions/workflows/mypy.yml/)
 [![ruff](https://github.com/altuson/tess-asteroids/actions/workflows/ruff.yml/badge.svg)](https://github.com/altuson/tess-asteroids/actions/workflows/ruff.yml)
+[![PyPI](https://img.shields.io/pypi/v/tess-asteroids.svg)](https://pypi.python.org/pypi/tess-asteroids)
 
 # tess-asteroids
 
@@ -22,21 +23,21 @@ You can easily make and save a TPF and LCF for any object in the JPL Small-Body 
 ```python
 from tess_asteroids import MovingTPF
 
-# Initialise MovingTPF for asteroid 1998 YT6 in TESS sector 6
-target = MovingTPF.from_name("1998 YT6", sector=6)
+# Initialise MovingTPF for asteroid 1980 VR1 in TESS sector 1
+target = MovingTPF.from_name("1980 VR1", sector=1, camera=1, ccd=1)
 
-# Make TPF and save to file (tess-1998YT6-s0006-1-1-shape11x11-moving_tp.fits)
+# Make TPF and save to file (tess-1980VR1-s0001-1-1-shape11x11-moving_tp.fits)
 target.make_tpf(save=True)
 
-# Make LC and save to file (tess-1998YT6-s0006-1-1-shape11x11_lc.fits)
+# Make LC and save to file (tess-1980VR1-s0001-1-1-shape11x11_lc.fits)
 target.make_lc(save=True)
 
 ```
 
 <p align="center">
-  <img alt="Example TPF" src="./docs/tess-1998YT6-s0006-1-1-shape11x11-moving_tp.gif" width="43%">
+  <img alt="Example TPF" src="./docs/tess-1980VR1-s0001-1-1-shape11x11-moving_tp.fits" width="43%">
 &nbsp; &nbsp; &nbsp; &nbsp;
-  <img alt="Example LC" src="./docs/tess-1998YT6-s0006-1-1-shape11x11_lc.png" width="52%">
+  <img alt="Example LC" src="./docs/tess-1980VR1-s0001-1-1-shape11x11_lc.png" width="52%">
 </p>
 
 ## Tutorial
