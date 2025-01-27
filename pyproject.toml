@@ -19,6 +19,9 @@ astropy = "^5.3.4"
 lkprf = "^1.1.1"
 matplotlib = "^3.9"
 
+[tool.poetry.group.dev]
+optional = true
+
 [tool.poetry.group.dev.dependencies]
 mkdocs = "^1.6.0"
 mkdocstrings = "^0.25.2"
