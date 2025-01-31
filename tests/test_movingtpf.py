@@ -89,6 +89,8 @@ def test_data_logic(caplog):
     ).all()
 
     # Check magnitude of time correction derived by lkspacecraft
+    # Maximum Earth to SS barycenter is 500sec, with an
+    # additional offset to account for TESS.
     assert (np.abs(target.timecorr * 24 * 3600) < 510).all()
 
     # Check the reshaped flux data has expected shape

@@ -16,6 +16,12 @@ pip install tess-asteroids
 
 ```
 
+### `lkspacecraft` dependency
+
+`tess-asteroids` uses `lkspacecraft` to derive barycentric time corrections (see [below](https://github.com/altuson/tess-asteroids?tab=readme-ov-file#barycentric-time-correction)). **The first time you run `lkspacecraft` it will download a set of files (the SPICE kernels for TESS). This will take approximately 5 minutes, depending on your internet connection, and the total file volume will be about 1GB.** The files will be cached once they are downloaded and if a new version of any file becomes available they will be automatically retrieved.
+
+Note: some of the files for early TESS sectors are currently missing from the archive. This is a known issue and the files will be made available in the future.
+
 ## Quickstart
 
 You can easily make and save a TPF and LCF for any object in the JPL Small-Body Database that has been observed by TESS. For example,
@@ -99,7 +105,7 @@ ephem = pd.DataFrame({
         })
 
 # Initialise MovingTPF
-target = MovingTPF("example", ephem)
+target = MovingTPF("example", ephem, time_scale = "tdb")
 
 # Make TPF, but do not save to file
 target.make_tpf()
@@ -107,7 +113,7 @@ target.make_tpf()
 ```
 
 A few things to note about the format of the ephemeris:
-- `time` must have units BTJD = BJD - 2457000.
+- `time` must have units JD - 2457000. See explanation of `time_scale` [below](https://github.com/altuson/tess-asteroids?tab=readme-ov-file#time-scales).
 - `sector`, `camera`, `ccd` must each have one unique value.
 - `column`, `row` must be one-indexed, where the lower left pixel of the FFI has value (1,1).
 
@@ -153,18 +159,6 @@ The `make_lc()` function extracts the lightcurve, creates a quality mask and opt
 - `outdir` is the directory where the LCF will be saved. Note, the directory is not automatically created.
 - `file_name` is the name the LCF will be saved with. If one is not given, a default name will be generated.
 
-### Understanding the TPF and LCF
-
-The TPF has four HDUs: 
-- "PRIMARY" - a primary HDU containing only a header.
-- "PIXELS" - a table with the same columns as a SPOC TPF. Note that "POS_CORR1" and "POS_CORR2" are defined as the offset between the center of the TPF and the expected position of the moving object given the input ephemeris.
-- "APERTURE" - an image HDU containing the average aperture across all times.
-- "EXTRAS" - a table HDU containing columns not found in a SPOC TPF. This includes "RA"/"DEC" (expected position of target in world coordinates), "CORNER1"/"CORNER2" (original FFI column/row of the lower-left pixel in the TPF), "PIXEL_QUALITY" (3D pixel quality mask identifying e.g. strap columns, non-science pixels and saturation) and "APERTURE" (aperture as a function of time).
-
-The LCF has two HDUs: 
-- "PRIMARY" - a primary HDU containing only a header.
-- "LIGHTCURVE" - a table HDU with columns including "TIME" (timestamps in BTJD), "FLUX"/"FLUX_ERR" (flux and error from aperture photometry) and "PSF_FLUX"/"PSF_FLUX_ERR" (flux and error from PSF photometry).
-
 ### Compatibility with `lightkurve`
 
 The TPFs and LCFs that get created by `tess-asteroids` can be opened with `lightkurve`, as follows:
@@ -182,3 +176,31 @@ tpf.plot(aperture_mask=tpf.hdu[3].data["APERTURE"][200], frame=200)
 # Plot LC
 lc.plot()
 ```
+
+## Time scales
+
+When you initialise `MovingTPF()`, the `time_scale` parameter defines the scale of the `time` column in the input ephemeris. It can have one of two values:
+- `tdb` (default): this means the input ephemeris `time` is in TDB measured at the solar system barycenter. This is the scale used for the TSTART/TSTOP keywords in SPOC FFI headers and the TIME column in SPOC TPFs and LCFs. It is the standard time scale for TESS data products.
+- `utc`: this means the input ephemeris `time` is in UTC measured at the spacecraft. This can be recovered from the SPOC data products: for FFIs subtract header keyword BARYCORR from TSTART/TSTOP and for TPFs/LCFs subtract the TIMECORR column from the TIME column.
+
+When `MovingTPF()` is initialised `from_name()`, the `time_scale` is handled internally. As a user, you will only need to consider the `time_scale` if you are inputting a custom ephemeris. 
+
+For more information about time scales, see the `astropy` [documentation](https://docs.astropy.org/en/stable/time/index.html#time-scale).
+
+### Barycentric time correction
+
+The barycentric time correction derived by SPOC (BARYCORR) is used to transform the time in UTC at the spacecraft into the time in TDB at the solar system barycenter. This correction is calculated at the center of the FFI but, in reality, the correction depends upon RA and Dec. Therefore, within `tess-asteroids` we re-derive the barycentric time correction based upon the position of the moving target. In the output TPFs and LCFs, you will see columns called ORIGINAL_TIME (FFI timestamp in TDB at barycenter, as derived by SPOC), ORIGINAL_TIMECORR (correction to transform UTC at spacecraft into TDB at barycenter, as derived by SPOC), TIME (re-derived time in TDB at barycenter) and TIMECORR (re-derived time correction).
+
+The barycentric time correction is derived using `lkspacecraft`, but some of the files needed to compute the correction are missing for early TESS sectors. This is a known issue and the files will be made available in the future. In the meantime, you might notice that the TIME and ORIGINAL_TIME columns are the same for some of your targets. This means the barycentric time correction was not re-derived and the timestamps in those files will be less accurate. 
+
+## Understanding the TPF and LCF
+
+The TPF has four HDUs: 
+- "PRIMARY" - a primary HDU containing only a header.
+- "PIXELS" - a table with the same columns as a SPOC TPF. Note that "POS_CORR1" and "POS_CORR2" are defined as the offset between the center of the TPF and the expected position of the moving object given the input ephemeris. 
+- "APERTURE" - an image HDU containing the average aperture across all times.
+- "EXTRAS" - a table HDU containing columns not found in a SPOC TPF. This includes "RA"/"DEC" (expected position of target in world coordinates), "CORNER1"/"CORNER2" (original FFI column/row of the lower-left pixel in the TPF), "PIXEL_QUALITY" (3D pixel quality mask identifying e.g. strap columns, non-science pixels and saturation), "APERTURE" (aperture as a function of time) and "ORIGINAL_TIME"/"ORIGINAL_TIMECORR" (time and barycentric correction derived by SPOC).
+
+The LCF has two HDUs: 
+- "PRIMARY" - a primary HDU containing only a header.
+- "LIGHTCURVE" - a table HDU with columns including "TIME" (timestamps in BTJD), "FLUX"/"FLUX_ERR" (flux and error from aperture photometry) and "PSF_FLUX"/"PSF_FLUX_ERR" (flux and error from PSF photometry).
