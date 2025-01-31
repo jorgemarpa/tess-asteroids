@@ -19,6 +19,9 @@ def test_from_name():
     assert target.camera == 1
     assert target.ccd == 1
 
+    # Check the time scale is UTC
+    assert target.time_scale == "utc"
+
     # Bounds taken from tesswcs pointings.csv file for sector 6.
     assert min(target.ephem["time"]) >= 2458463.5 - 2457000
     assert max(target.ephem["time"]) <= 2458490.5 - 2457000
@@ -71,11 +74,22 @@ def test_data_logic(caplog):
         and len(target.ephemeris) == len(target.time)
         and len(target.target_mask) == len(target.time)
         and len(target.coords) == len(target.time)
+        and len(target.time_original) == len(target.time)
+        and len(target.timecorr) == len(target.time)
     )
 
     # Check the ephemeris and corner have expected shape
     assert np.shape(target.corner)[1] == 2
     assert np.shape(target.ephemeris)[1] == 2
+
+    # Check conversion between time and time_original
+    assert (
+        (target.time - target.timecorr)
+        == (target.time_original - target.timecorr_original)
+    ).all()
+
+    # Check magnitude of time correction derived by lkspacecraft
+    assert (np.abs(target.timecorr * 24 * 3600) < 510).all()
 
     # Check the reshaped flux data has expected shape
     target.reshape_data()
@@ -269,14 +283,22 @@ def test_make_tpf():
         assert hdul[0].header["BG_CORR"].strip() == "rolling"
         assert hdul[0].header["VMAG"] > 0
         assert "SPOCDATE" in hdul[0].header.keys()
+        assert "TIME" in hdul[1].columns.names
+        assert "TIMECORR" in hdul[1].columns.names
         assert "APERTURE" in hdul[3].columns.names
         assert "PIXEL_QUALITY" in hdul[3].columns.names
         assert "CORNER1" in hdul[3].columns.names
         assert "CORNER2" in hdul[3].columns.names
         assert "RA" in hdul[3].columns.names
         assert "DEC" in hdul[3].columns.names
+        assert "ORIGINAL_TIME" in hdul[3].columns.names
+        assert "ORIGINAL_TIMECORR" in hdul[3].columns.names
         assert len(hdul[3].data["APERTURE"]) == len(target.time)
         assert np.array_equal(target.corr_flux, hdul[1].data["FLUX"])
+
+        # As long as SPICE kernels are still missing, TIME and TIME_ORIGINAL should be
+        # identical. When this test fails, we know the kernels have been updated.
+        assert (hdul[1].data["TIME"] == hdul[3].data["ORIGINAL_TIME"]).all()
 
     # Check the file can be opened with lightkurve
     tpf = lk.read(
@@ -358,12 +380,19 @@ def test_make_lc():
 
         # Check columns in lightcurve HDU
         assert "TIME" in hdul[1].columns.names
+        assert "TIMECORR" in hdul[1].columns.names
+        assert "ORIGINAL_TIME" in hdul[1].columns.names
+        assert "ORIGINAL_TIMECORR" in hdul[1].columns.names
         assert "FLUX" in hdul[1].columns.names
         assert "FLUX_ERR" in hdul[1].columns.names
         assert np.isnan(hdul[1].data["PSF_FLUX"]).all()
         assert "MOM_CENTR1" in hdul[1].columns.names
         assert "RA" in hdul[1].columns.names
         assert "EPHEM1" in hdul[1].columns.names
+
+        # As long as SPICE kernels are still missing, TIME and TIME_ORIGINAL should be
+        # identical. When this test fails, we know the kernels have been updated.
+        assert (hdul[1].data["TIME"] == hdul[1].data["ORIGINAL_TIME"]).all()
 
     # Check the file can be opened with lightkurve
     lc = lk.io.tess.read_tess_lightcurve(
