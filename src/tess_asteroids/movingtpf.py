@@ -1,4 +1,6 @@
+import sys
 import time
+import warnings
 from datetime import datetime
 from typing import Optional, Tuple, Union
 
@@ -9,8 +11,8 @@ import pandas as pd
 from astropy.io import fits
 from astropy.stats import sigma_clip
 from astropy.time import Time
-
-# from lkspacecraft import TESSSpacecraft
+from lkspacecraft import TESSSpacecraft
+from lkspacecraft.spacecraft import BadEphemeris
 from numpy.polynomial import Polynomial
 from scipy import ndimage, stats
 from tess_ephem import ephem
@@ -42,7 +44,7 @@ class MovingTPF:
             'column', 'row' : float. These must be one-indexed, where the lower left pixel of the FFI is (1,1).
             'vmag' : float, optional. Visual magnitude.
     time_scale : str
-        One of ['tdb', 'utc']. Default is 'tdb'.
+        Time scale of input 'time'. One of ['tdb', 'utc']. Default is 'tdb'.
         If 'tdb', the input 'time' must be in TDB measured at the solar system barycenter from the TESS FFI header.
             This is the scale used for the 'TSTART'/'TSTOP' keywords in SPOC FFI headers and the 'TIME' column in SPOC
             TPFs and LCFs.
@@ -371,28 +373,50 @@ class MovingTPF:
             ]
         )
 
-        """
         # Calculate UTC to TDB correction using position of object.
-        time_utc = self.time_original - self.timecorr_original
-        tess = TESSSpacecraft()
-        timecorr = []
-        for t in range(len(time_utc)):
-            timecorr.append(
-                tess.get_barycentric_time_correction(
-                    time=Time(time_utc[t] + 2457000, scale="utc", format="jd"),
-                    ra=self.coords[t].ra.value,
-                    dec=self.coords[t].dec.value,
-                )[0]
-                / 60
-                / 60
-                / 24
+        # This will not work for some early sectors due to missing SPICE kernels. This is a
+        # known issue and, once it is fixed, the try/except can be removed.
+        try:
+            time_utc = self.time_original - self.timecorr_original
+            # Catch warnings.
+            with warnings.catch_warnings(record=True) as recorded_warnings:
+                tess = TESSSpacecraft()
+                # Get unique warnings, save ErfaWarnings to logger and return other warnings.
+                for w in list(
+                    {
+                        "{0}-{1}".format(w.filename, w.lineno): w
+                        for w in recorded_warnings
+                    }.values()
+                ):
+                    if "ErfaWarning" == w.category.__name__:
+                        logger.warning("Warning from TESSSpacecraft(): {0}".format(w))
+                    else:
+                        sys.stderr.write(
+                            warnings.formatwarning(
+                                w.message, w.category, w.filename, w.lineno, line=w.line
+                            )
+                        )
+
+            timecorr = []
+            for t in range(len(time_utc)):
+                timecorr.append(
+                    tess.get_barycentric_time_correction(
+                        time=Time(time_utc[t] + 2457000, scale="utc", format="jd"),
+                        ra=self.coords[t].ra.value,
+                        dec=self.coords[t].dec.value,
+                    )[0]
+                    / 60
+                    / 60
+                    / 24
+                )
+            self.timecorr = np.asarray(timecorr)
+            self.time = time_utc + self.timecorr
+        except BadEphemeris:
+            logger.warning(
+                "UTC to TDB correction was not calculated due to missing SPICE kernels."
             )
-        self.timecorr = np.asarray(timecorr)
-        self.time = time_utc + self.timecorr
-        """
-        # Until the SPICE kernels are updated for early mission sectors, comment out correction.
-        self.timecorr = self.timecorr_original
-        self.time = self.time_original
+            self.timecorr = self.timecorr_original
+            self.time = self.time_original
 
     def reshape_data(self):
         """
@@ -740,6 +764,7 @@ class MovingTPF:
 
         # Build PRF model at each timestamp
         prf_model = []
+        recorded_warnings = []
         for t in range(len(self.time)):
             # Find indices in `high_res_time` between corresponding tstart/tstop.
             inds = np.where(
@@ -750,18 +775,37 @@ class MovingTPF:
             # If `row_interp` or `col_interp` contain nans (i.e. outside range of interpolation),
             # then prf.evaluate breaks. In that case, manually define model with nans.
             try:
-                model = prf.evaluate(
-                    targets=[
-                        (r, c) for r, c in zip(row_interp[inds], column_interp[inds])
-                    ],
-                    origin=(self.corner[t][0], self.corner[t][1]),
-                    shape=self.shape,
-                )
+                # Catch warnings.
+                with warnings.catch_warnings(record=True) as recorded_warning:
+                    model = prf.evaluate(
+                        targets=[
+                            (r, c)
+                            for r, c in zip(row_interp[inds], column_interp[inds])
+                        ],
+                        origin=(self.corner[t][0], self.corner[t][1]),
+                        shape=self.shape,
+                    )
+                    recorded_warnings.extend(recorded_warning)
                 model = sum(model) / np.sum(model)
             except ValueError:
                 model = np.full(self.shape, np.nan)
 
             prf_model.append(model)
+
+        # Get unique warnings, save LKPRFWarnings to logger and return other warnings.
+        for w in list(
+            {
+                "{0}-{1}".format(w.filename, w.lineno): w for w in recorded_warnings
+            }.values()
+        ):
+            if "LKPRFWarning" == w.category.__name__:
+                logger.warning("Warning from prf.evaluate(): {0}".format(w))
+            else:
+                sys.stderr.write(
+                    warnings.formatwarning(
+                        w.message, w.category, w.filename, w.lineno, line=w.line
+                    )
+                )
 
         # If first/last frame contains nans, replace PRF model with following/preceding frame.
         if np.isnan(prf_model).any():
