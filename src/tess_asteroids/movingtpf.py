@@ -1,4 +1,5 @@
 import time
+import warnings
 from datetime import datetime
 from typing import Optional, Tuple, Union
 
@@ -9,6 +10,8 @@ import pandas as pd
 from astropy.io import fits
 from astropy.stats import sigma_clip
 from astropy.time import Time
+from lkspacecraft import TESSSpacecraft
+from lkspacecraft.spacecraft import BadEphemeris
 from numpy.polynomial import Polynomial
 from scipy import ndimage, stats
 from tess_ephem import ephem
@@ -35,19 +38,36 @@ class MovingTPF:
         Target ID. This is only used when saving the TPF.
     ephem : DataFrame
         Target ephemeris with columns ['time','sector','camera','ccd','column','row']. Optional columns: ['vmag'].
-            'time' : float with units (BJD - 2457000).
+            'time' : float in format (JD - 2457000). See also `time_scale` below.
             'sector', 'camera', 'ccd' : int
             'column', 'row' : float. These must be one-indexed, where the lower left pixel of the FFI is (1,1).
             'vmag' : float, optional. Visual magnitude.
+    time_scale : str
+        Time scale of input 'time'. One of ['tdb', 'utc']. Default is 'tdb'.
+        If 'tdb', the input 'time' must be in TDB measured at the solar system barycenter from the TESS FFI header.
+            This is the scale used for the 'TSTART'/'TSTOP' keywords in SPOC FFI headers and the 'TIME' column in SPOC
+            TPFs and LCFs.
+        If 'utc', the input 'time' must be in UTC measured at the spacecraft. This can be recovered from the SPOC data
+            products: for FFIs subtract header keyword 'BARYCORR' from 'TSTART'/'TSTOP' and for TPFs/LCFs subtract the
+            'TIMECORR' column from the 'TIME' column.
     """
 
-    def __init__(self, target: str, ephem: pd.DataFrame):
+    def __init__(self, target: str, ephem: pd.DataFrame, time_scale: str = "tdb"):
         self.target = target
         self.ephem = ephem
+        self.time_scale = time_scale
 
         # Check self.ephem['time'] has correct units
         if min(self.ephem["time"]) >= 2457000:
-            raise ValueError("ephem['time'] must have units (BJD - 2457000).")
+            raise ValueError("ephem['time'] must have units (JD - 2457000).")
+
+        # Check self.time_scale has expected value
+        if self.time_scale not in ["tdb", "utc"]:
+            raise ValueError(
+                "`time_scale` must be either `utc` or `tdb`. Not `{0}`".format(
+                    self.time_scale
+                )
+            )
 
         # Check self.ephem['sector'] has one unique value
         if self.ephem["sector"].nunique() == 1:
@@ -72,6 +92,8 @@ class MovingTPF:
         self.primary_hdu = _sync_call(
             async_get_primary_hdu, object_key=self.cube.object_key
         ).header
+
+        logger.info("Initialised MovingTPF for target {0}.".format(self.target))
 
     def make_tpf(
         self,
@@ -183,15 +205,20 @@ class MovingTPF:
         self.shape = shape
 
         # Use interpolation to get target (row,column) at cube time.
+        # If input ephem uses UTC time scale, convert cube time to UTC for interpolation.
         column_interp = np.interp(
-            self.cube.time,
+            self.cube.time
+            if self.time_scale == "tdb"
+            else self.cube.time - self.cube.timecorr,
             self.ephem["time"].astype(float),
             self.ephem["column"].astype(float),
             left=np.nan,
             right=np.nan,
         )
         row_interp = np.interp(
-            self.cube.time,
+            self.cube.time
+            if self.time_scale == "tdb"
+            else self.cube.time - self.cube.timecorr,
             self.ephem["time"].astype(float),
             self.ephem["row"].astype(float),
             left=np.nan,
@@ -224,9 +251,14 @@ class MovingTPF:
                 for c in np.logical_and(column[:, 0, :] >= 1, column[:, 0, :] <= 2136)
             ],
         )
-        self.time = self.cube.time[nan_mask][
+        self.time_original = self.cube.time[
+            nan_mask
+        ][
             bound_mask
-        ]  # FFI timestamps of each frame in the data cube.
+        ]  # Original FFI timestamps of each frame in the data cube, in TDB at SS barycenter.
+        self.timecorr_original = self.cube.timecorr[nan_mask][
+            bound_mask
+        ]  # Original time correction of each frame in the data cube.
         self.tstart = self.cube.tstart[nan_mask][
             bound_mask
         ]  # Time at start of the exposure.
@@ -318,7 +350,7 @@ class MovingTPF:
 
         # Pixel mask that tracks moving target
         target_mask = []
-        for t in range(len(self.time)):
+        for t in range(len(self.time_original)):
             target_mask.append(
                 np.logical_and(
                     np.isin(self.pixels.T[0], row[t].ravel()),
@@ -336,11 +368,49 @@ class MovingTPF:
         self.coords = np.asarray(
             [
                 self.cube.wcs.pixel_to_world(
-                    self.ephemeris[i, 1] - 1, self.ephemeris[i, 0] - 1
+                    self.ephemeris[t, 1] - 1, self.ephemeris[t, 0] - 1
                 )
-                for i in range(len(self.time))
+                for t in range(len(self.time_original))
             ]
         )
+
+        # Calculate UTC to TDB correction using position of object.
+        # This will not work for some early sectors due to missing SPICE kernels. This is a
+        # known issue and, once it is fixed, the try/except can be removed.
+        try:
+            time_utc = self.time_original - self.timecorr_original
+            # Catch warnings.
+            with warnings.catch_warnings(record=True) as recorded_warnings:
+                tess = TESSSpacecraft()
+                # Get unique warnings and save to logger.
+                for w in list(
+                    {
+                        "{0}-{1}".format(w.filename, w.lineno): w
+                        for w in recorded_warnings
+                    }.values()
+                ):
+                    logger.warning("Warning from TESSSpacecraft(): {0}".format(w))
+
+            timecorr = []
+            for t in range(len(time_utc)):
+                timecorr.append(
+                    tess.get_barycentric_time_correction(
+                        time=Time(time_utc[t] + 2457000, scale="utc", format="jd"),
+                        ra=self.coords[t].ra.value,
+                        dec=self.coords[t].dec.value,
+                    )[0]
+                    / 60
+                    / 60
+                    / 24
+                )
+            self.timecorr = np.asarray(timecorr)
+            self.time = time_utc + self.timecorr
+        except BadEphemeris:
+            logger.warning(
+                "UTC to TDB correction was not calculated due to missing SPICE kernels."
+            )
+            self.timecorr = self.timecorr_original
+            self.time = self.time_original
 
     def reshape_data(self):
         """
@@ -400,6 +470,8 @@ class MovingTPF:
         self.corr_flux_err = np.sqrt(self.flux_err**2 + self.bg_err**2)
 
         self.bg_method = method
+
+        logger.info("Corrected background using method {0}.".format(self.bg_method))
 
     def _bg_rolling_median(self, nframes: int = 25, **kwargs):
         """
@@ -479,6 +551,8 @@ class MovingTPF:
             )
 
         self.ap_method = method
+
+        logger.info("Created aperture using method {0}.".format(self.ap_method))
 
     def _create_threshold_aperture(
         self,
@@ -633,6 +707,14 @@ class MovingTPF:
         if not hasattr(self, "all_flux"):
             raise AttributeError("Must run `get_data()` before creating PRF model.")
 
+        # If input ephemeris is in UTC, convert tstart and tstop to UTC.
+        if self.time_scale == "tdb":
+            tstart = self.tstart
+            tstop = self.tstop
+        else:
+            tstart = self.tstart - self.timecorr_original
+            tstop = self.tstop - self.timecorr_original
+
         # Initialise PRF - don't specify sector => uses post-sector4 models in all cases.
         prf = lkprf.TESSPRF(camera=self.camera, ccd=self.ccd)  # , sector=self.sector)
 
@@ -642,7 +724,7 @@ class MovingTPF:
         # affect their PRF models.
         if time_step is None:
             # Average cadence, in minutes
-            cadence = np.nanmean(self.tstop - self.tstart) * 24 * 60
+            cadence = np.nanmean(tstop - tstart) * 24 * 60
             # Average target track length, in pixels
             track_length = np.nanmedian(
                 np.sqrt(np.sum(np.diff(self.ephemeris, axis=0) ** 2, axis=1))
@@ -659,9 +741,9 @@ class MovingTPF:
 
         # Use interpolation to get target row,column for high-resolution time grid
         high_res_time = np.linspace(
-            self.tstart[0],
-            self.tstop[-1],
-            int(np.ceil((self.tstop[-1] - self.tstart[0]) * 24 * 60 / time_step)),
+            tstart[0],
+            tstop[-1],
+            int(np.ceil((tstop[-1] - tstart[0]) * 24 * 60 / time_step)),
         )
         column_interp = np.interp(
             high_res_time,
@@ -680,30 +762,41 @@ class MovingTPF:
 
         # Build PRF model at each timestamp
         prf_model = []
+        recorded_warnings = []
         for t in range(len(self.time)):
             # Find indices in `high_res_time` between corresponding tstart/tstop.
             inds = np.where(
-                np.logical_and(
-                    high_res_time >= self.tstart[t], high_res_time <= self.tstop[t]
-                )
+                np.logical_and(high_res_time >= tstart[t], high_res_time <= tstop[t])
             )[0]
 
             # Get PRF model throughout exposure, sum and normalise.
             # If `row_interp` or `col_interp` contain nans (i.e. outside range of interpolation),
             # then prf.evaluate breaks. In that case, manually define model with nans.
             try:
-                model = prf.evaluate(
-                    targets=[
-                        (r, c) for r, c in zip(row_interp[inds], column_interp[inds])
-                    ],
-                    origin=(self.corner[t][0], self.corner[t][1]),
-                    shape=self.shape,
-                )
+                # Catch warnings.
+                with warnings.catch_warnings(record=True) as recorded_warning:
+                    model = prf.evaluate(
+                        targets=[
+                            (r, c)
+                            for r, c in zip(row_interp[inds], column_interp[inds])
+                        ],
+                        origin=(self.corner[t][0], self.corner[t][1]),
+                        shape=self.shape,
+                    )
+                    recorded_warnings.extend(recorded_warning)
                 model = sum(model) / np.sum(model)
             except ValueError:
                 model = np.full(self.shape, np.nan)
 
             prf_model.append(model)
+
+        # Get unique warnings and save to logger.
+        for w in list(
+            {
+                "{0}-{1}".format(w.filename, w.lineno): w for w in recorded_warnings
+            }.values()
+        ):
+            logger.warning("Warning from prf.evaluate(): {0}".format(w))
 
         # If first/last frame contains nans, replace PRF model with following/preceding frame.
         if np.isnan(prf_model).any():
@@ -1361,12 +1454,12 @@ class MovingTPF:
         hdu.header.set(
             "TSTART",
             self.time[0],
-            comment="observation start time in TJD of first frame",
+            comment="observation start time in BTJD of first frame",
         )
         hdu.header.set(
             "TSTOP",
             self.time[-1],
-            comment="observation start time in TJD of last frame",
+            comment="observation start time in BTJD of last frame",
         )
         hdu.header.set(
             "DATE-OBS", Time(self.time[0] + 2457000, scale="tdb", format="jd").utc.isot
@@ -1434,8 +1527,18 @@ class MovingTPF:
                 np.nanmean(
                     self.ephem.loc[
                         np.logical_and(
-                            self.ephem["time"] >= self.time[0],
-                            self.ephem["time"] <= self.time[-1],
+                            self.ephem["time"]
+                            >= (
+                                self.time_original[0]
+                                if self.time_scale == "tdb"
+                                else self.time_original[0] - self.timecorr_original[0]
+                            ),
+                            self.ephem["time"]
+                            <= (
+                                self.time_original[-1]
+                                if self.time_scale == "tdb"
+                                else self.time_original[-1] - self.timecorr_original[-1]
+                            ),
                         ),
                         "vmag",
                     ]
@@ -1488,14 +1591,11 @@ class MovingTPF:
         pos_corr1 = self.ephemeris[:, 1] - self.corner[:, 1] - 0.5 * (self.shape[1] - 1)
         pos_corr2 = self.ephemeris[:, 0] - self.corner[:, 0] - 0.5 * (self.shape[0] - 1)
 
-        # Compute TIMECORR
-        # >>>>> UPDATE IN FUTURE <<<<<
-        time_corr = np.zeros_like(self.time)
-
         # Define SPOC-like FITS columns
         tform = str(self.corr_flux[0].size) + "E"
         dims = str(self.corr_flux[0].shape[::-1])
         cols = [
+            # Times in TDB at SS barycenter.
             fits.Column(
                 name="TIME",
                 format="D",
@@ -1503,12 +1603,13 @@ class MovingTPF:
                 disp="D14.7",
                 array=self.time,
             ),
+            # Correction used to convert UTC at spacecraft to TDB at barycenter.
             fits.Column(
                 name="TIMECORR",
                 format="E",
                 unit="d",
                 disp="E14.7",
-                array=time_corr,
+                array=self.timecorr,
             ),
             # Cadence number, as defined by tesscube.
             fits.Column(name="CADENCENO", format="I", array=self.cadence_number),
@@ -1610,6 +1711,24 @@ class MovingTPF:
 
         # Define extra FITS columns
         cols = [
+            # Original TESS FFI timestamps, in TDB at SS barycenter.
+            # This was calculated for the center of the FFI, not the target position.
+            fits.Column(
+                name="ORIGINAL_TIME",
+                format="D",
+                unit="BJD - 2457000, days",
+                disp="D14.7",
+                array=self.time_original,
+            ),
+            # Original correction used to convert UTC at spacecraft to TDB at barycenter.
+            # This was calculated for the center of the FFI, not the target position.
+            fits.Column(
+                name="ORIGINAL_TIMECORR",
+                format="E",
+                unit="d",
+                disp="E14.7",
+                array=self.timecorr_original,
+            ),
             # Predicted position of target in world coordinates.
             fits.Column(
                 name="RA",
@@ -1691,12 +1810,39 @@ class MovingTPF:
 
         # Define columns for lightcurve
         cols = [
+            # Times in TDB at SS barycenter.
             fits.Column(
                 name="TIME",
                 format="D",
                 unit="BJD - 2457000, days",
                 disp="D14.7",
                 array=self.time,
+            ),
+            # Correction used to convert UTC at spacecraft to TDB at barycenter.
+            fits.Column(
+                name="TIMECORR",
+                format="E",
+                unit="d",
+                disp="E14.7",
+                array=self.timecorr,
+            ),
+            # Original TESS FFI timestamps, in TDB at SS barycenter.
+            # This was calculated for the center of the FFI, not the target position.
+            fits.Column(
+                name="ORIGINAL_TIME",
+                format="D",
+                unit="BJD - 2457000, days",
+                disp="D14.7",
+                array=self.time_original,
+            ),
+            # Original correction used to convert UTC at spacecraft to TDB at barycenter.
+            # This was calculated for the center of the FFI, not the target position.
+            fits.Column(
+                name="ORIGINAL_TIMECORR",
+                format="E",
+                unit="d",
+                disp="E14.7",
+                array=self.timecorr_original,
             ),
             # Cadence number, as defined by tesscube.
             fits.Column(name="CADENCENO", format="I", array=self.cadence_number),
@@ -2086,6 +2232,7 @@ class MovingTPF:
                 outdir += "/"
 
             ani.save(outdir + file_name, writer="pillow")
+            logger.info("Created file: {0}".format(outdir + file_name))
 
         # Return animation in HTML format.
         # If in notebook environment, this allows animation to be displayed.
@@ -2132,13 +2279,14 @@ class MovingTPF:
         MovingTPF :
             Initialised MovingTPF with ephemeris from JPL/Horizons.
             Target ephemeris has columns ['time','sector','camera','ccd','column','row','vmag'].
-                'time' : float with units (JD - 2457000).
+                'time' : float with units (JD - 2457000) in UTC at spacecraft.
                 'sector', 'camera', 'ccd' : int
                 'column', 'row' : float. These are one-indexed, where the lower left pixel of the FFI is (1,1).
                 'vmag' : float. Visual magnitude.
         """
 
         # Get target ephemeris using tess-ephem
+        logger.info("Retrieving ephemeris for target {0}.".format(target))
         df_ephem = ephem(target, sector=sector, time_step=time_step, verbose=True)
 
         # Check whether target was observed in sector.
@@ -2160,10 +2308,10 @@ class MovingTPF:
                 )
 
         # Add column for time in units (JD - 2457000)
-        # >>>>> Note: tess-ephem returns time in JD, not BJD. <<<<<
+        # >>>>> Note: tess-ephem returns time in UTC at spacecraft. <<<<<
         df_ephem["time"] = [t.value - 2457000 for t in df_ephem.index.values]
         df_ephem = df_ephem[
             ["time", "sector", "camera", "ccd", "column", "row", "vmag"]
         ].reset_index(drop=True)
 
-        return MovingTPF(target=target, ephem=df_ephem)
+        return MovingTPF(target=target, ephem=df_ephem, time_scale="utc")
