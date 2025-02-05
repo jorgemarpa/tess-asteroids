@@ -1,4 +1,3 @@
-import sys
 import time
 import warnings
 from datetime import datetime
@@ -93,6 +92,8 @@ class MovingTPF:
         self.primary_hdu = _sync_call(
             async_get_primary_hdu, object_key=self.cube.object_key
         ).header
+
+        logger.info("Initialised MovingTPF for target {0}.".format(self.target))
 
     def make_tpf(
         self,
@@ -381,21 +382,14 @@ class MovingTPF:
             # Catch warnings.
             with warnings.catch_warnings(record=True) as recorded_warnings:
                 tess = TESSSpacecraft()
-                # Get unique warnings, save ErfaWarnings to logger and return other warnings.
+                # Get unique warnings and save to logger.
                 for w in list(
                     {
                         "{0}-{1}".format(w.filename, w.lineno): w
                         for w in recorded_warnings
                     }.values()
                 ):
-                    if "ErfaWarning" == w.category.__name__:
-                        logger.warning("Warning from TESSSpacecraft(): {0}".format(w))
-                    else:
-                        sys.stderr.write(
-                            warnings.formatwarning(
-                                w.message, w.category, w.filename, w.lineno, line=w.line
-                            )
-                        )
+                    logger.warning("Warning from TESSSpacecraft(): {0}".format(w))
 
             timecorr = []
             for t in range(len(time_utc)):
@@ -477,6 +471,8 @@ class MovingTPF:
 
         self.bg_method = method
 
+        logger.info("Corrected background using method {0}.".format(self.bg_method))
+
     def _bg_rolling_median(self, nframes: int = 25, **kwargs):
         """
         Calculate the background using a rolling median of nearby frames.
@@ -555,6 +551,8 @@ class MovingTPF:
             )
 
         self.ap_method = method
+
+        logger.info("Created aperture using method {0}.".format(self.ap_method))
 
     def _create_threshold_aperture(
         self,
@@ -792,20 +790,13 @@ class MovingTPF:
 
             prf_model.append(model)
 
-        # Get unique warnings, save LKPRFWarnings to logger and return other warnings.
+        # Get unique warnings and save to logger.
         for w in list(
             {
                 "{0}-{1}".format(w.filename, w.lineno): w for w in recorded_warnings
             }.values()
         ):
-            if "LKPRFWarning" == w.category.__name__:
-                logger.warning("Warning from prf.evaluate(): {0}".format(w))
-            else:
-                sys.stderr.write(
-                    warnings.formatwarning(
-                        w.message, w.category, w.filename, w.lineno, line=w.line
-                    )
-                )
+            logger.warning("Warning from prf.evaluate(): {0}".format(w))
 
         # If first/last frame contains nans, replace PRF model with following/preceding frame.
         if np.isnan(prf_model).any():
@@ -2241,6 +2232,7 @@ class MovingTPF:
                 outdir += "/"
 
             ani.save(outdir + file_name, writer="pillow")
+            logger.info("Created file: {0}".format(outdir + file_name))
 
         # Return animation in HTML format.
         # If in notebook environment, this allows animation to be displayed.
@@ -2294,6 +2286,7 @@ class MovingTPF:
         """
 
         # Get target ephemeris using tess-ephem
+        logger.info("Retrieving ephemeris for target {0}.".format(target))
         df_ephem = ephem(target, sector=sector, time_step=time_step, verbose=True)
 
         # Check whether target was observed in sector.
