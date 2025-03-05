@@ -529,9 +529,19 @@ class MovingTPF:
         -------
         """
 
+        # Check thresholds are physical.
+        if asteroid_threshold < 0 or asteroid_threshold >= 1:
+            raise ValueError(
+                f"`asteroid_threshold` must be between 0 and 1. Not '{asteroid_threshold}'"
+            )
+        if star_threshold <= 0:
+            raise ValueError(
+                f"`star_threshold` must be greater than 0. Not '{star_threshold}'"
+            )
+
         # Create mask for asteroid.
         asteroid_mask = (
-            self._create_target_prf_model(all_flux=True, **kwargs) > asteroid_threshold
+            self._create_target_prf_model(all_flux=True, **kwargs) >= asteroid_threshold
         )
 
         # Create mask for stars.
@@ -539,7 +549,7 @@ class MovingTPF:
         # flux value over all pixels and all times.
         star_mask = np.where(
             np.nanmedian(self.all_flux, axis=0)
-            > star_threshold * np.nanmedian(self.all_flux),
+            >= star_threshold * np.nanmedian(self.all_flux),
             True,
             False,
         )
@@ -558,6 +568,10 @@ class MovingTPF:
         **kwargs,
     ):
         """
+        Use PCA and linear modelling for TESS scattered light. Either model all times at once (`all_time`) or
+        use a for loop to go through each frame and compute model in time window (`per_time`). The latter is preferred,
+        but runtime is longer.
+
         Parameters
         ----------
 
@@ -957,7 +971,7 @@ class MovingTPF:
                     recorded_warnings.extend(recorded_warning)
                 model = sum(model) / np.sum(model)
             except ValueError:
-                model = np.full(self.shape, np.nan)
+                model = np.full(shape, np.nan)
 
             # Save PRF models to array, only saving pixels that have been retrieved.
             if all_flux:
