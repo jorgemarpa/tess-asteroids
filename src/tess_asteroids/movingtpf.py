@@ -682,7 +682,7 @@ class MovingTPF:
 
         return aperture_mask
 
-    def _create_target_prf_model(self, time_step: Optional[float] = None, **kwargs):
+    def _create_target_prf_model(self, time_step: Optional[float] = None, all_flux: bool = False, **kwargs):
         """
         Creates a PRF model of the target as a function of time, using the `lkprf` package.
         Since the target is moving, the PRF model per time is made by summing models on a high
@@ -760,10 +760,22 @@ class MovingTPF:
             right=np.nan,
         )
 
+        # Define origin and shape for all_flux
+        if all_flux:
+            # Origin is minimum row/column (not a pair) and shape is entire all_flux region
+            origin = tuple(self.pixels.min(axis=0).astype(int))
+            shape = tuple((self.pixels.max(axis=0) - self.pixels.min(axis=0) + 1).astype(int))
+
         # Build PRF model at each timestamp
         prf_model = []
         recorded_warnings = []
         for t in range(len(self.time)):
+
+            # Define origin and shape per time
+            if not all_flux:
+                origin = (self.corner[t][0], self.corner[t][1])
+                shape = self.shape               
+
             # Find indices in `high_res_time` between corresponding tstart/tstop.
             inds = np.where(
                 np.logical_and(high_res_time >= tstart[t], high_res_time <= tstop[t])
@@ -780,15 +792,19 @@ class MovingTPF:
                             (r, c)
                             for r, c in zip(row_interp[inds], column_interp[inds])
                         ],
-                        origin=(self.corner[t][0], self.corner[t][1]),
-                        shape=self.shape,
+                        origin=origin,
+                        shape=shape,
                     )
                     recorded_warnings.extend(recorded_warning)
                 model = sum(model) / np.sum(model)
             except ValueError:
                 model = np.full(self.shape, np.nan)
 
-            prf_model.append(model)
+            # Save PRF models to array, only saving pixels that have been retrieved.
+            if all_flux:
+                prf_model.append(model[self.pixels[:, 0] - np.asarray(origin[0]), self.pixels[:, 1] - np.asarray(origin[1])])
+            else:
+                prf_model.append(model)
 
         # Get unique warnings and save to logger.
         for w in list(
