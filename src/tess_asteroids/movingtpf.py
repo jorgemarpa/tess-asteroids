@@ -14,6 +14,7 @@ from lkspacecraft import TESSSpacecraft
 from lkspacecraft.spacecraft import BadEphemeris
 from numpy.polynomial import Polynomial
 from scipy import ndimage, stats
+from scipy.interpolate import CubicSpline
 from tess_ephem import ephem
 from tesscube import TESSCube
 from tesscube.fits import get_wcs_header_by_extension
@@ -206,23 +207,23 @@ class MovingTPF:
 
         # Use interpolation to get target (row,column) at cube time.
         # If input ephem uses UTC time scale, convert cube time to UTC for interpolation.
-        column_interp = np.interp(
-            self.cube.time
-            if self.time_scale == "tdb"
-            else self.cube.time - self.cube.timecorr,
+        column_interp = CubicSpline(
             self.ephem["time"].astype(float),
             self.ephem["column"].astype(float),
-            left=np.nan,
-            right=np.nan,
-        )
-        row_interp = np.interp(
+            extrapolate=False,
+        )(
             self.cube.time
             if self.time_scale == "tdb"
-            else self.cube.time - self.cube.timecorr,
+            else self.cube.time - self.cube.timecorr
+        )
+        row_interp = CubicSpline(
             self.ephem["time"].astype(float),
             self.ephem["row"].astype(float),
-            left=np.nan,
-            right=np.nan,
+            extrapolate=False,
+        )(
+            self.cube.time
+            if self.time_scale == "tdb"
+            else self.cube.time - self.cube.timecorr
         )
 
         # Remove nans from interpolated position
@@ -682,7 +683,9 @@ class MovingTPF:
 
         return aperture_mask
 
-    def _create_target_prf_model(self, time_step: Optional[float] = None, all_flux: bool = False, **kwargs):
+    def _create_target_prf_model(
+        self, time_step: Optional[float] = None, all_flux: bool = False, **kwargs
+    ):
         """
         Creates a PRF model of the target as a function of time, using the `lkprf` package.
         Since the target is moving, the PRF model per time is made by summing models on a high
@@ -745,36 +748,33 @@ class MovingTPF:
             tstop[-1],
             int(np.ceil((tstop[-1] - tstart[0]) * 24 * 60 / time_step)),
         )
-        column_interp = np.interp(
-            high_res_time,
+        column_interp = CubicSpline(
             self.ephem["time"].astype(float),
             self.ephem["column"].astype(float),
-            left=np.nan,
-            right=np.nan,
-        )
-        row_interp = np.interp(
-            high_res_time,
+            extrapolate=False,
+        )(high_res_time)
+        row_interp = CubicSpline(
             self.ephem["time"].astype(float),
             self.ephem["row"].astype(float),
-            left=np.nan,
-            right=np.nan,
-        )
+            extrapolate=False,
+        )(high_res_time)
 
         # Define origin and shape for all_flux
         if all_flux:
             # Origin is minimum row/column (not a pair) and shape is entire all_flux region
             origin = tuple(self.pixels.min(axis=0).astype(int))
-            shape = tuple((self.pixels.max(axis=0) - self.pixels.min(axis=0) + 1).astype(int))
+            shape = tuple(
+                (self.pixels.max(axis=0) - self.pixels.min(axis=0) + 1).astype(int)
+            )
 
         # Build PRF model at each timestamp
         prf_model = []
         recorded_warnings = []
         for t in range(len(self.time)):
-
             # Define origin and shape per time
             if not all_flux:
                 origin = (self.corner[t][0], self.corner[t][1])
-                shape = self.shape               
+                shape = self.shape
 
             # Find indices in `high_res_time` between corresponding tstart/tstop.
             inds = np.where(
@@ -802,7 +802,12 @@ class MovingTPF:
 
             # Save PRF models to array, only saving pixels that have been retrieved.
             if all_flux:
-                prf_model.append(model[self.pixels[:, 0] - np.asarray(origin[0]), self.pixels[:, 1] - np.asarray(origin[1])])
+                prf_model.append(
+                    model[
+                        self.pixels[:, 0] - np.asarray(origin[0]),
+                        self.pixels[:, 1] - np.asarray(origin[1]),
+                    ]
+                )
             else:
                 prf_model.append(model)
 
