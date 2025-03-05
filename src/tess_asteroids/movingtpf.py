@@ -548,62 +548,9 @@ class MovingTPF:
             [np.logical_or(ast_mask, star_mask) for ast_mask in asteroid_mask]
         )
 
-    def _create_scattered_light_model_all(
-        self, ncomponents: int = 5, niter: int = 5, poly_deg: int = 3, **kwargs
-    ):
-        """
-        Parameters
-        ----------
-
-        Returns
-        -------
-        """
-
-        # Create mask for asteroid and stars.
-        # Note: This masks all asteroid pixels at all times, even when asteroid is not present.
-        source_mask = self._create_pca_source_mask(**kwargs).any(axis=0)
-
-        # Get the PCA components for all pixels at all times, excluding pixels with sources.
-        U, s, V = pca(
-            self.all_flux[:, ~source_mask], k=ncomponents, raw=True, n_iter=niter
-        )
-
-        # Create design matrix - a `poly_deg` degree polynomial in row and column.
-        row, col = self.pixels.T
-        R = row - np.nanmean(row)
-        C = col - np.nanmean(col)
-        X = np.vstack(
-            [
-                R.ravel() ** idx * C.ravel() ** jdx
-                for idx in range(poly_deg)
-                for jdx in range(poly_deg)
-            ]
-        ).T
-
-        # Compute best-fitting weights
-        try:
-            w = np.linalg.solve(
-                X[~source_mask].T.dot(X[~source_mask]), X[~source_mask].T.dot(V.T)
-            )
-        except np.linalg.LinAlgError:
-            sl_model = np.full(self.all_flux.shape, np.nan)
-            sl_model_err = np.full(self.all_flux.shape, np.nan)
-        else:
-            w = np.linalg.solve(
-                X[~source_mask].T.dot(X[~source_mask]), X[~source_mask].T.dot(V.T)
-            )
-            # Create model that can predict V for pixels not included in PCA.
-            V_model = X.dot(w).T
-
-            # Compute scattered light model and error.
-            # >>>>> Add error on SL model <<<<<
-            sl_model = U.dot(np.diag(s)).dot(V_model)
-            sl_model_err = np.full(sl_model.shape, np.nan)
-
-        return np.asarray(sl_model), np.asarray(sl_model_err)
-
-    def _create_scattered_light_model_per_time(
+    def _create_scattered_light_model(
         self,
+        method: str = "per_time",
         ncomponents: int = 5,
         niter: int = 5,
         poly_deg: int = 3,
@@ -621,13 +568,6 @@ class MovingTPF:
         # Create mask for asteroid and stars.
         source_mask = self._create_pca_source_mask(**kwargs)
 
-        # Define good quality data
-        spoc_quality_mask = self.quality & (1 | 4 | 16 | 32 | 16384) == 0
-
-        # Initialise SL model and error.
-        sl_model = np.zeros(self.all_flux.shape)
-        sl_model_err = np.zeros(self.all_flux.shape)
-
         # Create design matrix - a `poly_deg` degree polynomial in row and column.
         row, col = self.pixels.T
         R = row - np.nanmean(row)
@@ -640,51 +580,99 @@ class MovingTPF:
             ]
         ).T
 
-        # Run through each time
-        for t in range(len(self.time)):
-            # Indices that define time window around current frame.
-            tmin, tmax = (
-                self.time[t] - 0.5 * window_length,
-                self.time[t] + 0.5 * window_length,
+        if method == "all_time":
+            # Note: This masks all asteroid pixels at all times, even when asteroid is not present.
+            source_mask = source_mask.any(axis=0)
+
+            # Get the PCA components for all pixels at all times, excluding pixels with sources.
+            U, s, V = pca(
+                self.all_flux[:, ~source_mask], k=ncomponents, raw=True, n_iter=niter
             )
-            t_window = np.where(np.logical_and(self.time >= tmin, self.time <= tmax))[0]
-
-            # Remove bad quality SPOC cadences, but ensure current time is always included.
-            t_window = np.unique(np.append(t_window[spoc_quality_mask[t_window]], t))
-
-            # Mask sources i.e. asteroid and stars. This masks asteroid pixels only at current time.
-            sources = source_mask[t_window].any(axis=0)
-
-            # Get the PCA components for pixels in time window, excluding pixels with sources.
-            # If too few times or too few pixels, set model to nan.
-            try:
-                U, s, V = pca(
-                    self.all_flux[t_window][:, ~sources],
-                    k=ncomponents,
-                    raw=True,
-                    n_iter=niter,
-                )
-            except AssertionError:
-                sl_model[t] = np.nan
-                sl_model_err[t] = np.nan
-                continue
 
             # Compute best-fitting weights
             try:
                 w = np.linalg.solve(
-                    X[~sources].T.dot(X[~sources]), X[~sources].T.dot(V.T)
+                    X[~source_mask].T.dot(X[~source_mask]), X[~source_mask].T.dot(V.T)
                 )
             except np.linalg.LinAlgError:
-                sl_model[t] = np.nan
-                sl_model_err[t] = np.nan
-                continue
-            # Create model that can predict V for pixels not included in PCA.
-            V_model = X.dot(w).T
+                sl_model = np.full(self.all_flux.shape, np.nan)
+                sl_model_err = np.full(self.all_flux.shape, np.nan)
+            else:
+                w = np.linalg.solve(
+                    X[~source_mask].T.dot(X[~source_mask]), X[~source_mask].T.dot(V.T)
+                )
+                # Create model that can predict V for pixels not included in PCA.
+                V_model = X.dot(w).T
 
-            # Compute scattered light model and error.
-            # >>>>> Add error on SL model <<<<<
-            sl_model[t] = U[t_window == t].dot(np.diag(s)).dot(V_model)
-            sl_model_err[t] = np.nan
+                # Compute scattered light model and error.
+                # >>>>> Add error on SL model <<<<<
+                sl_model = U.dot(np.diag(s)).dot(V_model)
+                sl_model_err = np.full(sl_model.shape, np.nan)
+
+        elif method == "per_time":
+            # Define good quality data
+            spoc_quality_mask = self.quality & (1 | 4 | 16 | 32 | 16384) == 0
+
+            # Initialise SL model and error.
+            sl_model = np.zeros(self.all_flux.shape)
+            sl_model_err = np.zeros(self.all_flux.shape)
+
+            # Run through each time
+            for t in range(len(self.time)):
+                # Indices that define time window around current frame.
+                tmin, tmax = (
+                    self.time[t] - 0.5 * window_length,
+                    self.time[t] + 0.5 * window_length,
+                )
+                t_window = np.where(
+                    np.logical_and(self.time >= tmin, self.time <= tmax)
+                )[0]
+
+                # Remove bad quality SPOC cadences, but ensure current time is always included.
+                t_window = np.unique(
+                    np.append(t_window[spoc_quality_mask[t_window]], t)
+                )
+
+                # Mask sources i.e. asteroid and stars. This masks asteroid pixels only at current time.
+                sources = source_mask[t_window].any(axis=0)
+
+                # Get the PCA components for pixels in time window, excluding pixels with sources.
+                # If too few times or too few pixels, set model to nan.
+                try:
+                    U, s, V = pca(
+                        self.all_flux[t_window][:, ~sources],
+                        k=ncomponents,
+                        raw=True,
+                        n_iter=niter,
+                    )
+                except AssertionError:
+                    sl_model[t] = np.nan
+                    sl_model_err[t] = np.nan
+                    continue
+
+                # Compute best-fitting weights
+                try:
+                    w = np.linalg.solve(
+                        X[~sources].T.dot(X[~sources]), X[~sources].T.dot(V.T)
+                    )
+                except np.linalg.LinAlgError:
+                    sl_model[t] = np.nan
+                    sl_model_err[t] = np.nan
+                    continue
+                # Create model that can predict V for pixels not included in PCA.
+                V_model = X.dot(w).T
+
+                # Compute scattered light model and error.
+                # >>>>> Add error on SL model <<<<<
+                sl_model[t] = U[t_window == t].dot(np.diag(s)).dot(V_model)
+                sl_model_err[t] = np.nan
+
+        else:
+            raise ValueError(
+                "`method` must be one of: [`per_time`, `all_time`]. Not `{0}`".format(
+                    method
+                )
+            )
 
         return np.asarray(sl_model), np.asarray(sl_model_err)
 
