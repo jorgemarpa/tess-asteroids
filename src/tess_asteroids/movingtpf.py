@@ -623,13 +623,22 @@ class MovingTPF:
         niter: int = 5,
         poly_deg: int = 3,
         window_length: float = 1,
+        diagnostic_plot: bool = False,
         **kwargs,
     ):
         """
         Use PCA to model scattered light. Either compute the PCA components for all times at once (`all_time`) or
         use a for loop to go through each frame and compute PCA components in a time window (`per_time`).
-        The latter is preferred, but runtime is longer. The resulting scattered light model has the same shape
+        The latter is preferred, but runtime is longer (see below). The resulting scattered light model has the same shape
         as `self.all_flux`.
+
+        e.g. asteroid 1980 VR1 in sector 1, camera 1, ccd 1 (ntimes = 905, npixels = 7917) run on MacBook Pro 2023.
+        `all_time` method takes about 0.1 seconds to run (~80% is computation of PCA), `per_time` method takes about
+        31 seconds to run (~86% is computation of PCA).
+
+        e.g. asteroid 1998 YT6 in sector 6, camera 1, ccd 1 (ntimes = 967, npixels = 14056) run on MacBook Pro 2023.
+        `all_time` method takes about 0.1 seconds to run (~75% is computation of PCA), `per_time` method takes about
+        20 minutes to run (~95% is computation of PCA).
 
         Parameters
         ----------
@@ -646,6 +655,8 @@ class MovingTPF:
         window_length : float
             If method is `per_time`, this is used to define the time window around each frame for the PCA computation.
             It is defined in days.
+        diagnostic_plot : bool
+            If True, shows two diagnostic plots to check the scattered light model.
         kwargs : dict
             Keywords arguments passed to `self._create_pca_source_mask`, e.g `target_threshold`, `star_flux_threshold`.
 
@@ -791,6 +802,75 @@ class MovingTPF:
                 time.time() - start_time
             )
         )
+
+        if diagnostic_plot:
+            logger.info("Making diagnostic plots for scattered light model...")
+            # Plot one: SL model on 2D pixel grid in all_flux region for selection of frames
+            # Origin is minimum row/column (not a pair) and shape is entire all_flux region.
+            origin = tuple(self.pixels.min(axis=0).astype(int))
+            shape = tuple(
+                (self.pixels.max(axis=0) - self.pixels.min(axis=0) + 1).astype(int)
+            )
+            # Re-shape SL model to all_flux region.
+            sl_reshaped = np.full((len(self.time), shape[0], shape[1]), np.nan)
+            for t in range(len(self.time)):
+                sl_reshaped[t][
+                    self.pixels[:, 0] - np.asarray(origin[0]),
+                    self.pixels[:, 1] - np.asarray(origin[1]),
+                ] = sl_model[t]
+            # Plot SL model from first, middle and last frame.
+            # Note: setting aspect="auto" means pixels are not square in these visualisations.
+            frames = [0, len(self.time) // 2, -1]
+            extent = (
+                origin[1] - 0.5,
+                origin[1] + shape[1] - 0.5,
+                origin[0] - 0.5,
+                origin[0] + shape[0] - 0.5,
+            )
+            fig, ax = plt.subplots(
+                1, len(frames), sharex=True, sharey=True, figsize=(len(frames) * 4, 4)
+            )
+            for i, frame in enumerate(frames):
+                if i == 0:
+                    im = ax[i].imshow(
+                        sl_reshaped[frame],
+                        origin="lower",
+                        extent=extent,
+                        aspect="auto",
+                        interpolation="none",
+                    )
+                    ax[i].set(ylabel="Row Pixel")
+                else:
+                    im = ax[i].imshow(
+                        sl_reshaped[frame],
+                        origin="lower",
+                        extent=extent,
+                        aspect="auto",
+                        interpolation="none",
+                    )
+                ax[i].set(
+                    xlabel="Column Pixel",
+                    title="CAD {0} | BTJD {1:.4f}".format(
+                        self.cadence_number[frame], self.time[frame]
+                    ),
+                )
+                cbar = fig.colorbar(im, ax=ax[i], location="right")
+                cbar.set_label("Flux [$e^-/s$]")
+            plt.show()
+            plt.close(fig)
+
+            # Plot two: time-series of SL model for each pixel.
+            # Note: setting aspect="auto" means pixels are not square in these visualisations.
+            fig, ax = plt.subplots()
+            im = ax.imshow(
+                sl_model.T, origin="lower", aspect="auto", interpolation="none"
+            )
+            ax.set(xlabel="Time Index", ylabel="Pixel Index")
+            # Add colorbar
+            cbar = fig.colorbar(im, ax=ax, location="right")
+            cbar.set_label("Flux [$e^-/s$]")
+            plt.show()
+            plt.close(fig)
 
         return np.asarray(sl_model), np.asarray(sl_model_err)
 
