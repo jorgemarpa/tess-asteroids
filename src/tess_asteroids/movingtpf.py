@@ -618,7 +618,7 @@ class MovingTPF:
 
     def _create_scattered_light_model(
         self,
-        method: str = "per_time",
+        method: str = "all_time",
         ncomponents: int = 5,
         niter: int = 5,
         poly_deg: int = 3,
