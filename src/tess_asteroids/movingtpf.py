@@ -666,10 +666,17 @@ class MovingTPF:
             Scattered light model, with same shape as `self.all_flux`.
         sl_model_err : ndarray
             Error on scattered light model, with same shape as `self.all_flux`.
+        sl_quality : ndarray
+            Quality of scattered light model, with same shape as `self.time`. At cadences where no SL model is available, 
+            quality mask is set to True.
         """
 
         # Create mask for moving target and stars.
         source_mask = self._create_pca_source_mask(**kwargs)
+
+        # Initialise scattered light quality mask
+        # >>> Once SL model is included in BG modelling, update where quality mask is created/saved. <<<
+        sl_quality = np.zeros_like(self.time, dtype=bool)
 
         # Create design matrix - a `poly_deg` degree polynomial in row and column.
         row, col = self.pixels.T
@@ -704,10 +711,11 @@ class MovingTPF:
                 w = np.linalg.solve(
                     X[~source_mask].T.dot(X[~source_mask]), X[~source_mask].T.dot(V.T)
                 )
-            # If no solution is found, return nan.
+            # If no solution is found, return nan at all times.
             except np.linalg.LinAlgError:
                 sl_model = np.full(self.all_flux.shape, np.nan)
                 sl_model_err = np.full(self.all_flux.shape, np.nan)
+                sl_quality = np.ones_like(self.time, dtype=bool)
                 logger.warning(
                     "When computing the scattered light model, no solution was found. The scattered light model was set to nan at all times."
                 )
@@ -762,6 +770,7 @@ class MovingTPF:
                 except AssertionError:
                     sl_model[t] = np.nan
                     sl_model_err[t] = np.nan
+                    sl_quality[t] = True
                     logger.warning(
                         "At cadence number {0}, the PCA failed with an AssertionError. This means either niter < 0, ncomponents <= 0 or ncomponents is greater than the smallest dimension of the input matrix (i.e. masking of `self.all_flux` has removed too much data). The corresponding scattered light model was set to nan.".format(
                             self.cadence_number[t]
@@ -777,6 +786,7 @@ class MovingTPF:
                 except np.linalg.LinAlgError:
                     sl_model[t] = np.nan
                     sl_model_err[t] = np.nan
+                    sl_quality[t] = True
                     logger.warning(
                         "When computing the scattered light model for cadence number {0}, no solution was found. The corresponding scattered light model was set to nan.".format(
                             self.cadence_number[t]
@@ -805,7 +815,7 @@ class MovingTPF:
 
         if diagnostic_plot:
             logger.info("Making diagnostic plots for scattered light model...")
-            # Plot one: SL model on 2D pixel grid in all_flux region for selection of frames
+            # Plot one: SL model on 2D pixel grid in all_flux region for selection of frames.
             # Origin is minimum row/column (not a pair) and shape is entire all_flux region.
             origin = tuple(self.pixels.min(axis=0).astype(int))
             shape = tuple(
@@ -872,7 +882,7 @@ class MovingTPF:
             plt.show()
             plt.close(fig)
 
-        return np.asarray(sl_model), np.asarray(sl_model_err)
+        return np.asarray(sl_model), np.asarray(sl_model_err), np.asarray(sl_quality)
 
     def create_aperture(self, method: str = "prf", **kwargs):
         """
