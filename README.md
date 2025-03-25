@@ -20,8 +20,6 @@ pip install tess-asteroids
 
 `tess-asteroids` uses `lkspacecraft` to derive barycentric time corrections (see [below](https://github.com/altuson/tess-asteroids?tab=readme-ov-file#barycentric-time-correction)). **The first time you run `lkspacecraft` it will download a set of files (the SPICE kernels for TESS). This will take approximately 5 minutes, depending on your internet connection, and the total file volume will be about 1GB.** The files will be cached once they are downloaded and if a new version of any file becomes available they will be automatically retrieved.
 
-Note: some of the files for early TESS sectors are currently missing from the archive. This is a known [issue](https://github.com/lightkurve/lkspacecraft/issues/4) and the files will be made available in the future.
-
 ## Quickstart
 
 You can easily make and save a TPF and LCF for any object in the JPL Small-Body Database that has been observed by TESS. For example,
@@ -189,9 +187,7 @@ For more information about time scales, see the `astropy` [documentation](https:
 
 ### Barycentric time correction
 
-The barycentric time correction derived by SPOC (BARYCORR) is used to transform the time in UTC at the spacecraft into the time in TDB at the solar system barycenter. This correction is calculated at the center of each FFI (i.e. one correction for each CCD) but, in reality, the correction depends upon RA and Dec. Therefore, within `tess-asteroids` we re-derive the barycentric time correction based upon the position of the moving target. In the output TPFs and LCFs, you will see columns called ORIGINAL_TIME (FFI timestamp in TDB at barycenter, as derived by SPOC), ORIGINAL_TIMECORR (correction to transform UTC at spacecraft into TDB at barycenter, as derived by SPOC), TIME (re-derived time in TDB at barycenter) and TIMECORR (re-derived time correction).
-
-The barycentric time correction is derived using `lkspacecraft`, but some of the files needed to compute the correction are missing for early TESS sectors. This is a known [issue](https://github.com/lightkurve/lkspacecraft/issues/4) and the files will be made available in the future. In the meantime, you might notice that the TIME and ORIGINAL_TIME columns are the same for some of your targets. This means the barycentric time correction was not re-derived and the timestamps in those files will be less accurate. 
+The barycentric time correction derived by SPOC (BARYCORR) is used to transform the time in UTC at the spacecraft into the time in TDB at the solar system barycenter. This correction is calculated at the center of each FFI (i.e. one correction for each CCD) but, in reality, the correction depends upon RA and Dec. Therefore, within `tess-asteroids` we use `lkspacecraft` to re-derive the barycentric time correction based upon the position of the moving target. In the output TPFs and LCFs, you will see columns called ORIGINAL_TIME (FFI timestamp in TDB at barycenter, as derived by SPOC), ORIGINAL_TIMECORR (correction to transform UTC at spacecraft into TDB at barycenter, as derived by SPOC), TIME (re-derived time in TDB at barycenter) and TIMECORR (re-derived time correction).
 
 ## Understanding the TPF and LCF
 

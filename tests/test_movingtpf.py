@@ -298,9 +298,8 @@ def test_make_tpf():
         assert len(hdul[3].data["APERTURE"]) == len(target.time)
         assert np.array_equal(target.corr_flux, hdul[1].data["FLUX"])
 
-        # As long as SPICE kernels are still missing, TIME and TIME_ORIGINAL should be
-        # identical. When this test fails, we know the kernels have been updated.
-        assert (hdul[1].data["TIME"] == hdul[3].data["ORIGINAL_TIME"]).all()
+        # Check the UTC to TDB conversion has been applied.
+        assert (hdul[1].data["TIME"] != hdul[3].data["ORIGINAL_TIME"]).all()
 
     # Check the file can be opened with lightkurve
     tpf = lk.read(
@@ -392,9 +391,8 @@ def test_make_lc():
         assert "RA" in hdul[1].columns.names
         assert "EPHEM1" in hdul[1].columns.names
 
-        # As long as SPICE kernels are still missing, TIME and TIME_ORIGINAL should be
-        # identical. When this test fails, we know the kernels have been updated.
-        assert (hdul[1].data["TIME"] == hdul[1].data["ORIGINAL_TIME"]).all()
+        # Check the UTC to TDB conversion has been applied.
+        assert (hdul[1].data["TIME"] != hdul[1].data["ORIGINAL_TIME"]).all()
 
     # Check the file can be opened with lightkurve
     lc = lk.io.tess.read_tess_lightcurve(
