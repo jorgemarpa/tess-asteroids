@@ -667,7 +667,7 @@ class MovingTPF:
         sl_model_err : ndarray
             Error on scattered light model, with same shape as `self.all_flux`.
         sl_quality : ndarray
-            Quality of scattered light model, with same shape as `self.time`. At cadences where no SL model is available, 
+            Quality of scattered light model, with same shape as `self.time`. At cadences where no SL model is available,
             quality mask is set to True.
         """
 
