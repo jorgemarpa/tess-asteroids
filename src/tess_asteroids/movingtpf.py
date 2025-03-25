@@ -377,8 +377,7 @@ class MovingTPF:
         )
 
         # Calculate UTC to TDB correction using position of object.
-        # This will not work for some early sectors due to missing SPICE kernels. This is a
-        # known issue and, once it is fixed, the try/except can be removed.
+        # If SPICE kernels are missing, no correction will be computed.
         try:
             time_utc = self.time_original - self.timecorr_original
             # Catch warnings.
