@@ -821,7 +821,7 @@ class MovingTPF:
                 (self.pixels.max(axis=0) - self.pixels.min(axis=0) + 1).astype(int)
             )
             # Re-shape SL model to all_flux region.
-            sl_reshaped = np.full((len(self.time), shape[0], shape[1]), np.nan)
+            sl_reshaped = np.full((len(self.time), *shape), np.nan)
             for t in range(len(self.time)):
                 sl_reshaped[t][
                     self.pixels[:, 0] - np.asarray(origin[0]),
