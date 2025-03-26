@@ -595,11 +595,10 @@ class MovingTPF:
         # Mask pixels whose average flux gradient over all time is some fraction greater than average flux gradient
         # over all pixels and all times. Have to use binary_fill_holes to fill holes in binary mask (otherwise bright
         # pixels in center of star are sometimes excluded from gradient mask).
+        med_gradient = np.gradient(med_reshaped)
         star_gradient_mask = np.hypot(
-            *np.gradient(med_reshaped)
-        ) >= star_gradient_threshold * np.nanmedian(
-            np.hypot(*np.gradient(med_reshaped))
-        )
+            *med_gradient
+        ) >= star_gradient_threshold * np.nanmedian(np.hypot(*med_gradient))
         star_gradient_mask = ndimage.binary_fill_holes(star_gradient_mask)
 
         # Combine flux and gradient mask - gradient mask is reshaped back to match star_flux_mask.
@@ -697,6 +696,7 @@ class MovingTPF:
         start_time = time.time()
         if method == "all_time":
             # Note: This masks all moving target pixels at all times, even when it is not present.
+            # This is a limitation of computing the PCA at all times.
             source_mask = source_mask.any(axis=0)
 
             # Get the PCA components for all pixels at all times, excluding pixels with sources.
@@ -840,29 +840,21 @@ class MovingTPF:
                 1, len(frames), sharex=True, sharey=True, figsize=(len(frames) * 4, 4)
             )
             for i, frame in enumerate(frames):
-                if i == 0:
-                    im = ax[i].imshow(
-                        sl_reshaped[frame],
-                        origin="lower",
-                        extent=extent,
-                        aspect="auto",
-                        interpolation="none",
-                    )
-                    ax[i].set(ylabel="Row Pixel")
-                else:
-                    im = ax[i].imshow(
-                        sl_reshaped[frame],
-                        origin="lower",
-                        extent=extent,
-                        aspect="auto",
-                        interpolation="none",
-                    )
+                im = ax[i].imshow(
+                    sl_reshaped[frame],
+                    origin="lower",
+                    extent=extent,
+                    aspect="auto",
+                    interpolation="none",
+                )
                 ax[i].set(
                     xlabel="Column Pixel",
                     title="CAD {0} | BTJD {1:.4f}".format(
                         self.cadence_number[frame], self.time[frame]
                     ),
                 )
+                if i == 0:
+                    ax[i].set(ylabel="Row Pixel")
                 cbar = fig.colorbar(im, ax=ax[i], location="right")
                 cbar.set_label("Flux [$e^-/s$]")
             plt.show()
