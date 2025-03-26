@@ -215,7 +215,7 @@ class MovingTPF:
         )(
             self.cube.time
             if self.time_scale == "tdb"
-            else self.cube.time - self.cube.timecorr
+            else self.cube.time - self.cube.last_hdu.data["BARYCORR"]
         )
         row_interp = CubicSpline(
             self.ephem["time"].astype(float),
@@ -224,7 +224,7 @@ class MovingTPF:
         )(
             self.cube.time
             if self.time_scale == "tdb"
-            else self.cube.time - self.cube.timecorr
+            else self.cube.time - self.cube.last_hdu.data["BARYCORR"]
         )
 
         # Remove nans from interpolated position
@@ -258,7 +258,7 @@ class MovingTPF:
         ][
             bound_mask
         ]  # Original FFI timestamps of each frame in the data cube, in TDB at SS barycenter.
-        self.timecorr_original = self.cube.timecorr[nan_mask][
+        self.timecorr_original = self.cube.last_hdu.data["BARYCORR"][nan_mask][
             bound_mask
         ]  # Original time correction of each frame in the data cube.
         self.tstart = self.cube.tstart[nan_mask][
@@ -2693,7 +2693,7 @@ class MovingTPF:
         if camera is not None and ccd is not None:
             df_ephem = df_ephem[
                 np.logical_and(df_ephem["camera"] == camera, df_ephem["ccd"] == ccd)
-            ]
+            ].copy()
             if len(df_ephem) == 0:
                 raise ValueError(
                     "Target {} was not observed in sector {}, camera {}, ccd {}.".format(
