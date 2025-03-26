@@ -12,9 +12,9 @@ packages = [{include = "tess_asteroids", from = "src"}]
 [tool.poetry.dependencies]
 python = ">=3.9, <3.13"
 tess-ephem = "^0.5.0"
-tesscube = "^1.0.5"
+tesscube = "^1.2"
 numpy = "^1.26.4"
-pandas = "^1.5.3"
+pandas = "^2.0"
 astropy = "^5.3.4"
 lkprf = "^1.1.1"
 matplotlib = "^3.9"
