@@ -10,10 +10,12 @@ import pandas as pd
 from astropy.io import fits
 from astropy.stats import sigma_clip
 from astropy.time import Time
+from fbpca import pca
 from lkspacecraft import TESSSpacecraft
 from lkspacecraft.spacecraft import BadEphemeris
 from numpy.polynomial import Polynomial
 from scipy import ndimage, stats
+from scipy.interpolate import CubicSpline
 from tess_ephem import ephem
 from tesscube import TESSCube
 from tesscube.fits import get_wcs_header_by_extension
@@ -206,23 +208,23 @@ class MovingTPF:
 
         # Use interpolation to get target (row,column) at cube time.
         # If input ephem uses UTC time scale, convert cube time to UTC for interpolation.
-        column_interp = np.interp(
-            self.cube.time
-            if self.time_scale == "tdb"
-            else self.cube.time - self.cube.last_hdu.data["BARYCORR"],
+        column_interp = CubicSpline(
             self.ephem["time"].astype(float),
             self.ephem["column"].astype(float),
-            left=np.nan,
-            right=np.nan,
-        )
-        row_interp = np.interp(
+            extrapolate=False,
+        )(
             self.cube.time
             if self.time_scale == "tdb"
-            else self.cube.time - self.cube.last_hdu.data["BARYCORR"],
+            else self.cube.time - self.cube.last_hdu.data["BARYCORR"]
+        )
+        row_interp = CubicSpline(
             self.ephem["time"].astype(float),
             self.ephem["row"].astype(float),
-            left=np.nan,
-            right=np.nan,
+            extrapolate=False,
+        )(
+            self.cube.time
+            if self.time_scale == "tdb"
+            else self.cube.time - self.cube.last_hdu.data["BARYCORR"]
         )
 
         # Remove nans from interpolated position
@@ -515,6 +517,364 @@ class MovingTPF:
 
         return np.asarray(bg), np.asarray(bg_err)
 
+    def _create_pca_source_mask(
+        self,
+        target_threshold: float = 0.01,
+        star_flux_threshold: float = 1.1,
+        star_gradient_threshold: float = 5,
+        **kwargs,
+    ):
+        """
+        Creates a boolean mask, with the same shape as `self.all_flux` (ntimes, npixels), that masks stationary sources
+        (e.g. stars) and the moving target. This is applied when modelling the background scattered light using PCA.
+
+        The moving target mask is created using the PRF model and selecting all pixels that contain more than the
+        `target_threshold` fraction of the object's flux. This mask is defined per time.
+
+        The star mask is created using two condiditons: i) a high flux value and ii) a high flux gradient. This mask is
+        constant across all times.
+
+        Parameters
+        ----------
+        target_threshold : float
+            Pixels where the PRF model is greater than this threshold are included in the target mask. Must be between 0 and 1
+            because the PRF model is normalised so that all values sum to one.
+        star_flux_threshold : float
+            Used to define the threshold above which a pixel has a high flux.
+        star_gradient_threshold : float
+            Used to define the threshold above which a pixel has a high flux gradient.
+        kwargs : dict
+            Keywords arguments passed to `self._create_target_prf_model`, e.g `time_step`.
+
+        Returns
+        -------
+        source_mask : ndarray
+            Boolean mask with shape (ntimes, npixels). The mask is `True` when the moving target or a star is present.
+        """
+
+        # Check thresholds are physical.
+        if target_threshold < 0 or target_threshold >= 1:
+            raise ValueError(
+                f"`target_threshold` must be between 0 and 1. Not '{target_threshold}'"
+            )
+        if star_flux_threshold <= 0:
+            raise ValueError(
+                f"`star_flux_threshold` must be greater than 0. Not '{star_flux_threshold}'"
+            )
+        if star_gradient_threshold <= 0:
+            raise ValueError(
+                f"`star_gradient_threshold` must be greater than 0. Not '{star_gradient_threshold}'"
+            )
+
+        # Create mask for moving target.
+        target_mask = (
+            self._create_target_prf_model(all_flux=True, **kwargs) >= target_threshold
+        )
+
+        # Create mask for stationary sources e.g. stars (high flux values AND high flux gradients).
+
+        # Median of each pixel across all times.
+        med = np.nanmedian(self.all_flux, axis=0)
+
+        # Mask pixels whose average flux value over all time is some fraction greater than average flux value over all
+        # pixels and all times.
+        star_flux_mask = med >= star_flux_threshold * np.nanmedian(self.all_flux)
+
+        # Reshape median to match 2D all_flux region. This is necessary to be able to compute mask in terms of gradient.
+        # Origin is minimum row/column (not a pair) and shape is entire all_flux region.
+        origin = tuple(self.pixels.min(axis=0).astype(int))
+        shape = tuple(
+            (self.pixels.max(axis=0) - self.pixels.min(axis=0) + 1).astype(int)
+        )
+        med_reshaped = np.full(shape, np.nan)
+        med_reshaped[
+            self.pixels[:, 0] - np.asarray(origin[0]),
+            self.pixels[:, 1] - np.asarray(origin[1]),
+        ] = med
+
+        # Mask pixels whose average flux gradient over all time is some fraction greater than average flux gradient
+        # over all pixels and all times. Have to use binary_fill_holes to fill holes in binary mask (otherwise bright
+        # pixels in center of star are sometimes excluded from gradient mask).
+        med_gradient = np.gradient(med_reshaped)
+        star_gradient_mask = np.hypot(
+            *med_gradient
+        ) >= star_gradient_threshold * np.nanmedian(np.hypot(*med_gradient))
+        star_gradient_mask = ndimage.binary_fill_holes(star_gradient_mask)
+
+        # Combine flux and gradient mask - gradient mask is reshaped back to match star_flux_mask.
+        star_mask = (
+            star_flux_mask
+            & star_gradient_mask[
+                self.pixels[:, 0] - np.asarray(origin[0]),
+                self.pixels[:, 1] - np.asarray(origin[1]),
+            ]
+        )
+
+        return np.asarray(
+            [np.logical_or(targ_mask, star_mask) for targ_mask in target_mask]
+        )
+
+    def _create_scattered_light_model(
+        self,
+        method: str = "all_time",
+        ncomponents: int = 5,
+        niter: int = 5,
+        poly_deg: int = 3,
+        window_length: float = 1,
+        diagnostic_plot: bool = False,
+        **kwargs,
+    ):
+        """
+        Use PCA to model scattered light. Either compute the PCA components for all times at once (`all_time`) or
+        use a for loop to go through each frame and compute PCA components in a time window (`per_time`).
+        The latter is preferred, but runtime is longer (see below). The resulting scattered light model has the same shape
+        as `self.all_flux`.
+
+        e.g. asteroid 1980 VR1 in sector 1, camera 1, ccd 1 (ntimes = 905, npixels = 7917) run on MacBook Pro 2023.
+        `all_time` method takes about 0.1 seconds to run (~80% is computation of PCA), `per_time` method takes about
+        31 seconds to run (~86% is computation of PCA).
+
+        e.g. asteroid 1998 YT6 in sector 6, camera 1, ccd 1 (ntimes = 967, npixels = 14056) run on MacBook Pro 2023.
+        `all_time` method takes about 0.1 seconds to run (~75% is computation of PCA), `per_time` method takes about
+        20 minutes to run (~95% is computation of PCA).
+
+        Parameters
+        ----------
+        method : str
+            Method used to compute scattered light model. One of [`all_time`, `per_time`].
+            If `all_time`, the PCA components are computed for all times at once.
+            If `per_time`, the PCA components are computed in a time window around each frame.
+        ncomponents : int
+            Number of PCA components.
+        niter : int
+            Number of iterations that will be run to compute the PCA components.
+        poly_deg : int
+            Polynomial degree for the cartesian design matrix.
+        window_length : float
+            If method is `per_time`, this is used to define the time window around each frame for the PCA computation.
+            It is defined in days.
+        diagnostic_plot : bool
+            If True, shows two diagnostic plots to check the scattered light model.
+        kwargs : dict
+            Keywords arguments passed to `self._create_pca_source_mask`, e.g `target_threshold`, `star_flux_threshold`.
+
+        Returns
+        -------
+        sl_model : ndarray
+            Scattered light model, with same shape as `self.all_flux`.
+        sl_model_err : ndarray
+            Error on scattered light model, with same shape as `self.all_flux`.
+        sl_quality : ndarray
+            Quality of scattered light model, with same shape as `self.time`. At cadences where no SL model is available,
+            quality mask is set to True.
+        """
+
+        # Create mask for moving target and stars.
+        source_mask = self._create_pca_source_mask(**kwargs)
+
+        # Initialise scattered light quality mask
+        # >>> Once SL model is included in BG modelling, update where quality mask is created/saved. <<<
+        sl_quality = np.zeros_like(self.time, dtype=bool)
+
+        # Create design matrix - a `poly_deg` degree polynomial in row and column.
+        row, col = self.pixels.T
+        R = row - np.nanmean(row)
+        C = col - np.nanmean(col)
+        X = np.vstack(
+            [
+                R.ravel() ** idx * C.ravel() ** jdx
+                for idx in range(poly_deg)
+                for jdx in range(poly_deg)
+            ]
+        ).T
+
+        logger.info(
+            "Started computation of scattered light model using {0} method.".format(
+                method
+            )
+        )
+        start_time = time.time()
+        if method == "all_time":
+            # Note: This masks all moving target pixels at all times, even when it is not present.
+            # This is a limitation of computing the PCA at all times.
+            source_mask = source_mask.any(axis=0)
+
+            # Get the PCA components for all pixels at all times, excluding pixels with sources.
+            # This will error if `ncomponents` is greater than the smallest dimension of the input matrix.
+            U, s, V = pca(
+                self.all_flux[:, ~source_mask], k=ncomponents, raw=True, n_iter=niter
+            )
+
+            # Compute best-fitting weights
+            try:
+                w = np.linalg.solve(
+                    X[~source_mask].T.dot(X[~source_mask]), X[~source_mask].T.dot(V.T)
+                )
+            # If no solution is found, return nan at all times.
+            except np.linalg.LinAlgError:
+                sl_model = np.full(self.all_flux.shape, np.nan)
+                sl_model_err = np.full(self.all_flux.shape, np.nan)
+                sl_quality = np.ones_like(self.time, dtype=bool)
+                logger.warning(
+                    "When computing the scattered light model, no solution was found. The scattered light model was set to nan at all times."
+                )
+            # If solution is found, continue:
+            else:
+                # Create model that can predict V for pixels not included in the PCA.
+                V_model = X.dot(w).T
+
+                # Compute scattered light model and error.
+                # >>>>> Add error on SL model <<<<<
+                sl_model = U.dot(np.diag(s)).dot(V_model)
+                sl_model_err = np.full(sl_model.shape, np.nan)
+
+        elif method == "per_time":
+            # Define good quality data using SPOC quality flags.
+            spoc_quality_mask = self.quality & (1 | 4 | 16 | 32 | 16384) == 0
+
+            # Initialise scattered light model and error.
+            sl_model = np.zeros(self.all_flux.shape)
+            sl_model_err = np.zeros(self.all_flux.shape)
+
+            # Run through each time
+            for t in range(len(self.time)):
+                # Indices that define a time window around the current frame.
+                tmin, tmax = (
+                    self.time[t] - 0.5 * window_length,
+                    self.time[t] + 0.5 * window_length,
+                )
+                t_window = np.where(
+                    np.logical_and(self.time >= tmin, self.time <= tmax)
+                )[0]
+
+                # Remove bad quality SPOC cadences, but ensure current time is always included.
+                t_window = np.unique(
+                    np.append(t_window[spoc_quality_mask[t_window]], t)
+                )
+
+                # Mask sources i.e. moving target and stars. This masks pixels associated with the moving target only
+                # at the current time.
+                sources = source_mask[t_window].any(axis=0)
+
+                # Get the PCA components for pixels in time window, excluding pixels with sources.
+                # This will return an AssertionError if `ncomponents` is greater than the smallest dimension of the
+                # input matrix (i.e. too few times or pixels). In this case, set scattered light model to nan.
+                try:
+                    U, s, V = pca(
+                        self.all_flux[t_window][:, ~sources],
+                        k=ncomponents,
+                        raw=True,
+                        n_iter=niter,
+                    )
+                except AssertionError:
+                    sl_model[t] = np.nan
+                    sl_model_err[t] = np.nan
+                    sl_quality[t] = True
+                    logger.warning(
+                        "At cadence number {0}, the PCA failed with an AssertionError. This means either niter < 0, ncomponents <= 0 or ncomponents is greater than the smallest dimension of the input matrix (i.e. masking of `self.all_flux` has removed too much data). The corresponding scattered light model was set to nan.".format(
+                            self.cadence_number[t]
+                        )
+                    )
+                    continue
+
+                # Compute best-fitting weights
+                try:
+                    w = np.linalg.solve(
+                        X[~sources].T.dot(X[~sources]), X[~sources].T.dot(V.T)
+                    )
+                except np.linalg.LinAlgError:
+                    sl_model[t] = np.nan
+                    sl_model_err[t] = np.nan
+                    sl_quality[t] = True
+                    logger.warning(
+                        "When computing the scattered light model for cadence number {0}, no solution was found. The corresponding scattered light model was set to nan.".format(
+                            self.cadence_number[t]
+                        )
+                    )
+                    continue
+                # Create model that can predict V for pixels not included in PCA.
+                V_model = X.dot(w).T
+
+                # Compute scattered light model and error.
+                # >>>>> Add error on SL model <<<<<
+                sl_model[t] = U[t_window == t].dot(np.diag(s)).dot(V_model)
+                sl_model_err[t] = np.nan
+
+        else:
+            raise ValueError(
+                "`method` must be one of: [`per_time`, `all_time`]. Not `{0}`".format(
+                    method
+                )
+            )
+        logger.info(
+            "Finished computation of scattered light model in {0:.2f} sec.".format(
+                time.time() - start_time
+            )
+        )
+
+        if diagnostic_plot:
+            logger.info("Making diagnostic plots for scattered light model...")
+            # Plot one: SL model on 2D pixel grid in all_flux region for selection of frames.
+            # Origin is minimum row/column (not a pair) and shape is entire all_flux region.
+            origin = tuple(self.pixels.min(axis=0).astype(int))
+            shape = tuple(
+                (self.pixels.max(axis=0) - self.pixels.min(axis=0) + 1).astype(int)
+            )
+            # Re-shape SL model to all_flux region.
+            sl_reshaped = np.full((len(self.time), *shape), np.nan)
+            for t in range(len(self.time)):
+                sl_reshaped[t][
+                    self.pixels[:, 0] - np.asarray(origin[0]),
+                    self.pixels[:, 1] - np.asarray(origin[1]),
+                ] = sl_model[t]
+            # Plot SL model from first, middle and last frame.
+            # Note: setting aspect="auto" means pixels are not square in these visualisations.
+            frames = [0, len(self.time) // 2, -1]
+            extent = (
+                origin[1] - 0.5,
+                origin[1] + shape[1] - 0.5,
+                origin[0] - 0.5,
+                origin[0] + shape[0] - 0.5,
+            )
+            fig, ax = plt.subplots(
+                1, len(frames), sharex=True, sharey=True, figsize=(len(frames) * 4, 4)
+            )
+            for i, frame in enumerate(frames):
+                im = ax[i].imshow(
+                    sl_reshaped[frame],
+                    origin="lower",
+                    extent=extent,
+                    aspect="auto",
+                    interpolation="none",
+                )
+                ax[i].set(
+                    xlabel="Column Pixel",
+                    title="CAD {0} | BTJD {1:.4f}".format(
+                        self.cadence_number[frame], self.time[frame]
+                    ),
+                )
+                if i == 0:
+                    ax[i].set(ylabel="Row Pixel")
+                cbar = fig.colorbar(im, ax=ax[i], location="right")
+                cbar.set_label("Flux [$e^-/s$]")
+            plt.show()
+            plt.close(fig)
+
+            # Plot two: time-series of SL model for each pixel.
+            # Note: setting aspect="auto" means pixels are not square in these visualisations.
+            fig, ax = plt.subplots()
+            im = ax.imshow(
+                sl_model.T, origin="lower", aspect="auto", interpolation="none"
+            )
+            ax.set(xlabel="Time Index", ylabel="Pixel Index")
+            # Add colorbar
+            cbar = fig.colorbar(im, ax=ax, location="right")
+            cbar.set_label("Flux [$e^-/s$]")
+            plt.show()
+            plt.close(fig)
+
+        return np.asarray(sl_model), np.asarray(sl_model_err), np.asarray(sl_quality)
+
     def create_aperture(self, method: str = "prf", **kwargs):
         """
         Creates an aperture mask using a method ['threshold', 'prf', 'ellipse'].
@@ -660,7 +1020,7 @@ class MovingTPF:
         """
 
         # Create PRF model
-        self._create_target_prf_model(**kwargs)
+        self.prf_model = self._create_target_prf_model(**kwargs)
 
         # Use PRF model to define aperture
         if threshold == "optimal":
@@ -681,14 +1041,18 @@ class MovingTPF:
 
         return aperture_mask
 
-    def _create_target_prf_model(self, time_step: Optional[float] = None, **kwargs):
+    def _create_target_prf_model(
+        self, time_step: Optional[float] = None, all_flux: bool = False, **kwargs
+    ):
         """
         Creates a PRF model of the target as a function of time, using the `lkprf` package.
         Since the target is moving, the PRF model per time is made by summing models on a high
-        resolution time grid during the exposure. This function creates the `self.prf_model`
-        attribute. The PRF model has shape (ntimes, nrows, ncols), each value represents the
-        fraction of the total flux in that pixel at that time and at each time all values
-        sum to one.
+        resolution time grid during the exposure. The PRF model represents the fraction of the
+        total flux in that pixel at that time and at each time all values sum to one.
+
+        The PRF model can be returned in the all_flux or TPF space, controlled by the
+        `all_flux` parameter. In all_flux space the PRF model has shape (ntimes, npixels) and in
+        the TPF space the shape is (ntimes, nrows, ncols).
 
         Parameters
         ----------
@@ -698,9 +1062,14 @@ class MovingTPF:
             of the moving target.
             If `None`, a value will be computed based upon the average speed of the target
             during the observation.
+        all_flux : boolean
+            If True, the PRF model is returned with a shape (ntimes, npixels).
+            If False, the PRF model is returned with a shape (ntimes, nrows, ncols).
 
         Returns
         -------
+        prf_model : ndarray
+            numpy array containing the PRF model of the moving target.
         """
 
         if not hasattr(self, "all_flux"):
@@ -744,25 +1113,34 @@ class MovingTPF:
             tstop[-1],
             int(np.ceil((tstop[-1] - tstart[0]) * 24 * 60 / time_step)),
         )
-        column_interp = np.interp(
-            high_res_time,
+        column_interp = CubicSpline(
             self.ephem["time"].astype(float),
             self.ephem["column"].astype(float),
-            left=np.nan,
-            right=np.nan,
-        )
-        row_interp = np.interp(
-            high_res_time,
+            extrapolate=False,
+        )(high_res_time)
+        row_interp = CubicSpline(
             self.ephem["time"].astype(float),
             self.ephem["row"].astype(float),
-            left=np.nan,
-            right=np.nan,
-        )
+            extrapolate=False,
+        )(high_res_time)
+
+        # Define origin and shape for all_flux
+        if all_flux:
+            # Origin is minimum row/column (not a pair) and shape is entire all_flux region
+            origin = tuple(self.pixels.min(axis=0).astype(int))
+            shape = tuple(
+                (self.pixels.max(axis=0) - self.pixels.min(axis=0) + 1).astype(int)
+            )
 
         # Build PRF model at each timestamp
         prf_model = []
         recorded_warnings = []
         for t in range(len(self.time)):
+            # Define origin and shape per time
+            if not all_flux:
+                origin = (self.corner[t][0], self.corner[t][1])
+                shape = self.shape
+
             # Find indices in `high_res_time` between corresponding tstart/tstop.
             inds = np.where(
                 np.logical_and(high_res_time >= tstart[t], high_res_time <= tstop[t])
@@ -779,15 +1157,24 @@ class MovingTPF:
                             (r, c)
                             for r, c in zip(row_interp[inds], column_interp[inds])
                         ],
-                        origin=(self.corner[t][0], self.corner[t][1]),
-                        shape=self.shape,
+                        origin=origin,
+                        shape=shape,
                     )
                     recorded_warnings.extend(recorded_warning)
                 model = sum(model) / np.sum(model)
             except ValueError:
-                model = np.full(self.shape, np.nan)
+                model = np.full(shape, np.nan)
 
-            prf_model.append(model)
+            # Save PRF models to array, only saving pixels that have been retrieved.
+            if all_flux:
+                prf_model.append(
+                    model[
+                        self.pixels[:, 0] - np.asarray(origin[0]),
+                        self.pixels[:, 1] - np.asarray(origin[1]),
+                    ]
+                )
+            else:
+                prf_model.append(model)
 
         # Get unique warnings and save to logger.
         for w in list(
@@ -830,7 +1217,7 @@ class MovingTPF:
                         )
                     )
 
-        self.prf_model = np.asarray(prf_model)
+        return np.asarray(prf_model)
 
     def _create_ellipse_aperture(
         self,

@@ -108,6 +108,26 @@ def test_data_logic(caplog):
     assert np.shape(target.corr_flux_err) == (len(target.time), *shape)
 
 
+def test_create_scattered_light_model():
+    # Initialise MovingTPF for 1980 VR1 and get data.
+    target = MovingTPF.from_name("1980 VR1", sector=1, camera=1, ccd=1)
+    target.get_data()
+
+    # Check the SL model has expected shape
+    sl_model, sl_model_err, sl_quality = target._create_scattered_light_model(
+        method="all_time"
+    )
+    assert np.shape(sl_model) == np.shape(target.all_flux)
+    assert np.shape(sl_model_err) == np.shape(target.all_flux)
+    assert np.shape(sl_quality) == np.shape(target.time)
+
+    # Check quality mask
+    sl_model, sl_model_err, sl_quality = target._create_scattered_light_model(
+        method="per_time", ncomponents=8000
+    )
+    assert np.array_equal(sl_quality, np.ones_like(target.time, dtype=bool))
+
+
 def test_create_threshold_aperture():
     """
     Test threshold mask method that creates an aperture mask at each frame
