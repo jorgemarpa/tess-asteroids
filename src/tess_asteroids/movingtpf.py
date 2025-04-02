@@ -117,7 +117,7 @@ class MovingTPF:
             Defines the pixels that will be retrieved, centred on the target, at each timestamp.
         bg_method : str
             Method used for background correction.
-            One of `rolling`.
+            One of [`rolling`, `linear_model`].
         ap_method : str
             Method used to create aperture.
             One of ['threshold', 'prf', 'ellipse'].
@@ -445,9 +445,9 @@ class MovingTPF:
         Parameters
         ----------
         method : str
-            Method used for background correction. One of `rolling`.
+            Method used for background correction. One of [`rolling`,`linear_model`].
         **kwargs
-            Keyword arguments to be passed to `_bg_rolling_median()`.
+            Keyword arguments to be passed to `_bg_rolling_median()` and `_bg_linear_model()`.
 
         Returns
         -------
@@ -461,9 +461,14 @@ class MovingTPF:
         if method == "rolling":
             self.bg, self.bg_err = self._bg_rolling_median(**kwargs)
 
+        elif method == "linear_model":
+            self.bg, self.bg_err, _, _, _, _ = self._bg_linear_model(**kwargs)
+
         else:
             raise ValueError(
-                "`method` must be one of: `rolling`. Not `{0}`".format(method)
+                "`method` must be one of: [`rolling`,`linear_model`]. Not `{0}`".format(
+                    method
+                )
             )
 
         # Apply background correction
@@ -517,28 +522,31 @@ class MovingTPF:
 
         return np.asarray(bg), np.asarray(bg_err)
 
-    def _create_pca_source_mask(
+    def _create_source_mask(
         self,
         target_threshold: float = 0.01,
+        include_stars: bool = True,
         star_flux_threshold: float = 1.1,
         star_gradient_threshold: float = 5,
         **kwargs,
     ):
         """
         Creates a boolean mask, with the same shape as `self.all_flux` (ntimes, npixels), that masks stationary sources
-        (e.g. stars) and the moving target. This is applied when modelling the background scattered light using PCA.
+        (e.g. stars) and the moving target.
 
         The moving target mask is created using the PRF model and selecting all pixels that contain more than the
         `target_threshold` fraction of the object's flux. This mask is defined per time.
 
         The star mask is created using two condiditons: i) a high flux value and ii) a high flux gradient. This mask is
-        constant across all times.
+        constant across all times. This is only included in the mask if `include_stars` is `True`.
 
         Parameters
         ----------
         target_threshold : float
             Pixels where the PRF model is greater than this threshold are included in the target mask. Must be between 0 and 1
             because the PRF model is normalised so that all values sum to one.
+        include_stars : bool
+            If `True`, returns a mask for moving target and stars. If `False`, returns a mask for moving target only.
         star_flux_threshold : float
             Used to define the threshold above which a pixel has a high flux.
         star_gradient_threshold : float
@@ -570,6 +578,8 @@ class MovingTPF:
         target_mask = (
             self._create_target_prf_model(all_flux=True, **kwargs) >= target_threshold
         )
+        if not include_stars:
+            return target_mask
 
         # Create mask for stationary sources e.g. stars (high flux values AND high flux gradients).
 
@@ -670,7 +680,7 @@ class MovingTPF:
         """
 
         # Create mask for moving target and stars.
-        source_mask = self._create_pca_source_mask(**kwargs)
+        source_mask = self._create_source_mask(include_stars=True, **kwargs)
 
         # Initialise scattered light quality mask
         # >>> Once SL model is included in BG modelling, update where quality mask is created/saved. <<<
@@ -874,6 +884,204 @@ class MovingTPF:
             plt.close(fig)
 
         return np.asarray(sl_model), np.asarray(sl_model_err), np.asarray(sl_quality)
+
+    def _bg_linear_model(
+        self,
+        sl_method: str = "all_time",
+        sl_poly_deg: int = 3,
+        sl_window_length: float = 1,
+        window_length: float = 1,
+        poly_deg: int = 3,
+        sigma: float = 5,
+        **kwargs,
+    ):
+        """
+
+        Parameters
+        ----------
+
+        Returns
+        -------
+        bg : ndarray
+            Background flux estimate.
+            Array with same shape as self.flux.
+        bg_err : ndarray
+            Error on background flux estimate.
+            Array with same shape as self.flux.
+        sl_model : ndarray
+        sl_model_err : ndarray
+        linear_model : ndarray
+        linear_model_err : ndarray
+        """
+
+        # Attribute checks
+
+        # Parameter logic checks
+
+        # Remove scattered light from flux
+        sl_model, sl_model_err, sl_quality = self._create_scattered_light_model(
+            method=sl_method,
+            poly_deg=sl_poly_deg,
+            window_length=sl_window_length,
+            **kwargs,
+        )
+        sl_corr_flux = self.all_flux - sl_model
+        sl_corr_flux_err = np.sqrt(
+            np.nansum([self.all_flux_err**2, sl_model_err**2], axis=0)
+        )
+
+        # Initialise arrays
+        linear_model = np.zeros(self.all_flux.shape)
+        linear_model_err = np.zeros(self.all_flux.shape)
+        linear_model_quality = np.zeros(self.all_flux.shape, dtype=bool)
+
+        # Define good quality data using SPOC quality flags.
+        spoc_quality_mask = self.quality & (1 | 4 | 16 | 32 | 16384) == 0
+
+        # Create mask for moving target.
+        source_mask = self._create_source_mask(include_stars=False, **kwargs)
+
+        # Scale time between (-0.5, 0.5) for linear modelling.
+        scaled_time = (self.time - np.nanmedian(self.time)) / np.ptp(self.time)
+
+        logger.info("Started computation of background linear model.")
+        start_time = time.time()
+        for t in range(len(self.time)):
+            # Calculate indices that define a time window around the current frame.
+            tmin, tmax = (
+                self.time[t] - 0.5 * window_length,
+                self.time[t] + 0.5 * window_length,
+            )
+            t_window = np.where(np.logical_and(self.time >= tmin, self.time <= tmax))[0]
+            adx, bdx = min(t_window), max(t_window) + 1
+
+            # Create design matrix - a `poly_deg` degree polynomial in time.
+            X = np.vstack([(scaled_time[adx:bdx]) ** idx for idx in range(poly_deg)]).T
+
+            # Initialise priors on LM components (broad normal distributions).
+            prior_mu = np.zeros(X.shape[1])
+            prior_sigma = np.ones(X.shape[1]) * 1e4
+
+            # Initialise BG linear model distribution.
+            linear_model_dist = np.zeros((self.all_flux.shape[1], 100))
+
+            # Loop through each relevant pixel for fitting i.e. pixels inside movingTPF region.
+            for pdx in np.where(self.target_mask[t])[0]:
+                # Mask times with bad SPOC quality or where the moving target is present in the pixel.
+                k = np.logical_and(
+                    ~source_mask[adx:bdx][:, pdx], spoc_quality_mask[adx:bdx]
+                )
+
+                # Prime while loop
+                n_clip = np.inf
+
+                while n_clip != 0:
+                    # If there are no times with which to fit, return nan.
+                    if not k.any():
+                        linear_model_dist[pdx] = np.nan
+                        break
+
+                    # Update priors: first component should be close to the median of the pixel flux value, but it can't be negative.
+                    # If it is negative, leave prior unchanged.
+                    prior_mu[0] = np.nanmedian(sl_corr_flux[adx:bdx][k, pdx])
+                    if prior_mu[0] <= 0:
+                        prior_mu[0] = 0
+                    else:
+                        prior_sigma[0] = prior_mu[0] ** 0.5
+
+                    # Use weighted Bayesian LS.
+                    sigma_w_inv = X[k].T.dot(
+                        X[k] / sl_corr_flux_err[adx:bdx][k, pdx, None] ** 2
+                    ) + np.diag(1 / prior_sigma**2)
+                    B = (
+                        X[k].T.dot(
+                            sl_corr_flux[adx:bdx][k, pdx]
+                            / sl_corr_flux_err[adx:bdx][k, pdx] ** 2
+                        )
+                        + prior_mu / prior_sigma**2
+                    )
+
+                    # Find the best-fitting weights and errors and turn it into a distribution
+                    w = np.linalg.solve(sigma_w_inv, B)
+                    werr = np.linalg.inv(sigma_w_inv)
+                    wdist = np.random.multivariate_normal(
+                        w, werr, size=linear_model_dist.shape[1]
+                    )
+                    linear_model_dist[pdx] = X[np.arange(adx, bdx) == t].dot(wdist.T)[0]
+
+                    # Mask significant outliers.
+                    n_clip_prev = np.sum(~k)
+                    k = np.logical_and(
+                        k,
+                        np.abs(sl_corr_flux[adx:bdx][:, pdx] - X.dot(w))
+                        / (sl_corr_flux_err[adx:bdx][:, pdx])
+                        < sigma,
+                    )
+                    n_clip = np.sum(~k) - n_clip_prev
+
+            # Compute BG linear model and error from distribution.
+            linear_model[t], linear_model_err[t] = (
+                np.nanmean(linear_model_dist, axis=1),
+                np.nanstd(linear_model_dist, ddof=1, axis=1)
+                / np.sqrt(linear_model_dist.shape[1]),
+            )
+
+            # If there is no `linear_model`, replace with median and MAD and flag as bad quality.
+            for pix in np.where(np.isnan(linear_model[t]))[0]:
+                linear_model[t, pix] = np.nanmedian(sl_corr_flux[adx:bdx][:, pix])
+                linear_model_err[t, pix] = stats.median_abs_deviation(
+                    sl_corr_flux[adx:bdx][:, pix]
+                )
+                linear_model_quality[t, pix] = True
+        logger.info(
+            "Finished computation of background linear model in {0:.2f} sec.".format(
+                time.time() - start_time
+            )
+        )
+
+        # Reshape arrays to match `self.flux`
+        sl_model_reshaped = []
+        sl_model_err_reshaped = []
+        linear_model_reshaped = []
+        linear_model_err_reshaped = []
+        linear_model_quality_reshaped = []
+        for t in range(len(self.time)):
+            sl_model_reshaped.append(
+                sl_model[t][self.target_mask[t]].reshape(self.shape)
+            )
+            sl_model_err_reshaped.append(
+                sl_model_err[t][self.target_mask[t]].reshape(self.shape)
+            )
+            linear_model_reshaped.append(
+                linear_model[t][self.target_mask[t]].reshape(self.shape)
+            )
+            linear_model_err_reshaped.append(
+                linear_model_err[t][self.target_mask[t]].reshape(self.shape)
+            )
+            linear_model_quality_reshaped.append(
+                linear_model_quality[t][self.target_mask[t]].reshape(self.shape)
+            )
+
+        # Combine LM and SL model to create global BG model
+        bg = np.asarray(sl_model_reshaped) + np.asarray(linear_model_reshaped)
+        bg_err = np.sqrt(
+            np.nansum(
+                [
+                    np.asarray(linear_model_err_reshaped) ** 2,
+                    np.asarray(sl_model_err_reshaped) ** 2,
+                ],
+                axis=0,
+            )
+        )
+
+        return (
+            bg,
+            bg_err,
+            np.asarray(sl_model_reshaped),
+            np.asarray(sl_model_err_reshaped),
+            np.asarray(linear_model_reshaped),
+            np.asarray(linear_model_err_reshaped),
+        )
 
     def create_aperture(self, method: str = "prf", **kwargs):
         """
