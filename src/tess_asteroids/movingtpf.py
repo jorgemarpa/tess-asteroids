@@ -100,7 +100,7 @@ class MovingTPF:
     def make_tpf(
         self,
         shape: Tuple[int, int] = (11, 11),
-        bg_method: str = "rolling",
+        bg_method: str = "linear_model",
         ap_method: str = "prf",
         save: bool = False,
         outdir: str = "",
@@ -914,7 +914,8 @@ class MovingTPF:
         linear_model_err : ndarray
         """
 
-        # Attribute checks
+        if not hasattr(self, "all_flux"):
+            raise AttributeError("Must run `get_data()` before computing background.")
 
         # Parameter logic checks
 
