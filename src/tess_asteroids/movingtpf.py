@@ -679,6 +679,12 @@ class MovingTPF:
             quality mask is set to True.
         """
 
+        # Parameter logic checks
+        if window_length <= 0:
+            raise ValueError(f"`window_length` must be greater than zero. Not '{window_length}'")
+        if poly_deg <= 0:
+            raise ValueError(f"`poly_deg` must be greater than zero. Not '{poly_deg}'")
+
         # Create mask for moving target and stars.
         source_mask = self._create_source_mask(include_stars=True, **kwargs)
 
@@ -918,6 +924,12 @@ class MovingTPF:
             raise AttributeError("Must run `get_data()` before computing background.")
 
         # Parameter logic checks
+        if window_length <= 0:
+            raise ValueError(f"`window_length` must be greater than zero. Not '{window_length}'")
+        if poly_deg <= 0:
+            raise ValueError(f"`poly_deg` must be greater than zero. Not '{poly_deg}'")
+        if sigma <= 0:
+            raise ValueError(f"`sigma` must be greater than zero. Not '{sigma}'")
 
         # Remove scattered light from flux
         sl_model, sl_model_err, sl_quality = self._create_scattered_light_model(
