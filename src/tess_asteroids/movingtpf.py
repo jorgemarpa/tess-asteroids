@@ -438,7 +438,7 @@ class MovingTPF:
         self.flux = np.asarray(self.flux)
         self.flux_err = np.asarray(self.flux_err)
 
-    def background_correction(self, method: str = "rolling", **kwargs):
+    def background_correction(self, method: str = "linear_model", **kwargs):
         """
         Apply background correction to reshaped flux data.
 
