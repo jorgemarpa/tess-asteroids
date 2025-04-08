@@ -956,7 +956,7 @@ class MovingTPF:
             method=sl_method,
             poly_deg=sl_poly_deg,
             window_length=sl_window_length,
-            progress_bar = progress_bar,
+            progress_bar=progress_bar,
             **kwargs,
         )
         sl_corr_flux = self.all_flux - sl_model
