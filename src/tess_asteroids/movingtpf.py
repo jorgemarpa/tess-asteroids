@@ -21,6 +21,7 @@ from tesscube import TESSCube
 from tesscube.fits import get_wcs_header_by_extension
 from tesscube.query import async_get_primary_hdu
 from tesscube.utils import _sync_call, convert_coordinates_to_runs
+from tqdm import tqdm
 
 from . import __version__, logger, straps
 from .utils import animate_cube, compute_moments, inside_ellipse, make_wcs_header
@@ -637,6 +638,7 @@ class MovingTPF:
         poly_deg: int = 3,
         window_length: float = 1,
         diagnostic_plot: bool = False,
+        progress_bar: bool = False,
         **kwargs,
     ):
         """
@@ -670,6 +672,8 @@ class MovingTPF:
             It is defined in days.
         diagnostic_plot : bool
             If True, shows two diagnostic plots to check the scattered light model.
+        progress_bar : bool
+            If True and method is `per_time`, this displays a progress bar for model computation.
         kwargs : dict
             Keywords arguments passed to `self._create_pca_source_mask`, e.g `target_threshold`, `star_flux_threshold`.
 
@@ -757,7 +761,7 @@ class MovingTPF:
             sl_model_err = np.zeros(self.all_flux.shape)
 
             # Run through each time
-            for t in range(len(self.time)):
+            for t in tqdm(range(len(self.time)), disable=not progress_bar):
                 # Indices that define a time window around the current frame.
                 tmin, tmax = (
                     self.time[t] - 0.5 * window_length,
@@ -911,12 +915,14 @@ class MovingTPF:
         window_length: float = 1,
         poly_deg: int = 3,
         sigma: float = 5,
+        progress_bar: bool = False,
         **kwargs,
     ):
         """
 
         Parameters
         ----------
+
 
         Returns
         -------
@@ -950,6 +956,7 @@ class MovingTPF:
             method=sl_method,
             poly_deg=sl_poly_deg,
             window_length=sl_window_length,
+            progress_bar = progress_bar,
             **kwargs,
         )
         sl_corr_flux = self.all_flux - sl_model
@@ -972,7 +979,7 @@ class MovingTPF:
 
         logger.info("Started computation of background linear model.")
         start_time = time.time()
-        for t in range(len(self.time)):
+        for t in tqdm(range(len(self.time)), disable=not progress_bar):
             # Calculate indices that define a time window around the current frame.
             tmin, tmax = (
                 self.time[t] - 0.5 * window_length,
