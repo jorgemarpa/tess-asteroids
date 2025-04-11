@@ -341,7 +341,7 @@ class MovingTPF:
         self.all_flux[:, non_science_pixel_mask] = np.nan
         self.all_flux_err[:, non_science_pixel_mask] = np.nan
         # Warn user if there are pixels outside of FFI science array.
-        if sum(non_science_pixel_mask) > 0:
+        if np.sum(non_science_pixel_mask) > 0:
             logger.warning(
                 "Some of the requested pixels are outside of the FFI science array (1<=row<=2048, 45<=col<=2092), but they will be included in your TPF."
             )
@@ -1015,13 +1015,9 @@ class MovingTPF:
                         linear_model_dist[pdx] = np.nan
                         break
 
-                    # Update priors: first component should be close to the median of the pixel flux value, but it can't be negative.
-                    # If it is negative, leave prior unchanged.
+                    # Update priors: first component should be close to the median of the pixel flux value.
                     prior_mu[0] = np.nanmedian(sl_corr_flux[adx:bdx][k, pdx])
-                    if prior_mu[0] <= 0:
-                        prior_mu[0] = 0
-                    else:
-                        prior_sigma[0] = prior_mu[0] ** 0.5
+                    prior_sigma[0] = np.abs(prior_mu[0]) ** 0.5
 
                     # Use weighted Bayesian LS.
                     sigma_w_inv = X[k].T.dot(
