@@ -342,7 +342,9 @@ class MovingTPF:
         self.all_flux_err[:, non_science_pixel_mask] = np.nan
         # Warn user if there are pixels outside of FFI science array.
         if sum(non_science_pixel_mask) > 0:
-            logger.warning("Some of the requested pixels are outside of the FFI science array (1<=row<=2048, 45<=col<=2092), but they will be included in your TPF.")
+            logger.warning(
+                "Some of the requested pixels are outside of the FFI science array (1<=row<=2048, 45<=col<=2092), but they will be included in your TPF."
+            )
 
         # Pixel mask that tracks moving target
         target_mask = []
