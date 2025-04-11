@@ -293,24 +293,6 @@ class MovingTPF:
             logger.warning(
                 "Some of the requested pixels are outside of the FFI bounds (1<=row<=2078, 1<=col<=2136) and will not be returned."
             )
-        # Warn user if there are pixels outside of FFI science array.
-        if (
-            sum(
-                ~np.logical_and(
-                    [r.all() for r in row[:, :, 0] <= 2048],
-                    [
-                        c.all()
-                        for c in np.logical_and(
-                            column[:, 0, :] >= 45, column[:, 0, :] <= 2092
-                        )
-                    ],
-                )
-            )
-            > 0
-        ):
-            logger.warning(
-                "Some of the requested pixels are outside of the FFI science array (1<=row<=2048, 45<=col<=2092), but they will be included in your TPF."
-            )
 
         # Convert pixels to byte runs
         runs = convert_coordinates_to_runs(pixel_coordinates)
@@ -350,6 +332,17 @@ class MovingTPF:
                 for j in i
             ]
         )
+
+        # Set non-science pixels to nan values.
+        non_science_pixel_mask = ~np.logical_and(
+            self.pixels[:, 0] <= 2048,
+            np.logical_and(self.pixels[:, 1] >= 45, self.pixels[:, 1] <= 2092),
+        )
+        self.all_flux[:, non_science_pixel_mask] = np.nan
+        self.all_flux_err[:, non_science_pixel_mask] = np.nan
+        # Warn user if there are pixels outside of FFI science array.
+        if sum(non_science_pixel_mask) > 0:
+            logger.warning("Some of the requested pixels are outside of the FFI science array (1<=row<=2048, 45<=col<=2092), but they will be included in your TPF.")
 
         # Pixel mask that tracks moving target
         target_mask = []
@@ -638,7 +631,7 @@ class MovingTPF:
         poly_deg: int = 3,
         window_length: float = 1,
         diagnostic_plot: bool = False,
-        progress_bar: bool = False,
+        progress_bar: bool = True,
         **kwargs,
     ):
         """
@@ -695,6 +688,9 @@ class MovingTPF:
 
         # Create mask for moving target and stars.
         source_mask = self._create_source_mask(include_stars=True, **kwargs)
+
+        # Add nan flux values to the mask (PCA cannot have nan in flux array)
+        source_mask |= np.isnan(self.all_flux)
 
         # Create design matrix - a `poly_deg` degree polynomial in row and column.
         row, col = self.pixels.T
@@ -915,13 +911,16 @@ class MovingTPF:
         window_length: float = 1,
         poly_deg: int = 3,
         sigma: float = 5,
-        progress_bar: bool = False,
+        progress_bar: bool = True,
         **kwargs,
     ):
         """
 
         Parameters
         ----------
+
+        sigma : float
+            Use np.inf to not use outlier clipping.
 
 
         Returns
@@ -1037,9 +1036,14 @@ class MovingTPF:
                     # Find the best-fitting weights and errors and turn it into a distribution
                     w = np.linalg.solve(sigma_w_inv, B)
                     werr = np.linalg.inv(sigma_w_inv)
-                    wdist = np.random.multivariate_normal(
-                        w, werr, size=linear_model_dist.shape[1]
-                    )
+                    try:
+                        wdist = np.random.multivariate_normal(
+                            w, werr, size=linear_model_dist.shape[1]
+                        )
+                    except np.linalg.LinAlgError:
+                        linear_model_dist[pdx] = np.nan
+                        break
+
                     linear_model_dist[pdx] = X[np.arange(adx, bdx) == t].dot(wdist.T)[0]
 
                     # Mask significant outliers.
