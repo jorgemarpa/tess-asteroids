@@ -461,7 +461,7 @@ class MovingTPF:
         # Get background via chosen method
         if method == "rolling":
             self.bg, self.bg_err = self._bg_rolling_median(**kwargs)
-            self.sl_method = "none"
+            self.sl_method = "n/a"
 
         elif method == "linear_model":
             self.bg, self.bg_err, _, _, _, _ = self._bg_linear_model(**kwargs)
@@ -495,11 +495,11 @@ class MovingTPF:
         -------
         bg : ndarray
             Background flux estimate.
-            Array with same shape as self.flux.
+            Array with same shape as `self.flux`.
 
         bg_err : ndarray
             Error on background flux estimate.
-            Array with same shape as self.flux.
+            Array with same shape as `self.flux`.
         """
 
         if not hasattr(self, "all_flux"):
@@ -919,26 +919,56 @@ class MovingTPF:
         **kwargs,
     ):
         """
+        Calculate the background flux using linear modelling. This has two components:
+            1. Scattered light model: usa PCA and linear modelling to compute a scattered light model at each cadence. 
+            2. Linear model: use linear modelling to compute a model for the rest of the background (e.g. stars) at 
+               each cadence.
+        These two components get summed to create a global background model.
+
+        Step one is done using the `self._create_scattered_light_model` function. Step two loops through each cadence
+        and each relevant pixel to model the SL corrected flux in a time window around that cadence.
 
         Parameters
         ----------
-
+        sl_method : str
+            Method used to compute scattered light model. One of [`all_time`, `per_time`].
+            If `all_time`, the PCA components are computed for all times at once (faster).
+            If `per_time`, the PCA components are computed in a time window around each frame (slower, but preferred).
+        sl_poly_deg : int
+            Polynomial degree for the cartesian design matrix used for the scattered light model.
+        sl_window_length : float
+            If `sl_method` is `per_time`, this is used to define the time window around each frame for 
+            the PCA computation when creating the scattered light model. It is defined in days.
+        window_length : float
+            This is used to define the time window around each frame when computing the linear model. It is 
+            defined in days. Runtime increases with `window_length`, as more data is included in each iteration.
+        poly_deg : int
+            Degree for the time polynomial, used for the linear model.
         sigma : float
-            Use np.inf to not use outlier clipping.
-
+            Controls outlier clipping. Values where `(flux - model)/flux_err >= sigma` are clipped and the fitting 
+            is re-run. This is done iteratively until no more outliers remain. 
+            To turn off outlier clipping, set `sigma` to infinity.
+        progress_bar : bool
+            If `True`, a progress bar will be displayed for the computation of the linear model.
+        kwargs : dict
+            Keywords arguments passed to `self._create_scattered_light_model` (e.g. `niter`, `ncomponents`) 
+            and `self._create_pca_source_mask` (e.g `target_threshold`, `star_flux_threshold`).
 
         Returns
         -------
         bg : ndarray
-            Background flux estimate.
-            Array with same shape as self.flux.
+            Background flux estimate, with same shape as `self.flux`.
+            This is the sum of the scattered light model and linear model.
         bg_err : ndarray
-            Error on background flux estimate.
-            Array with same shape as self.flux.
+            Error on background flux estimate, with same shape as `self.flux`.
         sl_model : ndarray
+            Scattered light model, with same shape as `self.flux`.
         sl_model_err : ndarray
+            Error on scattered light model, with same shape as `self.flux`.
         linear_model : ndarray
+            Linear  model, with same shape as `self.flux`.
         linear_model_err : ndarray
+            Error on linear  model, with same shape as `self.flux`.
         """
 
         if not hasattr(self, "all_flux"):
