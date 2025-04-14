@@ -461,9 +461,11 @@ class MovingTPF:
         # Get background via chosen method
         if method == "rolling":
             self.bg, self.bg_err = self._bg_rolling_median(**kwargs)
+            self.sl_method = "none"
 
         elif method == "linear_model":
             self.bg, self.bg_err, _, _, _, _ = self._bg_linear_model(**kwargs)
+            self.sl_method = sl_method
 
         else:
             raise ValueError(
@@ -2171,10 +2173,16 @@ class MovingTPF:
             after="SHAPE",
         )
         hdu.header.set(
+            "SL_CORR",
+            self.sl_method,
+            comment="method used for scattered light correction",
+            after="BG_CORR",
+        )
+        hdu.header.set(
             "AP_TYPE",
             self.ap_method,
             comment="method used to create aperture",
-            after="BG_CORR",
+            after="SL_CORR",
         )
         hdu.header.set(
             "AP_NPIX",
