@@ -112,7 +112,10 @@ def test_data_logic(caplog):
 
 
 def test_bg_linear_model():
-    """ """
+    """ 
+    Test background linear model. This checks the shapes and quality masks for the 
+    scattered light model, the linear model and the global background model.
+    """
     # Initialise MovingTPF for 1980 VR1 and get data.
     target = MovingTPF.from_name("1980 VR1", sector=1, camera=1, ccd=1)
     target.get_data()
