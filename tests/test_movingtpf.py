@@ -98,11 +98,14 @@ def test_data_logic(caplog):
     assert np.shape(target.flux) == (len(target.time), *shape)
     assert np.shape(target.flux_err) == (len(target.time), *shape)
 
-    # Check the background correction was applied correctly
+    # Check the background correction was applied correctly, including
+    # nan fluxes (non-science pixels).
     target.background_correction()
-    assert np.array_equal(target.corr_flux, target.flux - target.bg)
+    assert np.array_equal(target.corr_flux, target.flux - target.bg, equal_nan=True)
     assert np.array_equal(
-        target.corr_flux_err, np.sqrt(target.flux_err**2 + target.bg_err**2)
+        target.corr_flux_err,
+        np.sqrt(target.flux_err**2 + target.bg_err**2),
+        equal_nan=True,
     )
     assert np.shape(target.corr_flux) == (len(target.time), *shape)
     assert np.shape(target.corr_flux_err) == (len(target.time), *shape)
@@ -112,20 +115,17 @@ def test_create_scattered_light_model():
     # Initialise MovingTPF for 1980 VR1 and get data.
     target = MovingTPF.from_name("1980 VR1", sector=1, camera=1, ccd=1)
     target.get_data()
+    target.reshape_data()
 
     # Check the SL model has expected shape
-    sl_model, sl_model_err, sl_quality = target._create_scattered_light_model(
-        method="all_time"
-    )
+    sl_model, sl_model_err = target._create_scattered_light_model(method="all_time")
     assert np.shape(sl_model) == np.shape(target.all_flux)
     assert np.shape(sl_model_err) == np.shape(target.all_flux)
-    assert np.shape(sl_quality) == np.shape(target.time)
 
-    # Check quality mask
-    sl_model, sl_model_err, sl_quality = target._create_scattered_light_model(
-        method="per_time", ncomponents=8000
-    )
-    assert np.array_equal(sl_quality, np.ones_like(target.time, dtype=bool))
+    # Check SL quality mask:
+    target.background_correction(sl_method="per_time", ncomponents=8000)
+    assert np.shape(target.sl_nan_mask) == np.shape(target.time)
+    assert np.array_equal(target.sl_nan_mask, np.ones_like(target.time, dtype=bool))
 
 
 def test_create_threshold_aperture():
@@ -208,9 +208,9 @@ def test_create_ellipse_aperture():
     ellip_mask, params = target._create_ellipse_aperture(return_params=True)
 
     # aperture mask
-    # for the test source the median number of pixels across all frames is 16
+    # for the test source the median number of pixels across all frames is 10
     assert ellip_mask.shape == target.flux.shape
-    assert np.median(ellip_mask.reshape((target.time.shape[0], -1)).sum(axis=1)) == 16
+    assert np.median(ellip_mask.reshape((target.time.shape[0], -1)).sum(axis=1)) == 10
     # ellipse parameters
     # for the test source the centroid values should be within 0.2 pixels
     # from the asteroid ephemeris
@@ -246,6 +246,7 @@ def test_pixel_quality():
     target = MovingTPF("simulated_track", track)
     target.get_data(shape=shape)
     target.reshape_data()
+    target.background_correction(method="rolling")
     target.create_pixel_quality(sat_buffer_rad=1)
 
     # Check that pixel quality mask has expected shape.
@@ -302,7 +303,8 @@ def test_make_tpf():
         assert "BAD_BITS" not in hdul[0].header.keys()
         assert hdul[0].header["PROCVER"].strip() == __version__
         assert hdul[0].header["AP_TYPE"].strip() == "prf"
-        assert hdul[0].header["BG_CORR"].strip() == "rolling"
+        assert hdul[0].header["BG_CORR"].strip() == "linear_model"
+        assert hdul[0].header["SL_CORR"].strip() == "all_time"
         assert hdul[0].header["VMAG"] > 0
         assert "SPOCDATE" in hdul[0].header.keys()
         assert "TIME" in hdul[1].columns.names
@@ -316,7 +318,7 @@ def test_make_tpf():
         assert "ORIGINAL_TIME" in hdul[3].columns.names
         assert "ORIGINAL_TIMECORR" in hdul[3].columns.names
         assert len(hdul[3].data["APERTURE"]) == len(target.time)
-        assert np.array_equal(target.corr_flux, hdul[1].data["FLUX"])
+        assert np.allclose(target.corr_flux, hdul[1].data["FLUX"], rtol=1e-07)
 
         # Check the UTC to TDB conversion has been applied.
         assert (hdul[1].data["TIME"] != hdul[3].data["ORIGINAL_TIME"]).all()
@@ -328,7 +330,7 @@ def test_make_tpf():
     assert isinstance(tpf, lk.targetpixelfile.TessTargetPixelFile)
     assert hasattr(tpf, "pipeline_mask")
     assert len(tpf.time) == len(target.time)
-    assert np.array_equal(target.corr_flux, tpf.flux.value)
+    assert np.allclose(target.corr_flux, tpf.flux.value, rtol=1e-07)
 
     # Delete the file
     os.remove("tests/tess-1998YT6-s0006-1-1-shape11x11-moving_tp.fits")
@@ -383,7 +385,7 @@ def test_make_lc():
 
     # Make TPF for asteroid 1998 YT6
     target = MovingTPF.from_name("1998 YT6", sector=6)
-    target.make_tpf()
+    target.make_tpf(bg_method="rolling")
     target.make_lc(save=True, outdir="tests")
 
     # Check the file exists
@@ -396,6 +398,7 @@ def test_make_lc():
         assert hdul[0].header["PROCVER"].strip() == __version__
         assert hdul[0].header["AP_TYPE"].strip() == "prf"
         assert hdul[0].header["BG_CORR"].strip() == "rolling"
+        assert hdul[0].header["SL_CORR"].strip() == "n/a"
         assert hdul[0].header["VMAG"] > 0
         assert "SPOCDATE" in hdul[0].header.keys()
 
