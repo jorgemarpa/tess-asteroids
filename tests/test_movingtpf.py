@@ -112,18 +112,17 @@ def test_data_logic(caplog):
 
 
 def test_bg_linear_model():
-    """
-
-    """
+    """ """
     # Initialise MovingTPF for 1980 VR1 and get data.
     target = MovingTPF.from_name("1980 VR1", sector=1, camera=1, ccd=1)
     target.get_data()
     target.reshape_data()
 
     for method in ["all_time", "per_time"]:
-
         # Background correction using `all_time` SL correction
-        bg, bg_err, sl, sl_err, linear, linear_err = target._bg_linear_model(sl_method=method)
+        bg, bg_err, sl, sl_err, linear, linear_err = target._bg_linear_model(
+            sl_method=method
+        )
 
         # Check the components have the expected shape
         assert np.shape(bg) == np.shape(target.flux)
