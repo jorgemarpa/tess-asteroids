@@ -458,14 +458,15 @@ class MovingTPF:
         self.sl_nan_mask = np.zeros_like(self.time, dtype=bool)
         self.lm_nan_mask = np.zeros_like(self.all_flux, dtype=bool)
 
+        # Define SL correction method
+        self.sl_method = "n/a"
+
         # Get background via chosen method
         if method == "rolling":
             self.bg, self.bg_err = self._bg_rolling_median(**kwargs)
-            self.sl_method = "n/a"
 
         elif method == "linear_model":
             self.bg, self.bg_err, _, _, _, _ = self._bg_linear_model(**kwargs)
-            self.sl_method = sl_method
 
         else:
             raise ValueError(
@@ -514,14 +515,21 @@ class MovingTPF:
                 if i <= len(self.all_flux) - nframes
                 else len(self.all_flux)
             ][:, self.target_mask[i]]
-            # Compute background flux.
-            bg.append(np.nanmedian(flux_window, axis=0).reshape(self.shape))
-            # Use the Median Absolute Deviation (MAD) for error on the background flux.
-            bg_err.append(
-                np.nanmedian(
-                    np.abs(flux_window - np.nanmedian(flux_window, axis=0)), axis=0
-                ).reshape(self.shape)
-            )
+            # Catch warnings that arise if pixel is nan throughout window (e.g. non-science pixels).
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message="All-NaN slice encountered",
+                    category=RuntimeWarning,
+                )
+                # Compute background flux.
+                bg.append(np.nanmedian(flux_window, axis=0).reshape(self.shape))
+                # Use the Median Absolute Deviation (MAD) for error on the background flux.
+                bg_err.append(
+                    np.nanmedian(
+                        np.abs(flux_window - np.nanmedian(flux_window, axis=0)), axis=0
+                    ).reshape(self.shape)
+                )
 
         return np.asarray(bg), np.asarray(bg_err)
 
@@ -587,7 +595,12 @@ class MovingTPF:
         # Create mask for stationary sources e.g. stars (high flux values AND high flux gradients).
 
         # Median of each pixel across all times.
-        med = np.nanmedian(self.all_flux, axis=0)
+        # Catch warnings that arise if any pixel is nan at all times (e.g. non-science pixels).
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", message="All-NaN slice encountered", category=RuntimeWarning
+            )
+            med = np.nanmedian(self.all_flux, axis=0)
 
         # Mask pixels whose average flux value over all time is some fraction greater than average flux value over all
         # pixels and all times.
@@ -919,13 +932,13 @@ class MovingTPF:
         **kwargs,
     ):
         """
-        Calculate the background flux using linear modelling. This has two components:
-            1. Scattered light model: usa PCA and linear modelling to compute a scattered light model at each cadence. 
-            2. Linear model: use linear modelling to compute a model for the rest of the background (e.g. stars) at 
+        Calculate the background flux using linear modelling. There are two components:
+            1. Scattered light model: use PCA and linear modelling to compute a scattered light model at each cadence.
+            2. Linear model: use linear modelling to compute a model for the rest of the background (e.g. stars) at
                each cadence.
         These two components get summed to create a global background model.
 
-        Step one is done using the `self._create_scattered_light_model` function. Step two loops through each cadence
+        Step one is done using the `_create_scattered_light_model` function. Step two loops through each cadence
         and each relevant pixel to model the SL corrected flux in a time window around that cadence.
 
         Parameters
@@ -937,22 +950,22 @@ class MovingTPF:
         sl_poly_deg : int
             Polynomial degree for the cartesian design matrix used for the scattered light model.
         sl_window_length : float
-            If `sl_method` is `per_time`, this is used to define the time window around each frame for 
+            If `sl_method` is `per_time`, this is used to define the time window around each frame for
             the PCA computation when creating the scattered light model. It is defined in days.
         window_length : float
-            This is used to define the time window around each frame when computing the linear model. It is 
-            defined in days. Runtime increases with `window_length`, as more data is included in each iteration.
+            This is used to define the time window around each frame when computing the linear model. It is
+            defined in days.
         poly_deg : int
             Degree for the time polynomial, used for the linear model.
         sigma : float
-            Controls outlier clipping. Values where `(flux - model)/flux_err >= sigma` are clipped and the fitting 
-            is re-run. This is done iteratively until no more outliers remain. 
-            To turn off outlier clipping, set `sigma` to infinity.
+            Controls outlier clipping. Values where `(flux - model)/flux_err >= sigma` are clipped and the fitting
+            is re-run. This is done iteratively until no more outliers remain.
+            To turn off outlier clipping, set `sigma` to `np.inf`.
         progress_bar : bool
             If `True`, a progress bar will be displayed for the computation of the linear model.
         kwargs : dict
-            Keywords arguments passed to `self._create_scattered_light_model` (e.g. `niter`, `ncomponents`) 
-            and `self._create_pca_source_mask` (e.g `target_threshold`, `star_flux_threshold`).
+            Keywords arguments passed to `_create_scattered_light_model` (e.g. `niter`, `ncomponents`)
+            and `_create_pca_source_mask` (e.g `target_threshold`, `star_flux_threshold`).
 
         Returns
         -------
@@ -996,6 +1009,13 @@ class MovingTPF:
         sl_corr_flux_err = np.sqrt(
             np.nansum([self.all_flux_err**2, sl_model_err**2], axis=0)
         )
+        # If both errors have nan value, propagate nan:
+        sl_corr_flux_err = np.where(
+            np.logical_and(np.isnan(self.all_flux_err), np.isnan(sl_model_err)),
+            np.nan,
+            sl_corr_flux_err,
+        )
+        self.sl_method = sl_method
 
         # Initialise arrays
         linear_model = np.zeros(self.all_flux.shape)
@@ -1048,7 +1068,14 @@ class MovingTPF:
                         break
 
                     # Update priors: first component should be close to the median of the pixel flux value.
-                    prior_mu[0] = np.nanmedian(sl_corr_flux[adx:bdx][k, pdx])
+                    # Catch warnings that arise if pixel is nan throughout time window (e.g. non-science pixels).
+                    with warnings.catch_warnings():
+                        warnings.filterwarnings(
+                            "ignore",
+                            message="All-NaN slice encountered",
+                            category=RuntimeWarning,
+                        )
+                        prior_mu[0] = np.nanmedian(sl_corr_flux[adx:bdx][k, pdx])
                     prior_sigma[0] = np.abs(prior_mu[0]) ** 0.5
 
                     # Use weighted Bayesian LS.
@@ -1087,17 +1114,34 @@ class MovingTPF:
                     n_clip = np.sum(~k) - n_clip_prev
 
             # Compute BG linear model and error from distribution.
-            linear_model[t], linear_model_err[t] = (
-                np.nanmean(linear_model_dist, axis=1),
-                np.nanstd(linear_model_dist, ddof=1, axis=1)
-                / np.sqrt(linear_model_dist.shape[1]),
-            )
+            # Catch warnings that arise because of nan pixels (e.g. non-science pixels).
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore", message="Mean of empty slice", category=RuntimeWarning
+                )
+                warnings.filterwarnings(
+                    "ignore",
+                    message="Degrees of freedom <= 0 for slice.",
+                    category=RuntimeWarning,
+                )
+                linear_model[t], linear_model_err[t] = (
+                    np.nanmean(linear_model_dist, axis=1),
+                    np.nanstd(linear_model_dist, ddof=1, axis=1)
+                    / np.sqrt(linear_model_dist.shape[1]),
+                )
 
             # If there is no `linear_model`, replace with median and MAD and flag as bad quality.
             for pix in np.where(np.isnan(linear_model[t]))[0]:
-                linear_model[t, pix] = np.nanmedian(sl_corr_flux[adx:bdx][:, pix])
+                # Catch warnings that arise if pixel is nan throughout time window (e.g. non-science pixels).
+                with warnings.catch_warnings():
+                    warnings.filterwarnings(
+                        "ignore",
+                        message="All-NaN slice encountered",
+                        category=RuntimeWarning,
+                    )
+                    linear_model[t, pix] = np.nanmedian(sl_corr_flux[adx:bdx][:, pix])
                 linear_model_err[t, pix] = stats.median_abs_deviation(
-                    sl_corr_flux[adx:bdx][:, pix]
+                    sl_corr_flux[adx:bdx][:, pix], nan_policy="omit"
                 )
                 # Update LM NaN mask
                 if hasattr(self, "lm_nan_mask"):
@@ -1137,6 +1181,15 @@ class MovingTPF:
                 ],
                 axis=0,
             )
+        )
+        # If both errors have nan value, propagate nan:
+        bg_err = np.where(
+            np.logical_and(
+                np.isnan(np.asarray(linear_model_err_reshaped)),
+                np.isnan(np.asarray(sl_model_err_reshaped)),
+            ),
+            np.nan,
+            bg_err,
         )
 
         return (
@@ -1236,7 +1289,7 @@ class MovingTPF:
 
         # mask with value threshold
         median = np.nanmedian(self.corr_flux)
-        mad = stats.median_abs_deviation(self.corr_flux.ravel())
+        mad = stats.median_abs_deviation(self.corr_flux.ravel(), nan_policy="omit")
 
         # iterate over frames
         for nt in range(len(self.time)):
@@ -1536,7 +1589,7 @@ class MovingTPF:
             threshold=3.0, reference_pixel="center"
         )
 
-        X, Y, X2, Y2, XY = compute_moments(self.flux, threshold_mask)
+        X, Y, X2, Y2, XY = compute_moments(self.corr_flux, threshold_mask)
 
         if plot:
             fig, ax = plt.subplots(2, 2, figsize=(9, 7))
@@ -1641,18 +1694,22 @@ class MovingTPF:
             # iterate in the centroiding on bad frames to remove contaminated pixels
             # and refine solution. That will result in better centroid estimation
             # usable for the ellipse mask center.
-            aperture_mask[nt] = inside_ellipse(
-                cc,
-                rr,
-                CXX[nt],
-                CYY[nt],
-                CXY[nt],
-                x0=self.ephemeris[nt, 1],
-                # x0=self.corner[nt, 1] + X[nt],
-                y0=self.ephemeris[nt, 0],
-                # y0=self.corner[nt, 0] + Y[nt],
-                R=R,
-            )
+            if np.isnan(self.corr_flux[nt]).all():
+                # If all pixels at that time are nan (e.g. non-science region), mask should be False.
+                aperture_mask[nt] = np.full(self.shape, False)
+            else:
+                aperture_mask[nt] = inside_ellipse(
+                    cc,
+                    rr,
+                    CXX[nt],
+                    CYY[nt],
+                    CXY[nt],
+                    x0=self.ephemeris[nt, 1],
+                    # x0=self.corner[nt, 1] + X[nt],
+                    y0=self.ephemeris[nt, 0],
+                    # y0=self.corner[nt, 0] + Y[nt],
+                    R=R,
+                )
         if return_params:
             return aperture_mask, np.array(
                 [self.corner[:, 1] + X, self.corner[:, 0] + Y, A, B, theta_deg]
