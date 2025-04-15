@@ -111,21 +111,39 @@ def test_data_logic(caplog):
     assert np.shape(target.corr_flux_err) == (len(target.time), *shape)
 
 
-def test_create_scattered_light_model():
+def test_bg_linear_model():
+    """
+
+    """
     # Initialise MovingTPF for 1980 VR1 and get data.
     target = MovingTPF.from_name("1980 VR1", sector=1, camera=1, ccd=1)
     target.get_data()
     target.reshape_data()
 
-    # Check the SL model has expected shape
-    sl_model, sl_model_err = target._create_scattered_light_model(method="all_time")
-    assert np.shape(sl_model) == np.shape(target.all_flux)
-    assert np.shape(sl_model_err) == np.shape(target.all_flux)
+    for method in ["all_time", "per_time"]:
 
-    # Check SL quality mask:
+        # Background correction using `all_time` SL correction
+        bg, bg_err, sl, sl_err, linear, linear_err = target._bg_linear_model(sl_method=method)
+
+        # Check the components have the expected shape
+        assert np.shape(bg) == np.shape(target.flux)
+        assert np.shape(bg_err) == np.shape(target.flux)
+        assert np.shape(sl) == np.shape(target.flux)
+        assert np.shape(sl_err) == np.shape(target.flux)
+        assert np.shape(linear) == np.shape(target.flux)
+        assert np.shape(linear_err) == np.shape(target.flux)
+
+        # Check method is recorded correctly.
+        assert target.sl_method == method
+
+        # Check models are summer for global model.
+        assert np.array_equal(bg, sl + linear)
+
+    # Check SL and LM quality masks:
     target.background_correction(sl_method="per_time", ncomponents=8000)
     assert np.shape(target.sl_nan_mask) == np.shape(target.time)
     assert np.array_equal(target.sl_nan_mask, np.ones_like(target.time, dtype=bool))
+    assert np.shape(target.lm_nan_mask) == np.shape(target.all_flux)
 
 
 def test_create_threshold_aperture():
