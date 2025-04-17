@@ -1092,10 +1092,10 @@ class MovingTPF:
 
                     # Find the best-fitting weights and errors and turn it into a distribution
                     w = np.linalg.solve(sigma_w_inv, B)
-                    werr = np.linalg.inv(sigma_w_inv)
+                    wcov = np.linalg.inv(sigma_w_inv)
                     try:
                         wdist = np.random.multivariate_normal(
-                            w, werr, size=linear_model_dist.shape[1]
+                            w, wcov, size=linear_model_dist.shape[1]
                         )
                     except np.linalg.LinAlgError:
                         linear_model_dist[pdx] = np.nan
