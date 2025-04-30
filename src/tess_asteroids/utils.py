@@ -140,9 +140,13 @@ def compute_moments(
             # Error on first-order moments (assumes uncertainties on weights are similar).
             # See eqn. 6 in https://seismo.berkeley.edu/~kirchner/Toolkits/Toolkit_12.pdf
             # If only one non-zero pixel exists in mask, errors will be nan. Catch warning.
+            # If the denominator is negative, errors will be nan. Catch warning.
             with warnings.catch_warnings():
                 warnings.filterwarnings(
                     "ignore", message="invalid value encountered in scalar divide"
+                )
+                warnings.filterwarnings(
+                    "ignore", message="invalid value encountered in sqrt"
                 )
                 XERR[nt] = np.sqrt(
                     X2[nt]

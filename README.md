@@ -63,7 +63,7 @@ target.make_tpf(save=True)
 
 The `make_tpf()` function is retrieving and reshaping the FFI data, performing a background correction, computing an aperture and saving a SPOC-like TPF. There are a few optional parameters in the `make_tpf()` function. This includes:
 - `shape` controls the shape (nrows,ncols) of the TPF. Default : (11,11).
-- `bg_method` defines the method used to correct the background flux. Default: `rolling`.
+- `bg_method` defines the method used to correct the background flux. Default: `linear_model`.
 - `ap_method` defines the method used to create the aperture. Default: `prf`.
 - `save` determines whether or not the TPF will be saved as a FITS file. Default: `False`.
 - `outdir` is the directory where the TPF will be saved. Note, the directory is not automatically created.
@@ -73,7 +73,7 @@ These settings can be changed as follows:
 
 ```python
 # Make TPF and save to file - change default settings
-target.make_tpf(shape=(20,10), ap_method="threshold", save=True, file_name="test.fits", outdir="movingTPF")
+target.make_tpf(shape=(20,10), bg_method="rolling", ap_method="threshold", save=True, file_name="test.fits", outdir="movingTPF")
 ```
 
 A TPF can only be created for a single combination of sector/camera/CCD at a time. If the object crosses multiple cameras or CCDs during a sector, then the camera/CCD must also be specified when initialising `MovingTPF()`:
@@ -135,7 +135,7 @@ target.animate_tpf(save=True)
 
 ### Making a LC
 
-You can extract a LC from the TPF, using aperture or PSF photometry, as follows:
+You can extract a LC from the TPF, using aperture photometry, as follows:
 
 ```python
 from tess_asteroids import MovingTPF
