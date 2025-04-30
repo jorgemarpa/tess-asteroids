@@ -3076,7 +3076,7 @@ class MovingTPF:
         # >>>>> Note: tess-ephem returns time in UTC at spacecraft. <<<<<
         df_ephem["time"] = [t.value - 2457000 for t in df_ephem.index.values]
         df_ephem = df_ephem[
-            ["time", "sector", "camera", "ccd", "column", "row", "vmag"]
+            ["time", "sector", "camera", "ccd", "ra", "dec", "column", "row", "vmag"]
         ].reset_index(drop=True)
 
         return MovingTPF(target=target, ephem=df_ephem, time_scale="utc")
