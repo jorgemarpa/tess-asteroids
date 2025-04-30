@@ -340,6 +340,11 @@ class MovingTPF:
         )
         self.all_flux[:, non_science_pixel_mask] = np.nan
         self.all_flux_err[:, non_science_pixel_mask] = np.nan
+        # Check there are pixels inside FFI science array.
+        if np.all(non_science_pixel_mask):
+            raise RuntimeError(
+                "All pixels are outside of FFI science array (1<=row<=2048, 45<=col<=2092)."
+            )
         # Warn user if there are pixels outside of FFI science array.
         if np.sum(non_science_pixel_mask) > 0:
             logger.warning(
@@ -594,17 +599,18 @@ class MovingTPF:
 
         # Create mask for stationary sources e.g. stars (high flux values AND high flux gradients).
 
-        # Median of each pixel across all times.
-        # Catch warnings that arise if any pixel is nan at all times (e.g. non-science pixels).
+        # Compute median of each pixel across all times and median of all pixels across all times.
+        # Catch warnings that arise if value is nan at all times (e.g. non-science pixels).
         with warnings.catch_warnings():
             warnings.filterwarnings(
                 "ignore", message="All-NaN slice encountered", category=RuntimeWarning
             )
             med = np.nanmedian(self.all_flux, axis=0)
+            med_all = np.nanmedian(self.all_flux)
 
         # Mask pixels whose average flux value over all time is some fraction greater than average flux value over all
         # pixels and all times.
-        star_flux_mask = med >= star_flux_threshold * np.nanmedian(self.all_flux)
+        star_flux_mask = med >= star_flux_threshold * med_all
 
         # Reshape median to match 2D all_flux region. This is necessary to be able to compute mask in terms of gradient.
         # Origin is minimum row/column (not a pair) and shape is entire all_flux region.
@@ -621,10 +627,15 @@ class MovingTPF:
         # Mask pixels whose average flux gradient over all time is some fraction greater than average flux gradient
         # over all pixels and all times. Have to use binary_fill_holes to fill holes in binary mask (otherwise bright
         # pixels in center of star are sometimes excluded from gradient mask).
+        # Catch warnings that arise if all pixels are nan at all times (e.g. non-science pixels).
         med_gradient = np.gradient(med_reshaped)
-        star_gradient_mask = np.hypot(
-            *med_gradient
-        ) >= star_gradient_threshold * np.nanmedian(np.hypot(*med_gradient))
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", message="All-NaN slice encountered", category=RuntimeWarning
+            )
+            star_gradient_mask = np.hypot(
+                *med_gradient
+            ) >= star_gradient_threshold * np.nanmedian(np.hypot(*med_gradient))
         star_gradient_mask = ndimage.binary_fill_holes(star_gradient_mask)
 
         # Combine flux and gradient mask - gradient mask is reshaped back to match star_flux_mask.
@@ -1094,9 +1105,15 @@ class MovingTPF:
                     w = np.linalg.solve(sigma_w_inv, B)
                     wcov = np.linalg.inv(sigma_w_inv)
                     try:
-                        wdist = np.random.multivariate_normal(
-                            w, wcov, size=linear_model_dist.shape[1]
-                        )
+                        with warnings.catch_warnings():
+                            warnings.filterwarnings(
+                                "ignore",
+                                message="covariance is not symmetric positive-semidefinite",
+                                category=RuntimeWarning,
+                            )
+                            wdist = np.random.multivariate_normal(
+                                w, wcov, size=linear_model_dist.shape[1]
+                            )
                     except np.linalg.LinAlgError:
                         linear_model_dist[pdx] = np.nan
                         break
@@ -1105,12 +1122,20 @@ class MovingTPF:
 
                     # Mask significant outliers.
                     n_clip_prev = np.sum(~k)
-                    k = np.logical_and(
-                        k,
-                        np.abs(sl_corr_flux[adx:bdx][:, pdx] - X.dot(w))
-                        / (sl_corr_flux_err[adx:bdx][:, pdx])
-                        < sigma,
-                    )
+                    # If sl_corr_flux_err is zero, catch warning. We have seen this happen for S1, Cam1, CCD4
+                    # where all_flux and all_flux_err are zero for several cadences.
+                    with warnings.catch_warnings():
+                        warnings.filterwarnings(
+                            "ignore",
+                            message="divide by zero encountered in divide",
+                            category=RuntimeWarning,
+                        )
+                        k = np.logical_and(
+                            k,
+                            np.abs(sl_corr_flux[adx:bdx][:, pdx] - X.dot(w))
+                            / (sl_corr_flux_err[adx:bdx][:, pdx])
+                            < sigma,
+                        )
                     n_clip = np.sum(~k) - n_clip_prev
 
             # Compute BG linear model and error from distribution.
