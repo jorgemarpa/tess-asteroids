@@ -343,7 +343,7 @@ class MovingTPF:
         # Warn user if there are pixels outside of FFI science array.
         if np.sum(non_science_pixel_mask) > 0:
             logger.warning(
-                "Some of the requested pixels are outside of the FFI science array (1<=row<=2048, 45<=col<=2092), but they will be included in your TPF."
+                "Some of the requested pixels are outside of the FFI science array (1<=row<=2048, 45<=col<=2092), but they will be set to NaN in your TPF."
             )
 
         # Pixel mask that tracks moving target
