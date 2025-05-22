@@ -369,12 +369,14 @@ class MovingTPF:
         # `self.coords` does not recover these original values because the
         # ephemeris has since been interpolated.
         # Note: pixel_to_world() assumes zero-indexing so subtract one from (row,col).
-        wcs = tesswcs.WCS.from_archive(
+        self.wcs = tesswcs.WCS.from_archive(
             sector=self.sector, camera=self.camera, ccd=self.ccd
         )
         self.coords = np.asarray(
             [
-                wcs.pixel_to_world(self.ephemeris[t, 1] - 1, self.ephemeris[t, 0] - 1)
+                self.wcs.pixel_to_world(
+                    self.ephemeris[t, 1] - 1, self.ephemeris[t, 0] - 1
+                )
                 for t in range(len(self.time_original))
             ]
         )
@@ -1885,6 +1887,7 @@ class MovingTPF:
                 row_cen,
                 col_cen_err,
                 row_cen_err,
+                measured_coords,
                 flux_fraction,
             ) = self._aperture_photometry(**kwargs)
             quality = self._create_lc_quality()
@@ -1900,6 +1903,8 @@ class MovingTPF:
                 "row_cen_err": row_cen_err,
                 "quality": quality,
                 "flux_fraction": flux_fraction,
+                "ra": [coord.ra.value for coord in measured_coords],
+                "dec": [coord.dec.value for coord in measured_coords],
             }
 
         elif method == "psf":
@@ -1922,10 +1927,11 @@ class MovingTPF:
 
         Returns
         -------
-        ap_flux, ap_flux_err, ap_bg, ap_bg_err, col_cen, row_cen, col_cen_err, row_cen_err, flux_fraction : ndarrays
+        ap_flux, ap_flux_err, ap_bg, ap_bg_err, col_cen, row_cen, col_cen_err, row_cen_err, measured_coords, flux_fraction : ndarrays
             Sum of flux inside aperture and error (ap_flux, ap_flux_err), sum of background flux inside
             aperture and error (ap_bg, ap_bg_err), flux-weighted centroids inside aperture and errors
-            (col_cen, row_cen, col_cen_err, row_cen_err) and fraction of PRF model flux inside aperture (flux_fraction).
+            (col_cen, row_cen, col_cen_err, row_cen_err), flux-weighted centroids converted to world coordinates using WCS (measured_coords)
+            and fraction of PRF model flux inside aperture (flux_fraction).
             The row and column centroids are one-indexed and correspond to the position in the full FFI, where the
             lower left pixel has the value (1,1). Flux fraction will be nan unless `prf` aperture is used.
         """
@@ -2004,6 +2010,15 @@ class MovingTPF:
         col_cen += self.corner[:, 1]
         row_cen += self.corner[:, 0]
 
+        # Convert measured centroid from (row,col) to (ra,dec) using WCS from tesswcs.
+        # Note: pixel_to_world() assumes zero-indexing so subtract one from (row,col).
+        measured_coords = np.asarray(
+            [
+                self.wcs.pixel_to_world(col_cen[t] - 1, row_cen[t] - 1)
+                for t in range(len(self.time_original))
+            ]
+        )
+
         return (
             np.asarray(ap_flux),
             np.asarray(ap_flux_err),
@@ -2013,6 +2028,7 @@ class MovingTPF:
             row_cen,
             col_cen_err,
             row_cen_err,
+            measured_coords,
             np.asarray(flux_fraction),
         )
 
@@ -2536,16 +2552,16 @@ class MovingTPF:
                 disp="E14.7",
                 array=self.timecorr_original,
             ),
-            # Predicted position of target in world coordinates.
+            # Predicted position of target, in world coordinates.
             fits.Column(
-                name="RA",
+                name="RA_PRED",
                 format="E",
                 unit="deg",
                 disp="E14.7",
                 array=[coord.ra.value for coord in self.coords],
             ),
             fits.Column(
-                name="DEC",
+                name="DEC_PRED",
                 format="E",
                 unit="deg",
                 disp="E14.7",
@@ -2700,7 +2716,7 @@ class MovingTPF:
                 if "aperture" in self.lc
                 else np.full(len(self.time), np.nan),
             ),
-            # Column centroid and err
+            # Measured column centroid and err
             fits.Column(
                 name="MOM_CENTR1",
                 format="E",
@@ -2719,7 +2735,7 @@ class MovingTPF:
                 if "aperture" in self.lc
                 else np.full(len(self.time), np.nan),
             ),
-            # Row centroid and err
+            # Measured row centroid and err
             fits.Column(
                 name="MOM_CENTR2",
                 format="E",
@@ -2735,6 +2751,25 @@ class MovingTPF:
                 unit="pixel",
                 disp="E14.7",
                 array=self.lc["aperture"]["row_cen_err"]
+                if "aperture" in self.lc
+                else np.full(len(self.time), np.nan),
+            ),
+            # Measured position of target, in world coordinates.
+            fits.Column(
+                name="RA",
+                format="E",
+                unit="deg",
+                disp="E14.7",
+                array=self.lc["aperture"]["ra"]
+                if "aperture" in self.lc
+                else np.full(len(self.time), np.nan),
+            ),
+            fits.Column(
+                name="DEC",
+                format="E",
+                unit="deg",
+                disp="E14.7",
+                array=self.lc["aperture"]["dec"]
                 if "aperture" in self.lc
                 else np.full(len(self.time), np.nan),
             ),
@@ -2856,16 +2891,16 @@ class MovingTPF:
                 disp="E14.7",
                 array=self.ephemeris[:, 0],
             ),
-            # Predicted position of target in world coordinates.
+            # Predicted position of target, in world coordinates.
             fits.Column(
-                name="RA",
+                name="RA_PRED",
                 format="E",
                 unit="deg",
                 disp="E14.7",
                 array=[coord.ra.value for coord in self.coords],
             ),
             fits.Column(
-                name="DEC",
+                name="DEC_PRED",
                 format="E",
                 unit="deg",
                 disp="E14.7",

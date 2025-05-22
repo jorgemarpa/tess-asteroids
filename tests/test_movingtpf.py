@@ -333,8 +333,8 @@ def test_make_tpf():
         assert "PIXEL_QUALITY" in hdul[3].columns.names
         assert "CORNER1" in hdul[3].columns.names
         assert "CORNER2" in hdul[3].columns.names
-        assert "RA" in hdul[3].columns.names
-        assert "DEC" in hdul[3].columns.names
+        assert "RA_PRED" in hdul[3].columns.names
+        assert "DEC_PRED" in hdul[3].columns.names
         assert "ORIGINAL_TIME" in hdul[3].columns.names
         assert "ORIGINAL_TIMECORR" in hdul[3].columns.names
         assert len(hdul[3].data["APERTURE"]) == len(target.time)
@@ -432,6 +432,7 @@ def test_make_lc():
         assert np.isnan(hdul[1].data["PSF_FLUX"]).all()
         assert "MOM_CENTR1" in hdul[1].columns.names
         assert "RA" in hdul[1].columns.names
+        assert "RA_PRED" in hdul[1].columns.names
         assert "EPHEM1" in hdul[1].columns.names
 
         # Check the UTC to TDB conversion has been applied.
