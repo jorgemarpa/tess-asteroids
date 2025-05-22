@@ -369,7 +369,7 @@ class MovingTPF:
         # `self.coords` does not recover these original values because the
         # ephemeris has since been interpolated.
         # Note: pixel_to_world() assumes zero-indexing so subtract one from (row,col).
-        wcs = tesswcs.WCS.from_sector(
+        wcs = tesswcs.WCS.from_archive(
             sector=self.sector, camera=self.camera, ccd=self.ccd
         )
         self.coords = np.asarray(
@@ -1759,6 +1759,8 @@ class MovingTPF:
         4 - pixel is within `sat_buffer_rad` pixels of a saturated pixel
         5 - pixel has no scattered light correction. Only relevant if `linear_model` background correction was used.
         6 - pixel had no background linear model, value was infilled. Only relevant if `linear_model` background correction was used.
+        7 - pixel had negative flux value BEFORE background correction was applied.
+            This can happen near bleed columns from saturated stars (e.g. see Sector 6, Camera 1, CCD 4).
 
         Parameters
         ----------
@@ -1792,7 +1794,10 @@ class MovingTPF:
         # Pixel mask that identifies saturated pixels
         sat_mask = self.flux > sat_level
 
-        # >>>>> ADD A MASK FOR OTHER SATURATION FEATURES <<<<<
+        # Pixel mask that identifies negative flux values
+        negative_mask = self.flux < 0
+
+        # >>>>> ADD A MASK FOR OTHER SATURATION FEATURES? <<<<<
 
         # Combine masks
         pixel_quality = []
@@ -1835,6 +1840,7 @@ class MovingTPF:
                         self.shape
                     ),
                 },
+                "negative_mask": {"bit": 7, "value": negative_mask[t]},
             }
             # Compute bit-wise mask
             pixel_quality.append(
@@ -1903,7 +1909,7 @@ class MovingTPF:
                 f"Method must be one of: ['aperture', 'psf']. Not '{method}'"
             )
 
-    def _aperture_photometry(self, bad_bits: list = [1, 3], **kwargs):
+    def _aperture_photometry(self, bad_bits: list = [1, 3, 7], **kwargs):
         """
         Gets flux and BG flux inside aperture and computes flux-weighted centroid.
 
@@ -1911,8 +1917,8 @@ class MovingTPF:
         ----------
         bad_bits : list
             Bits to mask during computation of aperture flux, BG flux and centroid. These bits correspond
-            to the `self.pixel_quality` flags. By default, bits 1 (non-science pixel) and 3 (saturated pixel)
-            are masked.
+            to the `self.pixel_quality` flags. By default, bits 1 (non-science pixel), 3 (saturated pixel)
+            and 7 (negative flux before BG correction) are masked.
 
         Returns
         -------
@@ -2017,18 +2023,19 @@ class MovingTPF:
 
         Bit - Description
         ----------------
-        1 - no pixels inside aperture.
-        2 - at least one non-science pixel inside aperture.
-        3 - at least one pixel inside aperture is in a strap column.
-        4 - at least one saturated pixel inside aperture.
-        5 - at least one pixel inside aperture is 4-adjacent to a saturated pixel.
-        6 - all pixels inside aperture are `bad_bits`.
-        7 - PRF model contained nans.
-            Only relevant if `prf` aperture was used.
-        8 - at least one pixel inside aperture does not have scattered light correction.
-            Only relevant if `linear_model` background correction was used.
-        9 - at least one pixel inside aperture had no background linear model, value was infilled.
-            Only relevant if `linear_model` background correction was used.
+        1  - no pixels inside aperture.
+        2  - at least one non-science pixel inside aperture.
+        3  - at least one pixel inside aperture is in a strap column.
+        4  - at least one saturated pixel inside aperture.
+        5  - at least one pixel inside aperture is 4-adjacent to a saturated pixel.
+        6  - all pixels inside aperture are `bad_bits`.
+        7  - PRF model contained nans.
+             Only relevant if `prf` aperture was used.
+        8  - at least one pixel inside aperture does not have scattered light correction.
+             Only relevant if `linear_model` background correction was used.
+        9  - at least one pixel inside aperture had no background linear model, value was infilled.
+             Only relevant if `linear_model` background correction was used.
+        10 - at least one pixel inside aperture had negative value BEFORE background correction was applied.
 
         Parameters
         ----------
@@ -2132,7 +2139,15 @@ class MovingTPF:
                         for t in range(len(self.time))
                     ],
                 },
-                # Add flag for negative pixels in aperture?
+                # Negative pixel (before BG correction) in aperture
+                "negative_mask": {
+                    "bit": 10,
+                    "value": [
+                        (self.pixel_quality[t][self.aperture_mask[t]] & 64 != 0).any()
+                        for t in range(len(self.time))
+                    ],
+                },
+                # Add flag for negative pixels (after BG correction) in aperture?
             }
 
         elif method == "psf":
