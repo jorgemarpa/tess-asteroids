@@ -7,6 +7,7 @@ import lkprf
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import tesswcs
 from astropy.io import fits
 from astropy.stats import sigma_clip
 from astropy.time import Time
@@ -362,17 +363,18 @@ class MovingTPF:
             )
         self.target_mask = np.asarray(target_mask)
 
-        # Convert (row,column) ephemeris to (ra,dec) using average WCS from observing sector.
+        # Convert (row,column) ephemeris to (ra,dec) using WCS from tesswcs.
         # Note: if MovingTPF was initialised from_name, then tess-ephem
-        # internally converted (ra,dec) to (row,column) using the average WCS
-        # from the observing sector. `self.coords` does not recover these original values
-        # because the ephemeris has been interpolated.
+        # internally converted (ra,dec) to (row,column) using tesswcs.
+        # `self.coords` does not recover these original values because the
+        # ephemeris has since been interpolated.
         # Note: pixel_to_world() assumes zero-indexing so subtract one from (row,col).
+        wcs = tesswcs.WCS.from_sector(
+            sector=self.sector, camera=self.camera, ccd=self.ccd
+        )
         self.coords = np.asarray(
             [
-                self.cube.wcs.pixel_to_world(
-                    self.ephemeris[t, 1] - 1, self.ephemeris[t, 0] - 1
-                )
+                wcs.pixel_to_world(self.ephemeris[t, 1] - 1, self.ephemeris[t, 0] - 1)
                 for t in range(len(self.time_original))
             ]
         )

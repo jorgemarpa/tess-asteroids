@@ -223,28 +223,28 @@ test-all = ["coverage[toml]", "ipython (>=4.2)", "objgraph", "pytest (>=7.0,<8)"
 
 [[package]]
 name = "astroquery"
-version = "0.4.6"
+version = "0.4.10"
 description = "Functions and classes to access online astronomical data resources"
 optional = false
-python-versions = "*"
+python-versions = ">=3.9"
 files = [
-    {file = "astroquery-0.4.6-py3-none-any.whl", hash = "sha256:e1bc4996af7500370837d31491bd4ee7f0c954c78d24cd54fb1cceb755469094"},
-    {file = "astroquery-0.4.6.tar.gz", hash = "sha256:307ca554cb734a0ca9a22f86f5effe7e413af913ae65e1578972d847b1fe13ee"},
+    {file = "astroquery-0.4.10-py3-none-any.whl", hash = "sha256:43a0255766bfe1f7a86f528e19832d1a6428400bda348e9f0ec970cac2ee81ec"},
+    {file = "astroquery-0.4.10.tar.gz", hash = "sha256:eacd91e9da378e641740fbc3123850daa83ba0926a6fff4c40ccbf5dc6d5a406"},
 ]
 
 [package.dependencies]
-astropy = ">=4.0"
-beautifulsoup4 = ">=4.3.2"
+astropy = ">=5.0"
+beautifulsoup4 = ">=4.8"
 html5lib = ">=0.999"
-keyring = ">=4.0"
-numpy = ">=1.16"
-pyvo = ">=1.1"
-requests = ">=2.4.3"
+keyring = ">=15.0"
+numpy = ">=1.20"
+pyvo = ">=1.5"
+requests = ">=2.19"
 
 [package.extras]
-all = ["aplpy", "astropy-healpix", "boto3", "mocpy (>=0.5.2)", "pyregion", "regions"]
-docs = ["scipy", "sphinx-astropy (>=1.5)"]
-test = ["flask", "jinja2", "matplotlib", "pytest-astropy", "pytest-dependency"]
+all = ["astropy-healpix", "boto3", "mocpy (>=0.12)", "regions (>=0.5)"]
+docs = ["fsspec[http]", "matplotlib", "scipy", "sphinx-astropy (>=1.5)", "sphinx-automodapi (<0.18)"]
+test = ["fsspec[http]", "matplotlib", "moto[s3]", "pytest-astropy", "pytest-dependency", "pytest-rerunfailures"]
 
 [[package]]
 name = "async-timeout"
@@ -2965,22 +2965,22 @@ tests = ["numpy (>=1.17.0)", "pandas (>=0.24.0)", "pytest (>=7.0.0)"]
 
 [[package]]
 name = "tess-ephem"
-version = "0.5.1"
+version = "0.5.2"
 description = "Where are Solar System objects located in TESS FFI data?"
 optional = false
 python-versions = "<4.0,>=3.9"
 files = [
-    {file = "tess_ephem-0.5.1-py3-none-any.whl", hash = "sha256:3666b53b28f6359de74da367564cc0f8228a4d60456524200404ad31497d6938"},
-    {file = "tess_ephem-0.5.1.tar.gz", hash = "sha256:b075d1c8786ea5d038395de2fe9af4a3dfbdaf91d75e2547b38c3575e03c83ef"},
+    {file = "tess_ephem-0.5.2-py3-none-any.whl", hash = "sha256:741c0acc864622369005aabe1694aa7991cafec5507b13a94d69a99b30674b58"},
+    {file = "tess_ephem-0.5.2.tar.gz", hash = "sha256:1974d3c0c23fad21d7e2b6c5b27b5ad84035c4c04ad9545a8fcc81e3134c7f0f"},
 ]
 
 [package.dependencies]
 astropy = ">=5.2.0,<6.0.0"
-astroquery = "0.4.6"
+astroquery = ">=0.4.9,<0.5.0"
 numpy = ">=1.23.0,<2.0.0"
 pandas = ">=2.0,<3.0"
 scipy = ">=1.9.0,<2.0.0"
-tesswcs = ">=1.1.3,<2.0.0"
+tesswcs = ">=1.6.1,<2.0.0"
 
 [[package]]
 name = "tesscube"
@@ -3006,22 +3006,24 @@ rich = ">=13.7.0,<14.0.0"
 
 [[package]]
 name = "tesswcs"
-version = "1.5.0"
+version = "1.6.2"
 description = ""
 optional = false
 python-versions = "<4.0,>=3.9"
 files = [
-    {file = "tesswcs-1.5.0-py3-none-any.whl", hash = "sha256:30460d606b8a8fb7af0119a94c5e57b3456b436005589b33a1f959114b0644db"},
-    {file = "tesswcs-1.5.0.tar.gz", hash = "sha256:13cef5e1bad830cc9d49db5683ab7be4fc297163dc067e4aca44e64d05a35015"},
+    {file = "tesswcs-1.6.2-py3-none-any.whl", hash = "sha256:831004045d73f267231338ecc7495ba1973c805f2a2af79da7f2581f934c48ca"},
+    {file = "tesswcs-1.6.2.tar.gz", hash = "sha256:a713ee1b32d9f535f50eb711a4253e5befcb7b3181526c77587c50b24dff3710"},
 ]
 
 [package.dependencies]
 astropy = ">=5.0"
+astroquery = ">=0.4.9"
 matplotlib = ">=3.8.2"
+pandas = ">=2.2.3,<3.0.0"
 tqdm = ">=4.66.1"
 
 [package.extras]
-database = ["tesscube (>=1.0.4,<2.0.0)"]
+database = ["tesscube (>=1.2.0)"]
 
 [[package]]
 name = "threadpoolctl"
@@ -3458,4 +3460,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.9, <3.13"
-content-hash = "c2f703cef5d7bfe52e023b8fe5d0de4313b1640caea83eb1eae6d23c21133956"
+content-hash = "7673798e38999bdb197cf05921b830e2479f566f07667caac86f1841f7ba3e60"
