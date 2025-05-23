@@ -333,8 +333,8 @@ def test_make_tpf():
         assert "PIXEL_QUALITY" in hdul[3].columns.names
         assert "CORNER1" in hdul[3].columns.names
         assert "CORNER2" in hdul[3].columns.names
-        assert "RA" in hdul[3].columns.names
-        assert "DEC" in hdul[3].columns.names
+        assert "RA_PRED" in hdul[3].columns.names
+        assert "DEC_PRED" in hdul[3].columns.names
         assert "ORIGINAL_TIME" in hdul[3].columns.names
         assert "ORIGINAL_TIMECORR" in hdul[3].columns.names
         assert len(hdul[3].data["APERTURE"]) == len(target.time)
@@ -396,6 +396,20 @@ def test_to_lightcurve():
     assert (target.lc["aperture"]["flux_fraction"] <= 1).all()
     assert np.isfinite(target.lc["aperture"]["flux_fraction"]).all()
 
+    # Check measured coords are within 1deg of predicted coords, excluding NaNs:
+    ra_nan_mask = ~np.isnan(target.lc["aperture"]["ra"])
+    dec_nan_mask = ~np.isnan(target.lc["aperture"]["dec"])
+    assert (
+        np.array(target.lc["aperture"]["ra"])[ra_nan_mask]
+        - [coord.ra.value for coord in target.coords[ra_nan_mask]]
+        < 1
+    ).all()
+    assert (
+        np.array(target.lc["aperture"]["dec"])[dec_nan_mask]
+        - [coord.dec.value for coord in target.coords[dec_nan_mask]]
+        < 1
+    ).all()
+
 
 def test_make_lc():
     """
@@ -432,6 +446,7 @@ def test_make_lc():
         assert np.isnan(hdul[1].data["PSF_FLUX"]).all()
         assert "MOM_CENTR1" in hdul[1].columns.names
         assert "RA" in hdul[1].columns.names
+        assert "RA_PRED" in hdul[1].columns.names
         assert "EPHEM1" in hdul[1].columns.names
 
         # Check the UTC to TDB conversion has been applied.

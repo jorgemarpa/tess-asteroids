@@ -7,6 +7,7 @@ import lkprf
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import tesswcs
 from astropy.io import fits
 from astropy.stats import sigma_clip
 from astropy.time import Time
@@ -59,6 +60,10 @@ class MovingTPF:
         self.target = target
         self.ephem = ephem
         self.time_scale = time_scale
+
+        # Check self.ephem has more than one row
+        if len(self.ephem) < 2:
+            raise ValueError("ephem must have at least two rows.")
 
         # Check self.ephem['time'] has correct units
         if min(self.ephem["time"]) >= 2457000:
@@ -362,15 +367,18 @@ class MovingTPF:
             )
         self.target_mask = np.asarray(target_mask)
 
-        # Convert (row,column) ephemeris to (ra,dec) using average WCS from observing sector.
+        # Convert (row,column) ephemeris to (ra,dec) using WCS from tesswcs.
         # Note: if MovingTPF was initialised from_name, then tess-ephem
-        # internally converted (ra,dec) to (row,column) using the average WCS
-        # from the observing sector. `self.coords` does not recover these original values
-        # because the ephemeris has been interpolated.
+        # internally converted (ra,dec) to (row,column) using tesswcs.
+        # `self.coords` does not recover these original values because the
+        # ephemeris has since been interpolated.
         # Note: pixel_to_world() assumes zero-indexing so subtract one from (row,col).
+        self.wcs = tesswcs.WCS.from_archive(
+            sector=self.sector, camera=self.camera, ccd=self.ccd
+        )
         self.coords = np.asarray(
             [
-                self.cube.wcs.pixel_to_world(
+                self.wcs.pixel_to_world(
                     self.ephemeris[t, 1] - 1, self.ephemeris[t, 0] - 1
                 )
                 for t in range(len(self.time_original))
@@ -1090,16 +1098,23 @@ class MovingTPF:
                     prior_sigma[0] = np.abs(prior_mu[0]) ** 0.5
 
                     # Use weighted Bayesian LS.
-                    sigma_w_inv = X[k].T.dot(
-                        X[k] / sl_corr_flux_err[adx:bdx][k, pdx, None] ** 2
-                    ) + np.diag(1 / prior_sigma**2)
-                    B = (
-                        X[k].T.dot(
-                            sl_corr_flux[adx:bdx][k, pdx]
-                            / sl_corr_flux_err[adx:bdx][k, pdx] ** 2
+                    with warnings.catch_warnings():
+                        warnings.filterwarnings(
+                            "ignore", message="divide by zero encountered in divide"
                         )
-                        + prior_mu / prior_sigma**2
-                    )
+                        warnings.filterwarnings(
+                            "ignore", message="invalid value encountered in divide"
+                        )
+                        sigma_w_inv = X[k].T.dot(
+                            X[k] / sl_corr_flux_err[adx:bdx][k, pdx, None] ** 2
+                        ) + np.diag(1 / prior_sigma**2)
+                        B = (
+                            X[k].T.dot(
+                                sl_corr_flux[adx:bdx][k, pdx]
+                                / sl_corr_flux_err[adx:bdx][k, pdx] ** 2
+                            )
+                            + prior_mu / prior_sigma**2
+                        )
 
                     # Find the best-fitting weights and errors and turn it into a distribution
                     w = np.linalg.solve(sigma_w_inv, B)
@@ -1757,6 +1772,8 @@ class MovingTPF:
         4 - pixel is within `sat_buffer_rad` pixels of a saturated pixel
         5 - pixel has no scattered light correction. Only relevant if `linear_model` background correction was used.
         6 - pixel had no background linear model, value was infilled. Only relevant if `linear_model` background correction was used.
+        7 - pixel had negative flux value BEFORE background correction was applied.
+            This can happen near bleed columns from saturated stars (e.g. see Sector 6, Camera 1, CCD 4).
 
         Parameters
         ----------
@@ -1790,7 +1807,10 @@ class MovingTPF:
         # Pixel mask that identifies saturated pixels
         sat_mask = self.flux > sat_level
 
-        # >>>>> ADD A MASK FOR OTHER SATURATION FEATURES <<<<<
+        # Pixel mask that identifies negative flux values
+        negative_mask = self.flux < 0
+
+        # >>>>> ADD A MASK FOR OTHER SATURATION FEATURES? <<<<<
 
         # Combine masks
         pixel_quality = []
@@ -1833,6 +1853,7 @@ class MovingTPF:
                         self.shape
                     ),
                 },
+                "negative_mask": {"bit": 7, "value": negative_mask[t]},
             }
             # Compute bit-wise mask
             pixel_quality.append(
@@ -1877,6 +1898,7 @@ class MovingTPF:
                 row_cen,
                 col_cen_err,
                 row_cen_err,
+                measured_coords,
                 flux_fraction,
             ) = self._aperture_photometry(**kwargs)
             quality = self._create_lc_quality()
@@ -1892,6 +1914,8 @@ class MovingTPF:
                 "row_cen_err": row_cen_err,
                 "quality": quality,
                 "flux_fraction": flux_fraction,
+                "ra": [coord.ra.value for coord in measured_coords],
+                "dec": [coord.dec.value for coord in measured_coords],
             }
 
         elif method == "psf":
@@ -1901,7 +1925,7 @@ class MovingTPF:
                 f"Method must be one of: ['aperture', 'psf']. Not '{method}'"
             )
 
-    def _aperture_photometry(self, bad_bits: list = [1, 3], **kwargs):
+    def _aperture_photometry(self, bad_bits: list = [1, 3, 7], **kwargs):
         """
         Gets flux and BG flux inside aperture and computes flux-weighted centroid.
 
@@ -1909,15 +1933,16 @@ class MovingTPF:
         ----------
         bad_bits : list
             Bits to mask during computation of aperture flux, BG flux and centroid. These bits correspond
-            to the `self.pixel_quality` flags. By default, bits 1 (non-science pixel) and 3 (saturated pixel)
-            are masked.
+            to the `self.pixel_quality` flags. By default, bits 1 (non-science pixel), 3 (saturated pixel)
+            and 7 (negative flux before BG correction) are masked.
 
         Returns
         -------
-        ap_flux, ap_flux_err, ap_bg, ap_bg_err, col_cen, row_cen, col_cen_err, row_cen_err, flux_fraction : ndarrays
+        ap_flux, ap_flux_err, ap_bg, ap_bg_err, col_cen, row_cen, col_cen_err, row_cen_err, measured_coords, flux_fraction : ndarrays
             Sum of flux inside aperture and error (ap_flux, ap_flux_err), sum of background flux inside
             aperture and error (ap_bg, ap_bg_err), flux-weighted centroids inside aperture and errors
-            (col_cen, row_cen, col_cen_err, row_cen_err) and fraction of PRF model flux inside aperture (flux_fraction).
+            (col_cen, row_cen, col_cen_err, row_cen_err), flux-weighted centroids converted to world coordinates using WCS (measured_coords)
+            and fraction of PRF model flux inside aperture (flux_fraction).
             The row and column centroids are one-indexed and correspond to the position in the full FFI, where the
             lower left pixel has the value (1,1). Flux fraction will be nan unless `prf` aperture is used.
         """
@@ -1996,6 +2021,15 @@ class MovingTPF:
         col_cen += self.corner[:, 1]
         row_cen += self.corner[:, 0]
 
+        # Convert measured centroid from (row,col) to (ra,dec) using WCS from tesswcs.
+        # Note: pixel_to_world() assumes zero-indexing so subtract one from (row,col).
+        measured_coords = np.asarray(
+            [
+                self.wcs.pixel_to_world(col_cen[t] - 1, row_cen[t] - 1)
+                for t in range(len(self.time_original))
+            ]
+        )
+
         return (
             np.asarray(ap_flux),
             np.asarray(ap_flux_err),
@@ -2005,6 +2039,7 @@ class MovingTPF:
             row_cen,
             col_cen_err,
             row_cen_err,
+            measured_coords,
             np.asarray(flux_fraction),
         )
 
@@ -2015,18 +2050,19 @@ class MovingTPF:
 
         Bit - Description
         ----------------
-        1 - no pixels inside aperture.
-        2 - at least one non-science pixel inside aperture.
-        3 - at least one pixel inside aperture is in a strap column.
-        4 - at least one saturated pixel inside aperture.
-        5 - at least one pixel inside aperture is 4-adjacent to a saturated pixel.
-        6 - all pixels inside aperture are `bad_bits`.
-        7 - PRF model contained nans.
-            Only relevant if `prf` aperture was used.
-        8 - at least one pixel inside aperture does not have scattered light correction.
-            Only relevant if `linear_model` background correction was used.
-        9 - at least one pixel inside aperture had no background linear model, value was infilled.
-            Only relevant if `linear_model` background correction was used.
+        1  - no pixels inside aperture.
+        2  - at least one non-science pixel inside aperture.
+        3  - at least one pixel inside aperture is in a strap column.
+        4  - at least one saturated pixel inside aperture.
+        5  - at least one pixel inside aperture is 4-adjacent to a saturated pixel.
+        6  - all pixels inside aperture are `bad_bits`.
+        7  - PRF model contained nans.
+             Only relevant if `prf` aperture was used.
+        8  - at least one pixel inside aperture does not have scattered light correction.
+             Only relevant if `linear_model` background correction was used.
+        9  - at least one pixel inside aperture had no background linear model, value was infilled.
+             Only relevant if `linear_model` background correction was used.
+        10 - at least one pixel inside aperture had negative value BEFORE background correction was applied.
 
         Parameters
         ----------
@@ -2130,7 +2166,15 @@ class MovingTPF:
                         for t in range(len(self.time))
                     ],
                 },
-                # Add flag for negative pixels in aperture?
+                # Negative pixel (before BG correction) in aperture
+                "negative_mask": {
+                    "bit": 10,
+                    "value": [
+                        (self.pixel_quality[t][self.aperture_mask[t]] & 64 != 0).any()
+                        for t in range(len(self.time))
+                    ],
+                },
+                # Add flag for negative pixels (after BG correction) in aperture?
             }
 
         elif method == "psf":
@@ -2519,16 +2563,16 @@ class MovingTPF:
                 disp="E14.7",
                 array=self.timecorr_original,
             ),
-            # Predicted position of target in world coordinates.
+            # Predicted position of target, in world coordinates.
             fits.Column(
-                name="RA",
+                name="RA_PRED",
                 format="E",
                 unit="deg",
                 disp="E14.7",
                 array=[coord.ra.value for coord in self.coords],
             ),
             fits.Column(
-                name="DEC",
+                name="DEC_PRED",
                 format="E",
                 unit="deg",
                 disp="E14.7",
@@ -2683,7 +2727,7 @@ class MovingTPF:
                 if "aperture" in self.lc
                 else np.full(len(self.time), np.nan),
             ),
-            # Column centroid and err
+            # Measured column centroid and err
             fits.Column(
                 name="MOM_CENTR1",
                 format="E",
@@ -2702,7 +2746,7 @@ class MovingTPF:
                 if "aperture" in self.lc
                 else np.full(len(self.time), np.nan),
             ),
-            # Row centroid and err
+            # Measured row centroid and err
             fits.Column(
                 name="MOM_CENTR2",
                 format="E",
@@ -2718,6 +2762,25 @@ class MovingTPF:
                 unit="pixel",
                 disp="E14.7",
                 array=self.lc["aperture"]["row_cen_err"]
+                if "aperture" in self.lc
+                else np.full(len(self.time), np.nan),
+            ),
+            # Measured position of target, in world coordinates.
+            fits.Column(
+                name="RA",
+                format="E",
+                unit="deg",
+                disp="E14.7",
+                array=self.lc["aperture"]["ra"]
+                if "aperture" in self.lc
+                else np.full(len(self.time), np.nan),
+            ),
+            fits.Column(
+                name="DEC",
+                format="E",
+                unit="deg",
+                disp="E14.7",
+                array=self.lc["aperture"]["dec"]
                 if "aperture" in self.lc
                 else np.full(len(self.time), np.nan),
             ),
@@ -2839,16 +2902,16 @@ class MovingTPF:
                 disp="E14.7",
                 array=self.ephemeris[:, 0],
             ),
-            # Predicted position of target in world coordinates.
+            # Predicted position of target, in world coordinates.
             fits.Column(
-                name="RA",
+                name="RA_PRED",
                 format="E",
                 unit="deg",
                 disp="E14.7",
                 array=[coord.ra.value for coord in self.coords],
             ),
             fits.Column(
-                name="DEC",
+                name="DEC_PRED",
                 format="E",
                 unit="deg",
                 disp="E14.7",
