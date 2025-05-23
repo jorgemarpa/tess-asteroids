@@ -148,6 +148,9 @@ def compute_moments(
                 warnings.filterwarnings(
                     "ignore", message="invalid value encountered in sqrt"
                 )
+                warnings.filterwarnings(
+                    "ignore", message="divide by zero encountered in scalar divide"
+                )
                 XERR[nt] = np.sqrt(
                     X2[nt]
                     * (np.nansum(flux[nt, mask[nt]] ** 2))

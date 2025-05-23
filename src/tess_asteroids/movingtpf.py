@@ -61,6 +61,10 @@ class MovingTPF:
         self.ephem = ephem
         self.time_scale = time_scale
 
+        # Check self.ephem has more than one row
+        if len(self.ephem) < 2:
+            raise ValueError("ephem must have at least two rows.")
+
         # Check self.ephem['time'] has correct units
         if min(self.ephem["time"]) >= 2457000:
             raise ValueError("ephem['time'] must have units (JD - 2457000).")
@@ -1094,16 +1098,23 @@ class MovingTPF:
                     prior_sigma[0] = np.abs(prior_mu[0]) ** 0.5
 
                     # Use weighted Bayesian LS.
-                    sigma_w_inv = X[k].T.dot(
-                        X[k] / sl_corr_flux_err[adx:bdx][k, pdx, None] ** 2
-                    ) + np.diag(1 / prior_sigma**2)
-                    B = (
-                        X[k].T.dot(
-                            sl_corr_flux[adx:bdx][k, pdx]
-                            / sl_corr_flux_err[adx:bdx][k, pdx] ** 2
+                    with warnings.catch_warnings():
+                        warnings.filterwarnings(
+                            "ignore", message="divide by zero encountered in divide"
                         )
-                        + prior_mu / prior_sigma**2
-                    )
+                        warnings.filterwarnings(
+                            "ignore", message="invalid value encountered in divide"
+                        )
+                        sigma_w_inv = X[k].T.dot(
+                            X[k] / sl_corr_flux_err[adx:bdx][k, pdx, None] ** 2
+                        ) + np.diag(1 / prior_sigma**2)
+                        B = (
+                            X[k].T.dot(
+                                sl_corr_flux[adx:bdx][k, pdx]
+                                / sl_corr_flux_err[adx:bdx][k, pdx] ** 2
+                            )
+                            + prior_mu / prior_sigma**2
+                        )
 
                     # Find the best-fitting weights and errors and turn it into a distribution
                     w = np.linalg.solve(sigma_w_inv, B)
