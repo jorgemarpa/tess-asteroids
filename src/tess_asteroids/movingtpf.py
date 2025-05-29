@@ -25,7 +25,13 @@ from tesscube.utils import _sync_call, convert_coordinates_to_runs
 from tqdm import tqdm
 
 from . import __version__, logger, straps
-from .utils import animate_cube, compute_moments, inside_ellipse, make_wcs_header, calculate_TESSmag
+from .utils import (
+    animate_cube,
+    calculate_TESSmag,
+    compute_moments,
+    inside_ellipse,
+    make_wcs_header,
+)
 
 
 class MovingTPF:
@@ -1926,9 +1932,20 @@ class MovingTPF:
             )
 
         # Convert measured flux to TESS magnitude.
-        # If "prf" method was used to compute the aperture, there are meaningful flux fractions. 
+        # If "prf" method was used to compute the aperture, there are meaningful flux fractions.
         # Otherwise, assume 100% of the flux is inside the aperture.
-        self.lc[method]["TESSmag"], self.lc[method]["TESSmag_err"], self.TESSmag_zero_point, self.TESSmag_zero_point_err = calculate_TESSmag(self.lc[method]["flux"], self.lc[method]["flux_err"], self.lc[method]["flux_fraction"] if self.ap_method == "prf" else np.ones_like(self.lc[method]["flux_fraction"]))
+        (
+            self.lc[method]["TESSmag"],
+            self.lc[method]["TESSmag_err"],
+            self.TESSmag_zero_point,
+            self.TESSmag_zero_point_err,
+        ) = calculate_TESSmag(
+            self.lc[method]["flux"],
+            self.lc[method]["flux_err"],
+            self.lc[method]["flux_fraction"]
+            if self.ap_method == "prf"
+            else np.ones_like(self.lc[method]["flux_fraction"]),
+        )
 
     def _aperture_photometry(self, bad_bits: list = [1, 3, 7], **kwargs):
         """
@@ -2710,6 +2727,25 @@ class MovingTPF:
                 unit="e-/s",
                 disp="D14.7",
                 array=self.lc["aperture"]["flux_err"]
+                if "aperture" in self.lc
+                else np.full(len(self.time), np.nan),
+            ),
+            # TESS magnitude and error
+            fits.Column(
+                name="TESSMAG",
+                format="D",
+                unit="mag",
+                disp="D14.7",
+                array=self.lc["aperture"]["TESSmag"]
+                if "aperture" in self.lc
+                else np.full(len(self.time), np.nan),
+            ),
+            fits.Column(
+                name="TESSMAG_ERR",
+                format="D",
+                unit="mag",
+                disp="D14.7",
+                array=self.lc["aperture"]["TESSmag_err"]
                 if "aperture" in self.lc
                 else np.full(len(self.time), np.nan),
             ),
