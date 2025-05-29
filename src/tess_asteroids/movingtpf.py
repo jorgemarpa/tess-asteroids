@@ -3095,7 +3095,7 @@ class MovingTPF:
         sector: int,
         camera: Optional[int] = None,
         ccd: Optional[int] = None,
-        time_step: float = 1.0,
+        time_step: float = 0.1,
     ):
         """
         Initialises MovingTPF from target name and TESS sector. Specifying a camera and
