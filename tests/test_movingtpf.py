@@ -7,6 +7,7 @@ import pandas as pd
 from astropy.io import fits
 
 from tess_asteroids import MovingTPF, __version__
+from tess_asteroids.utils import calculate_TESSmag
 
 
 def test_from_name():
@@ -180,7 +181,7 @@ def test_create_prf_aperture(caplog):
     """
 
     # Make TPF for asteroid 1998 YT6
-    target = MovingTPF.from_name("1998 YT6", sector=6)
+    target = MovingTPF.from_name("1998 YT6", sector=6, time_step=1.0)
     target.get_data(shape=(11, 11))
 
     # Make aperture from PRF model
@@ -326,6 +327,8 @@ def test_make_tpf():
         assert hdul[0].header["BG_CORR"].strip() == "linear_model"
         assert hdul[0].header["SL_CORR"].strip() == "all_time"
         assert hdul[0].header["VMAG"] > 0
+        assert hdul[0].header["TESSMAG"] == 0
+        assert hdul[0].header["TESSMAG0"] == 0
         assert "SPOCDATE" in hdul[0].header.keys()
         assert "TIME" in hdul[1].columns.names
         assert "TIMECORR" in hdul[1].columns.names
@@ -374,6 +377,7 @@ def test_to_lightcurve():
     # Check the lightcurve has the same length as target.time
     assert len(target.lc["aperture"]["time"]) == len(target.time)
     assert len(target.lc["aperture"]["flux"]) == len(target.time)
+    assert len(target.lc["aperture"]["TESSmag"]) == len(target.time)
     assert len(target.lc["aperture"]["quality"]) == len(target.time)
     assert len(target.lc["aperture"]["flux_fraction"]) == len(target.time)
 
@@ -411,6 +415,43 @@ def test_to_lightcurve():
     ).all()
 
 
+def test_calculate_TESSmag():
+    """
+    Check expected behaviour of calculate_TESSmag() for some simple test cases.
+    """
+
+    # If flux_fraction = 1, magnitude should be equal to zero-point magnitude.
+    mag, _, mag0, _ = calculate_TESSmag(1.0, 0.1, 1.0)
+    assert mag == mag0
+
+    # If flux = NaN, magnitude should be NaN.
+    mag, _, _, _ = calculate_TESSmag(np.nan, 0.1, 1.0)
+    assert np.isnan(mag)
+
+    # If flux, flux_err and flux_frac are arrays, mag/mag_err should have the same length.
+    flux = np.array([0.1, 0.5, 0.9, 1.5])
+    flux_err = np.array([0.01, 0.05, 0.09, 0.15])
+    flux_frac = np.array([1.0, 0.5, 0.8, 0.9])
+    mag, mag_err, _, _ = calculate_TESSmag(flux, flux_err, flux_frac)
+    assert len(mag) == len(flux)
+    assert len(mag_err) == len(flux)
+
+    # If any value of flux <= 0, corresponding mag/mag_err should be NaN.
+    flux[0] = -0.3
+    mag, mag_err, _, _ = calculate_TESSmag(flux, flux_err, flux_frac)
+    assert np.isnan(mag[0])
+    assert np.isnan(mag_err[0])
+
+    # If any value of flux_frac < 0, function should return ValueError.
+    flux_frac[2] = -0.3
+    try:
+        calculate_TESSmag(flux, flux_err, flux_frac)
+    except ValueError:
+        assert True
+    else:
+        assert False
+
+
 def test_make_lc():
     """
     Check that make_lc() correctly saves the LCF, that the file has the expected attributes
@@ -434,6 +475,8 @@ def test_make_lc():
         assert hdul[0].header["BG_CORR"].strip() == "rolling"
         assert hdul[0].header["SL_CORR"].strip() == "n/a"
         assert hdul[0].header["VMAG"] > 0
+        assert hdul[0].header["TESSMAG"] > 0
+        assert hdul[0].header["TESSMAG0"] > 0
         assert "SPOCDATE" in hdul[0].header.keys()
 
         # Check columns in lightcurve HDU
@@ -443,7 +486,8 @@ def test_make_lc():
         assert "ORIGINAL_TIMECORR" in hdul[1].columns.names
         assert "FLUX" in hdul[1].columns.names
         assert "FLUX_ERR" in hdul[1].columns.names
-        assert np.isnan(hdul[1].data["PSF_FLUX"]).all()
+        assert "TESSMAG" in hdul[1].columns.names
+        assert "TESSMAG_ERR" in hdul[1].columns.names
         assert "MOM_CENTR1" in hdul[1].columns.names
         assert "RA" in hdul[1].columns.names
         assert "RA_PRED" in hdul[1].columns.names

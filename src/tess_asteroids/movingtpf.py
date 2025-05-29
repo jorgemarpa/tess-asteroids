@@ -2322,7 +2322,7 @@ class MovingTPF:
         hdu.header.set("DATA_REL", comment="SPOC data release version number")
         hdu.header.set("OBJECT", self.target, comment="object name")
 
-        # Add average measured TESS magnitude of target
+        # Add average measured TESS magnitude of target and zero-point
         hdu.header.set(
             "TESSMAG",
             round(np.nanmedian(self.lc["aperture"]["TESSmag"]), 3)

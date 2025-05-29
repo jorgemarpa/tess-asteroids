@@ -60,6 +60,17 @@ def calculate_TESSmag(
             "All values of flux fraction must satisfy 0 < flux_fraction <= 1."
         )
 
+    # If flux <= 0 (a remnant of BG correction), set it to be NaN for this calculation.
+    # This means corresponding mag and mag_err will be NaN.
+    # If flux/flux_err are arrays, must make a copy before manpiulating.
+    if not isinstance(flux, np.ndarray) and flux <= 0:
+        flux = np.nan
+    elif isinstance(flux, np.ndarray):
+        flux = flux.copy().astype(float)
+        flux[flux <= 0] = np.nan
+    if isinstance(flux_err, np.ndarray):
+        flux_err = flux_err.copy().astype(float)
+
     # Account for target flux outside aperture.
     flux /= flux_fraction
     flux_err /= flux_fraction
