@@ -199,4 +199,4 @@ The TPF has four HDUs:
 
 The LCF has two HDUs: 
 - "PRIMARY" - a primary HDU containing only a header.
-- "LIGHTCURVE" - a table HDU with columns including "TIME" (timestamps in BTJD), "FLUX"/"FLUX_ERR" (flux and error from aperture photometry) and "PSF_FLUX"/"PSF_FLUX_ERR" (flux and error from PSF photometry).
+- "LIGHTCURVE" - a table HDU with columns including "TIME" (timestamps in BTJD), "FLUX"/"FLUX_ERR" (flux and error from aperture photometry) and "TESSMAG"/"TESSMAG_ERR" (measured TESS magnitude and error).
