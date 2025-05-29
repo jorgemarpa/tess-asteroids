@@ -2321,7 +2321,23 @@ class MovingTPF:
         hdu.header.set("PROCVER", __version__)
         hdu.header.set("DATA_REL", comment="SPOC data release version number")
         hdu.header.set("OBJECT", self.target, comment="object name")
-        # Future: update TESSMAG with measured value.
+
+        # Add average measured TESS magnitude of target
+        hdu.header.set(
+            "TESSMAG",
+            round(np.nanmedian(self.lc["aperture"]["TESSmag"]), 3)
+            if file_type == "lc" and hasattr(self, "lc") and "aperture" in self.lc
+            else 0.0,
+            comment="[mag] measured TESS magnitude",
+        )
+        hdu.header.set(
+            "TESSMAG0",
+            round(self.TESSmag_zero_point, 3)
+            if file_type == "lc" and hasattr(self, "lc") and "aperture" in self.lc
+            else 0.0,
+            comment="[mag] TESS zero-point magnitude",
+            after="TESSMAG",
+        )
 
         # Add keywords from original FFI header
         hdu.header.set(
@@ -2403,10 +2419,10 @@ class MovingTPF:
             )
             if "vmag" in self.ephem
             else 0.0,
-            comment="V magnitude",
+            comment="[mag] predicted V magnitude",
             after="TICVER",
         )
-        hdu.header.set("HMAG", 0.0, comment="H absolute magnitude", after="VMAG")
+        hdu.header.set("HMAG", 0.0, comment="[mag] H absolute magnitude", after="VMAG")
         hdu.header.set("PERIHEL", 0.0, comment="[AU] perihelion", after="HMAG")
         hdu.header.set("ORBECC", 0.0, comment="orbit eccentricity", after="PERIHEL")
         hdu.header.set("ORBINC", 0.0, comment="[deg] orbit inclination", after="ORBECC")
