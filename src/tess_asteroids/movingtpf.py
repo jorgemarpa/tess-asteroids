@@ -24,8 +24,14 @@ from tesscube.query import async_get_primary_hdu
 from tesscube.utils import _sync_call, convert_coordinates_to_runs
 from tqdm import tqdm
 
-from . import __version__, logger, straps
-from .utils import animate_cube, compute_moments, inside_ellipse, make_wcs_header
+from . import TESSmag_zero_point, __version__, logger, straps
+from .utils import (
+    animate_cube,
+    calculate_TESSmag,
+    compute_moments,
+    inside_ellipse,
+    make_wcs_header,
+)
 
 
 class MovingTPF:
@@ -1925,6 +1931,17 @@ class MovingTPF:
                 f"Method must be one of: ['aperture', 'psf']. Not '{method}'"
             )
 
+        # Convert measured flux to TESS magnitude.
+        # If "prf" method was used to compute the aperture, there are meaningful flux fractions.
+        # Otherwise, assume 100% of the flux is inside the aperture.
+        self.lc[method]["TESSmag"], self.lc[method]["TESSmag_err"] = calculate_TESSmag(
+            self.lc[method]["flux"],
+            self.lc[method]["flux_err"],
+            self.lc[method]["flux_fraction"]
+            if self.ap_method == "prf"
+            else np.ones_like(self.lc[method]["flux_fraction"]),
+        )
+
     def _aperture_photometry(self, bad_bits: list = [1, 3, 7], **kwargs):
         """
         Gets flux and BG flux inside aperture and computes flux-weighted centroid.
@@ -2299,7 +2316,23 @@ class MovingTPF:
         hdu.header.set("PROCVER", __version__)
         hdu.header.set("DATA_REL", comment="SPOC data release version number")
         hdu.header.set("OBJECT", self.target, comment="object name")
-        # Future: update TESSMAG with measured value.
+
+        # Add average measured TESS magnitude of target and zero-point
+        hdu.header.set(
+            "TESSMAG",
+            round(np.nanmedian(self.lc["aperture"]["TESSmag"]), 3)
+            if file_type == "lc" and hasattr(self, "lc") and "aperture" in self.lc
+            else 0.0,
+            comment="[mag] measured TESS magnitude",
+        )
+        hdu.header.set(
+            "TESSMAG0",
+            round(TESSmag_zero_point, 3)
+            if file_type == "lc" and hasattr(self, "lc") and "aperture" in self.lc
+            else 0.0,
+            comment="[mag] TESS zero-point magnitude",
+            after="TESSMAG",
+        )
 
         # Add keywords from original FFI header
         hdu.header.set(
@@ -2381,10 +2414,10 @@ class MovingTPF:
             )
             if "vmag" in self.ephem
             else 0.0,
-            comment="V magnitude",
+            comment="[mag] predicted V magnitude",
             after="TICVER",
         )
-        hdu.header.set("HMAG", 0.0, comment="H absolute magnitude", after="VMAG")
+        hdu.header.set("HMAG", 0.0, comment="[mag] H absolute magnitude", after="VMAG")
         hdu.header.set("PERIHEL", 0.0, comment="[AU] perihelion", after="HMAG")
         hdu.header.set("ORBECC", 0.0, comment="orbit eccentricity", after="PERIHEL")
         hdu.header.set("ORBINC", 0.0, comment="[deg] orbit inclination", after="ORBECC")
@@ -2450,10 +2483,10 @@ class MovingTPF:
             # RAW_CNTS is included to give the files the same structure as the SPOC files
             fits.Column(
                 name="RAW_CNTS",
-                format=tform,
+                format=tform.replace("E", "I"),
                 dim=dims,
                 unit="e-/s",
-                disp="E14.7",
+                disp="I8",
                 array=np.zeros_like(self.corr_flux),
             ),
             fits.Column(
@@ -2595,7 +2628,7 @@ class MovingTPF:
             # 3D pixel quality mask
             fits.Column(
                 name="PIXEL_QUALITY",
-                format=str(self.corr_flux[0].size) + "I",
+                format=tform.replace("E", "I"),
                 dim=dims,
                 disp="B16.16",
                 array=self.pixel_quality,
@@ -2605,7 +2638,7 @@ class MovingTPF:
             # This format is used to be consistent with the aperture HDU from SPOC.
             fits.Column(
                 name="APERTURE",
-                format=str(self.corr_flux[0].size) + "J",
+                format=tform.replace("E", "J"),
                 dim=dims,
                 array=self.aperture_mask.astype("int32") * 2,
             ),
@@ -2692,37 +2725,56 @@ class MovingTPF:
             # Sum of flux inside aperture and err
             fits.Column(
                 name="FLUX",
-                format="D",
+                format="E",
                 unit="e-/s",
-                disp="D14.7",
+                disp="E14.7",
                 array=self.lc["aperture"]["flux"]
                 if "aperture" in self.lc
                 else np.full(len(self.time), np.nan),
             ),
             fits.Column(
                 name="FLUX_ERR",
-                format="D",
+                format="E",
                 unit="e-/s",
-                disp="D14.7",
+                disp="E14.7",
                 array=self.lc["aperture"]["flux_err"]
+                if "aperture" in self.lc
+                else np.full(len(self.time), np.nan),
+            ),
+            # TESS magnitude and error
+            fits.Column(
+                name="TESSMAG",
+                format="E",
+                unit="mag",
+                disp="E14.7",
+                array=self.lc["aperture"]["TESSmag"]
+                if "aperture" in self.lc
+                else np.full(len(self.time), np.nan),
+            ),
+            fits.Column(
+                name="TESSMAG_ERR",
+                format="E",
+                unit="mag",
+                disp="E14.7",
+                array=self.lc["aperture"]["TESSmag_err"]
                 if "aperture" in self.lc
                 else np.full(len(self.time), np.nan),
             ),
             # Sum of BG flux inside aperture and err
             fits.Column(
                 name="FLUX_BKG",
-                format="D",
+                format="E",
                 unit="e-/s",
-                disp="D14.7",
+                disp="E14.7",
                 array=self.lc["aperture"]["bg"]
                 if "aperture" in self.lc
                 else np.full(len(self.time), np.nan),
             ),
             fits.Column(
                 name="FLUX_BKG_ERR",
-                format="D",
+                format="E",
                 unit="e-/s",
-                disp="D14.7",
+                disp="E14.7",
                 array=self.lc["aperture"]["bg_err"]
                 if "aperture" in self.lc
                 else np.full(len(self.time), np.nan),
@@ -2801,74 +2853,6 @@ class MovingTPF:
                 disp="E14.7",
                 array=self.lc["aperture"]["flux_fraction"]
                 if "aperture" in self.lc
-                else np.full(len(self.time), np.nan),
-            ),
-            # --------------
-            # PSF photometry
-            # Flux and err
-            fits.Column(
-                name="PSF_FLUX",
-                format="D",
-                unit="e-/s",
-                disp="D14.7",
-                array=self.lc["psf"]["flux"]
-                if "psf" in self.lc
-                else np.full(len(self.time), np.nan),
-            ),
-            fits.Column(
-                name="PSF_FLUX_ERR",
-                format="D",
-                unit="e-/s",
-                disp="D14.7",
-                array=self.lc["psf"]["flux_err"]
-                if "psf" in self.lc
-                else np.full(len(self.time), np.nan),
-            ),
-            # Column centroid and err
-            fits.Column(
-                name="PSF_CENTR1",
-                format="E",
-                unit="pixel",
-                disp="E14.7",
-                array=self.lc["psf"]["col_cen"]
-                if "psf" in self.lc
-                else np.full(len(self.time), np.nan),
-            ),
-            fits.Column(
-                name="PSF_CENTR1_ERR",
-                format="E",
-                unit="pixel",
-                disp="E14.7",
-                array=self.lc["psf"]["col_cen_err"]
-                if "psf" in self.lc
-                else np.full(len(self.time), np.nan),
-            ),
-            # Row centroid and err
-            fits.Column(
-                name="PSF_CENTR2",
-                format="E",
-                unit="pixel",
-                disp="E14.7",
-                array=self.lc["psf"]["row_cen"]
-                if "psf" in self.lc
-                else np.full(len(self.time), np.nan),
-            ),
-            fits.Column(
-                name="PSF_CENTR2_ERR",
-                format="E",
-                unit="pixel",
-                disp="E14.7",
-                array=self.lc["psf"]["row_cen_err"]
-                if "psf" in self.lc
-                else np.full(len(self.time), np.nan),
-            ),
-            # Quality from _create_lc_quality()
-            fits.Column(
-                name="PSF_QUALITY",
-                format="I" if "psf" in self.lc else "E",
-                disp="B16.16",
-                array=self.lc["psf"]["quality"]
-                if "psf" in self.lc
                 else np.full(len(self.time), np.nan),
             ),
             # --------------
@@ -3106,7 +3090,7 @@ class MovingTPF:
         sector: int,
         camera: Optional[int] = None,
         ccd: Optional[int] = None,
-        time_step: float = 1.0,
+        time_step: float = 0.1,
     ):
         """
         Initialises MovingTPF from target name and TESS sector. Specifying a camera and

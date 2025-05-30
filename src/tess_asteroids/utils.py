@@ -12,6 +12,69 @@ from astropy.visualization import simple_norm
 from astropy.wcs.utils import fit_wcs_from_points
 from matplotlib import animation, colors, patches
 
+from . import TESSmag_zero_point, TESSmag_zero_point_err
+
+
+def calculate_TESSmag(
+    flux: Union[float, np.ndarray],
+    flux_err: Union[float, np.ndarray],
+    flux_fraction: Union[float, np.ndarray],
+):
+    """
+    Calculate TESS magnitude from a flux and a zero-point magnitude. The equation was taken from the
+    TESS Instrument Handbook 2018 (see also Fausnaugh et al. 2021).
+
+    This function assumes that the background flux has been perfectly removed, i.e. the only flux is that
+    from the target. It can account for flux outside of the aperture via `flux_fraction`.
+
+    Parameters
+    ----------
+    flux : float or ndarray
+        Target flux, in electrons/second.
+    flux_err : float or ndarray
+        Error on target flux, in electrons/second.
+    flux_fraction : float or ndarray
+        Fraction of target flux inside aperture. Must satisfy: 0 < flux_fraction <= 1.
+
+    Returns
+    -------
+    mag : float or ndarray
+        TESS magnitude.
+    mag_err : float or ndarray
+        Error on TESS magnitude.
+    """
+
+    # Check that all values of flux fraction are within allowed range:
+    if (np.asarray([flux_fraction]) <= 0).any() or (
+        np.asarray([flux_fraction]) > 1
+    ).any():
+        raise ValueError(
+            "All values of flux fraction must satisfy 0 < flux_fraction <= 1."
+        )
+
+    # If flux <= 0 (a remnant of BG correction), set it to be NaN for this calculation.
+    # This means corresponding mag and mag_err will be NaN.
+    # If flux/flux_err are arrays, must make a copy before manpiulating.
+    if not isinstance(flux, np.ndarray) and flux <= 0:
+        flux = np.nan
+    elif isinstance(flux, np.ndarray):
+        flux = flux.copy().astype(float)
+        flux[flux <= 0] = np.nan
+    if isinstance(flux_err, np.ndarray):
+        flux_err = flux_err.copy().astype(float)
+
+    # Account for target flux outside aperture.
+    flux /= flux_fraction
+    flux_err /= flux_fraction
+
+    # Calculate magnitude and error.
+    mag = -2.5 * np.log10(flux) + TESSmag_zero_point
+    mag_err = np.sqrt(
+        (TESSmag_zero_point_err) ** 2 + ((2.5 / np.log(10)) * (flux_err / flux)) ** 2
+    )
+
+    return mag, mag_err
+
 
 def inside_ellipse(
     x: np.ndarray,
