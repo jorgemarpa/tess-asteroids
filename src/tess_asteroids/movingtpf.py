@@ -2483,10 +2483,10 @@ class MovingTPF:
             # RAW_CNTS is included to give the files the same structure as the SPOC files
             fits.Column(
                 name="RAW_CNTS",
-                format=tform,
+                format=tform.replace("E", "I"),
                 dim=dims,
                 unit="e-/s",
-                disp="E14.7",
+                disp="I8",
                 array=np.zeros_like(self.corr_flux),
             ),
             fits.Column(
@@ -2628,7 +2628,7 @@ class MovingTPF:
             # 3D pixel quality mask
             fits.Column(
                 name="PIXEL_QUALITY",
-                format=str(self.corr_flux[0].size) + "I",
+                format=tform.replace("E", "I"),
                 dim=dims,
                 disp="B16.16",
                 array=self.pixel_quality,
@@ -2638,7 +2638,7 @@ class MovingTPF:
             # This format is used to be consistent with the aperture HDU from SPOC.
             fits.Column(
                 name="APERTURE",
-                format=str(self.corr_flux[0].size) + "J",
+                format=tform.replace("E", "J"),
                 dim=dims,
                 array=self.aperture_mask.astype("int32") * 2,
             ),
@@ -2725,18 +2725,18 @@ class MovingTPF:
             # Sum of flux inside aperture and err
             fits.Column(
                 name="FLUX",
-                format="D",
+                format="E",
                 unit="e-/s",
-                disp="D14.7",
+                disp="E14.7",
                 array=self.lc["aperture"]["flux"]
                 if "aperture" in self.lc
                 else np.full(len(self.time), np.nan),
             ),
             fits.Column(
                 name="FLUX_ERR",
-                format="D",
+                format="E",
                 unit="e-/s",
-                disp="D14.7",
+                disp="E14.7",
                 array=self.lc["aperture"]["flux_err"]
                 if "aperture" in self.lc
                 else np.full(len(self.time), np.nan),
@@ -2744,18 +2744,18 @@ class MovingTPF:
             # TESS magnitude and error
             fits.Column(
                 name="TESSMAG",
-                format="D",
+                format="E",
                 unit="mag",
-                disp="D14.7",
+                disp="E14.7",
                 array=self.lc["aperture"]["TESSmag"]
                 if "aperture" in self.lc
                 else np.full(len(self.time), np.nan),
             ),
             fits.Column(
                 name="TESSMAG_ERR",
-                format="D",
+                format="E",
                 unit="mag",
-                disp="D14.7",
+                disp="E14.7",
                 array=self.lc["aperture"]["TESSmag_err"]
                 if "aperture" in self.lc
                 else np.full(len(self.time), np.nan),
@@ -2763,18 +2763,18 @@ class MovingTPF:
             # Sum of BG flux inside aperture and err
             fits.Column(
                 name="FLUX_BKG",
-                format="D",
+                format="E",
                 unit="e-/s",
-                disp="D14.7",
+                disp="E14.7",
                 array=self.lc["aperture"]["bg"]
                 if "aperture" in self.lc
                 else np.full(len(self.time), np.nan),
             ),
             fits.Column(
                 name="FLUX_BKG_ERR",
-                format="D",
+                format="E",
                 unit="e-/s",
-                disp="D14.7",
+                disp="E14.7",
                 array=self.lc["aperture"]["bg_err"]
                 if "aperture" in self.lc
                 else np.full(len(self.time), np.nan),
