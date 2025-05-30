@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 from astropy.io import fits
 
-from tess_asteroids import MovingTPF, __version__
+from tess_asteroids import MovingTPF, TESSmag_zero_point, __version__
 from tess_asteroids.utils import calculate_TESSmag
 
 
@@ -421,24 +421,24 @@ def test_calculate_TESSmag():
     """
 
     # If flux_fraction = 1, magnitude should be equal to zero-point magnitude.
-    mag, _, mag0, _ = calculate_TESSmag(1.0, 0.1, 1.0)
-    assert mag == mag0
+    mag, _ = calculate_TESSmag(1.0, 0.1, 1.0)
+    assert mag == TESSmag_zero_point
 
     # If flux = NaN, magnitude should be NaN.
-    mag, _, _, _ = calculate_TESSmag(np.nan, 0.1, 1.0)
+    mag, _ = calculate_TESSmag(np.nan, 0.1, 1.0)
     assert np.isnan(mag)
 
     # If flux, flux_err and flux_frac are arrays, mag/mag_err should have the same length.
     flux = np.array([0.1, 0.5, 0.9, 1.5])
     flux_err = np.array([0.01, 0.05, 0.09, 0.15])
     flux_frac = np.array([1.0, 0.5, 0.8, 0.9])
-    mag, mag_err, _, _ = calculate_TESSmag(flux, flux_err, flux_frac)
+    mag, mag_err = calculate_TESSmag(flux, flux_err, flux_frac)
     assert len(mag) == len(flux)
     assert len(mag_err) == len(flux)
 
     # If any value of flux <= 0, corresponding mag/mag_err should be NaN.
     flux[0] = -0.3
-    mag, mag_err, _, _ = calculate_TESSmag(flux, flux_err, flux_frac)
+    mag, mag_err = calculate_TESSmag(flux, flux_err, flux_frac)
     assert np.isnan(mag[0])
     assert np.isnan(mag_err[0])
 
@@ -503,8 +503,12 @@ def test_make_lc():
     )
     assert isinstance(lc, lk.lightcurve.TessLightCurve)
     assert len(lc.time) == len(target.time)
-    assert np.array_equal(target.lc["aperture"]["flux"], lc.flux.value)
-    assert np.array_equal(target.lc["aperture"]["flux_err"], lc.flux_err.value)
+    assert np.array_equal(
+        target.lc["aperture"]["flux"].astype("float32"), lc.flux.value
+    )
+    assert np.array_equal(
+        target.lc["aperture"]["flux_err"].astype("float32"), lc.flux_err.value
+    )
 
     # Delete the file
     os.remove("tests/tess-1998YT6-s0006-1-1-shape11x11_lc.fits")
