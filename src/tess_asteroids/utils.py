@@ -12,13 +12,13 @@ from astropy.visualization import simple_norm
 from astropy.wcs.utils import fit_wcs_from_points
 from matplotlib import animation, colors, patches
 
+from . import TESSmag_zero_point, TESSmag_zero_point_err
+
 
 def calculate_TESSmag(
     flux: Union[float, np.ndarray],
     flux_err: Union[float, np.ndarray],
     flux_fraction: Union[float, np.ndarray],
-    m0: float = 20.44,
-    m0_err: float = 0.05,
 ):
     """
     Calculate TESS magnitude from a flux and a zero-point magnitude. The equation was taken from the
@@ -35,10 +35,6 @@ def calculate_TESSmag(
         Error on target flux, in electrons/second.
     flux_fraction : float or ndarray
         Fraction of target flux inside aperture. Must satisfy: 0 < flux_fraction <= 1.
-    m0 : float
-        TESS zero-point magnitude. Default value from TESS Instrument Handbook 2018 and Fausnaugh et al. 2021.
-    m0_err : float
-        Error on TESS zero-point magnitude. Default value from TESS Instrument Handbook 2018 and Fausnaugh et al. 2021.
 
     Returns
     -------
@@ -46,10 +42,6 @@ def calculate_TESSmag(
         TESS magnitude.
     mag_err : float or ndarray
         Error on TESS magnitude.
-    m0 : float
-        TESS zero-point magnitude used in calculation.
-    m0_err : float
-        Error on TESS zero-point magnitude used in calculation.
     """
 
     # Check that all values of flux fraction are within allowed range:
@@ -76,10 +68,12 @@ def calculate_TESSmag(
     flux_err /= flux_fraction
 
     # Calculate magnitude and error.
-    mag = -2.5 * np.log10(flux) + m0
-    mag_err = np.sqrt((m0_err) ** 2 + ((2.5 / np.log(10)) * (flux_err / flux)) ** 2)
+    mag = -2.5 * np.log10(flux) + TESSmag_zero_point
+    mag_err = np.sqrt(
+        (TESSmag_zero_point_err) ** 2 + ((2.5 / np.log(10)) * (flux_err / flux)) ** 2
+    )
 
-    return mag, mag_err, m0, m0_err
+    return mag, mag_err
 
 
 def inside_ellipse(

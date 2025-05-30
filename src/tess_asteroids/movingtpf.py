@@ -24,7 +24,7 @@ from tesscube.query import async_get_primary_hdu
 from tesscube.utils import _sync_call, convert_coordinates_to_runs
 from tqdm import tqdm
 
-from . import __version__, logger, straps
+from . import TESSmag_zero_point, __version__, logger, straps
 from .utils import (
     animate_cube,
     calculate_TESSmag,
@@ -1934,12 +1934,7 @@ class MovingTPF:
         # Convert measured flux to TESS magnitude.
         # If "prf" method was used to compute the aperture, there are meaningful flux fractions.
         # Otherwise, assume 100% of the flux is inside the aperture.
-        (
-            self.lc[method]["TESSmag"],
-            self.lc[method]["TESSmag_err"],
-            self.TESSmag_zero_point,
-            self.TESSmag_zero_point_err,
-        ) = calculate_TESSmag(
+        self.lc[method]["TESSmag"], self.lc[method]["TESSmag_err"] = calculate_TESSmag(
             self.lc[method]["flux"],
             self.lc[method]["flux_err"],
             self.lc[method]["flux_fraction"]
@@ -2332,7 +2327,7 @@ class MovingTPF:
         )
         hdu.header.set(
             "TESSMAG0",
-            round(self.TESSmag_zero_point, 3)
+            round(TESSmag_zero_point, 3)
             if file_type == "lc" and hasattr(self, "lc") and "aperture" in self.lc
             else 0.0,
             comment="[mag] TESS zero-point magnitude",
