@@ -2485,7 +2485,7 @@ class MovingTPF:
                 ),
                 3,
             )
-            if "hmag" in self.ephem
+            if "hmag" in self.ephem and ~np.isnan(self.ephem["hmag"]).all()
             else 0.0,
             comment="[mag] H absolute magnitude",
             after="VMAG",
@@ -2508,10 +2508,51 @@ class MovingTPF:
             comment="[deg] orbit inclination",
             after="ORBECC",
         )
+
+        # RA and Dec rates are computed from predicted coordinates so TPF and LCF can use
+        # consistent values.
         hdu.header.set(
-            "RARATE", 0.0, comment='["/h] right ascension rate', after="ORBINC"
+            "RARATE",
+            round(
+                np.nanmean(
+                    np.gradient([coord.ra.value for coord in self.coords], self.time)
+                    * 3600
+                    / 24
+                ),
+                3,
+            ),
+            comment='["/h] average RA rate',
+            after="ORBINC",
         )
-        hdu.header.set("DECRATE", 0.0, comment='["/h] declination rate', after="RARATE")
+        hdu.header.set(
+            "DECRATE",
+            round(
+                np.nanmean(
+                    np.gradient([coord.dec.value for coord in self.coords], self.time)
+                    * 3600
+                    / 24
+                ),
+                3,
+            ),
+            comment='["/h] average Dec rate',
+            after="RARATE",
+        )
+        # Pixel speed is computed from input ephemeris so TPF and LCF can use consistent values.
+        hdu.header.set(
+            "PIXVEL",
+            round(
+                np.nanmean(
+                    np.hypot(
+                        np.gradient(self.ephemeris[:, 0], self.time),
+                        np.gradient(self.ephemeris[:, 1], self.time),
+                    )
+                    / 24
+                ),
+                3,
+            ),
+            comment="[pix/h] average speed",
+            after="DECRATE",
+        )
 
         return hdu
 
@@ -3032,7 +3073,7 @@ class MovingTPF:
         # Create default file name
         if file_name is None:
             file_name = "tess-{0}-s{1:04}-{2}-{3}-shape{4}x{5}".format(
-                str(self.target).replace(" ", ""),
+                str(self.target).replace(" ", "").replace("/", ""),
                 self.sector,
                 self.camera,
                 self.ccd,
@@ -3140,7 +3181,7 @@ class MovingTPF:
             if file_name is None:
                 file_name = (
                     "tess-{0}-s{1:04}-{2}-{3}-shape{4}x{5}-moving_tp.gif".format(
-                        str(self.target).replace(" ", ""),
+                        str(self.target).replace(" ", "").replace("/", ""),
                         self.sector,
                         self.camera,
                         self.ccd,
