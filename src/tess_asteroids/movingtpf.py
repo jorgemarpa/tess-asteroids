@@ -47,11 +47,12 @@ class MovingTPF:
     target : str
         Target ID. This is only used when saving the TPF.
     ephem : DataFrame
-        Target ephemeris with columns ['time','sector','camera','ccd','column','row']. Optional columns: ['vmag'].
+        Target ephemeris with columns ['time','sector','camera','ccd','column','row']. Optional columns: ['vmag','hmag'].
             'time' : float in format (JD - 2457000). See also `time_scale` below.
             'sector', 'camera', 'ccd' : int
             'column', 'row' : float. These must be one-indexed, where the lower left pixel of the FFI is (1,1).
             'vmag' : float, optional. Visual magnitude.
+            'hmag' : float, optional. Absolute magnitude.
     time_scale : str
         Time scale of input 'time'. One of ['tdb', 'utc']. Default is 'tdb'.
         If 'tdb', the input 'time' must be in TDB measured at the solar system barycenter from the TESS FFI header.
@@ -60,9 +61,20 @@ class MovingTPF:
         If 'utc', the input 'time' must be in UTC measured at the spacecraft. This can be recovered from the SPOC data
             products: for FFIs subtract header keyword 'BARYCORR' from 'TSTART'/'TSTOP' and for TPFs/LCFs subtract the
             'TIMECORR' column from the 'TIME' column.
+    metadata : dict
+        A dictionary with optional keys {'eccentricity': float, 'inclination': float, 'perihelion': float}.
+            'eccentricity' : Target's orbital eccentricity. This is saved in the TPF/LCF headers.
+            'inclination' : Target's orbital inclination, in degrees. This is saved in the TPF/LCF headers.
+            'perihelion' : Target's perihelion distance, in AU. This is saved in the TPF/LCF headers.
     """
 
-    def __init__(self, target: str, ephem: pd.DataFrame, time_scale: str = "tdb"):
+    def __init__(
+        self,
+        target: str,
+        ephem: pd.DataFrame,
+        time_scale: str = "tdb",
+        metadata: dict = {},
+    ):
         self.target = target
         self.ephem = ephem
         self.time_scale = time_scale
@@ -98,6 +110,35 @@ class MovingTPF:
             raise NotImplementedError(
                 "Target crosses multiple camera/ccd. Not yet implemented."
             )
+
+        # Save orbital elements and check the values are physical.
+        if "eccentricity" in metadata:
+            self.ecc = float(metadata["eccentricity"])
+            # Eccentricity cannot be negative:
+            if self.ecc < 0:
+                raise ValueError(
+                    "`ecc` is the orbital eccentricity and it must satisfy: ecc >= 0. Not `{0}`".format(
+                        self.ecc
+                    )
+                )
+        if "inclination" in metadata:
+            self.inc = float(metadata["inclination"])
+            # Orbital inclination runs from 0 to 180 degrees:
+            if self.inc < 0 or self.inc > 180:
+                raise ValueError(
+                    "`inc` is the orbital inclination in degrees and it must satisfy: 0 <= inc <= 180. Not `{0}`".format(
+                        self.inc
+                    )
+                )
+        if "perihelion" in metadata:
+            self.peri = float(metadata["perihelion"])
+            # Perihelion distance cannot be negative:
+            if self.peri < 0:
+                raise ValueError(
+                    "`peri` is the perihelion distance in AU and it must satisfy: peri >= 0. Not `{0}`".format(
+                        self.peri
+                    )
+                )
 
         # Initialise tesscube
         self.cube = TESSCube(sector=self.sector, camera=self.camera, ccd=self.ccd)
@@ -2417,14 +2458,104 @@ class MovingTPF:
             comment="[mag] predicted V magnitude",
             after="TICVER",
         )
-        hdu.header.set("HMAG", 0.0, comment="[mag] H absolute magnitude", after="VMAG")
-        hdu.header.set("PERIHEL", 0.0, comment="[AU] perihelion", after="HMAG")
-        hdu.header.set("ORBECC", 0.0, comment="orbit eccentricity", after="PERIHEL")
-        hdu.header.set("ORBINC", 0.0, comment="[deg] orbit inclination", after="ORBECC")
         hdu.header.set(
-            "RARATE", 0.0, comment='["/h] right ascension rate', after="ORBINC"
+            "HMAG",
+            round(
+                np.nanmean(
+                    self.ephem.loc[
+                        np.logical_and(
+                            self.ephem["time"]
+                            >= (
+                                self.time_original[0]
+                                if self.time_scale == "tdb"
+                                else self.time_original[0] - self.timecorr_original[0]
+                            ),
+                            self.ephem["time"]
+                            <= (
+                                self.time_original[-1]
+                                if self.time_scale == "tdb"
+                                else self.time_original[-1] - self.timecorr_original[-1]
+                            ),
+                        ),
+                        "hmag",
+                    ]
+                ),
+                3,
+            )
+            if "hmag" in self.ephem and ~np.isnan(self.ephem["hmag"]).all()
+            else 0.0,
+            comment="[mag] H absolute magnitude",
+            after="VMAG",
         )
-        hdu.header.set("DECRATE", 0.0, comment='["/h] declination rate', after="RARATE")
+        hdu.header.set(
+            "PERIHEL",
+            round(self.peri, 3) if hasattr(self, "peri") else 0.0,
+            comment="[AU] perihelion distance",
+            after="HMAG",
+        )
+        hdu.header.set(
+            "ORBECC",
+            round(self.ecc, 3) if hasattr(self, "ecc") else 0.0,
+            comment="orbit eccentricity",
+            after="PERIHEL",
+        )
+        hdu.header.set(
+            "ORBINC",
+            round(self.inc, 3) if hasattr(self, "inc") else 0.0,
+            comment="[deg] orbit inclination",
+            after="ORBECC",
+        )
+
+        # RA and Dec rates are computed from predicted coordinates so TPF and LCF can use
+        # consistent values.
+        # Use np.unwrap() for RA to ensure angles correctly wrap at 0/360.
+        hdu.header.set(
+            "RARATE",
+            round(
+                np.nanmean(
+                    np.gradient(
+                        np.unwrap(
+                            [coord.ra.value for coord in self.coords], period=360
+                        ),
+                        self.time,
+                    )
+                    * 3600
+                    / 24
+                ),
+                3,
+            ),
+            comment='["/h] average RA rate',
+            after="ORBINC",
+        )
+        hdu.header.set(
+            "DECRATE",
+            round(
+                np.nanmean(
+                    np.gradient([coord.dec.value for coord in self.coords], self.time)
+                    * 3600
+                    / 24
+                ),
+                3,
+            ),
+            comment='["/h] average Dec rate',
+            after="RARATE",
+        )
+        # Pixel speed is computed from input ephemeris so TPF and LCF can use consistent values.
+        hdu.header.set(
+            "PIXVEL",
+            round(
+                np.nanmean(
+                    np.hypot(
+                        np.gradient(self.ephemeris[:, 0], self.time),
+                        np.gradient(self.ephemeris[:, 1], self.time),
+                    )
+                    / 24
+                ),
+                3,
+            ),
+            comment="[pix/h] average speed",
+            after="DECRATE",
+        )
 
         return hdu
 
@@ -2945,7 +3076,7 @@ class MovingTPF:
         # Create default file name
         if file_name is None:
             file_name = "tess-{0}-s{1:04}-{2}-{3}-shape{4}x{5}".format(
-                str(self.target).replace(" ", ""),
+                str(self.target).replace(" ", "").replace("/", ""),
                 self.sector,
                 self.camera,
                 self.ccd,
@@ -3053,7 +3184,7 @@ class MovingTPF:
             if file_name is None:
                 file_name = (
                     "tess-{0}-s{1:04}-{2}-{3}-shape{4}x{5}-moving_tp.gif".format(
-                        str(self.target).replace(" ", ""),
+                        str(self.target).replace(" ", "").replace("/", ""),
                         self.sector,
                         self.camera,
                         self.ccd,
@@ -3114,17 +3245,20 @@ class MovingTPF:
         Returns
         -------
         MovingTPF :
-            Initialised MovingTPF with ephemeris from JPL/Horizons.
-            Target ephemeris has columns ['time','sector','camera','ccd','column','row','vmag'].
+            Initialised MovingTPF with ephemeris and orbital elements from JPL/Horizons.
+            Target ephemeris has columns ['time','sector','camera','ccd','column','row','vmag','hmag'].
                 'time' : float with units (JD - 2457000) in UTC at spacecraft.
                 'sector', 'camera', 'ccd' : int
                 'column', 'row' : float. These are one-indexed, where the lower left pixel of the FFI is (1,1).
                 'vmag' : float. Visual magnitude.
+                'hmag' : float. Absolute magntiude.
         """
 
-        # Get target ephemeris using tess-ephem
+        # Get target ephemeris and orbital elements using tess-ephem
         logger.info("Retrieving ephemeris for target {0}.".format(target))
-        df_ephem = ephem(target, sector=sector, time_step=time_step, verbose=True)
+        df_ephem, orbital_elements = ephem(
+            target, sector=sector, time_step=time_step, orbital_elements=True
+        )
 
         # Check whether target was observed in sector.
         if len(df_ephem) == 0:
@@ -3148,7 +3282,24 @@ class MovingTPF:
         # >>>>> Note: tess-ephem returns time in UTC at spacecraft. <<<<<
         df_ephem["time"] = [t.value - 2457000 for t in df_ephem.index.values]
         df_ephem = df_ephem[
-            ["time", "sector", "camera", "ccd", "ra", "dec", "column", "row", "vmag"]
+            [
+                "time",
+                "sector",
+                "camera",
+                "ccd",
+                "ra",
+                "dec",
+                "column",
+                "row",
+                "vmag",
+                "hmag",
+            ]
         ].reset_index(drop=True)
 
-        return MovingTPF(target=target, ephem=df_ephem, time_scale="utc")
+        # Rename keys in orbital_elements dictionary
+        orbital_elements["inclination"] = orbital_elements.pop("orbital_inclination")
+        orbital_elements["perihelion"] = orbital_elements.pop("perihelion_distance")
+
+        return MovingTPF(
+            target=target, ephem=df_ephem, time_scale="utc", metadata=orbital_elements
+        )

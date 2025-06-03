@@ -327,6 +327,7 @@ def test_make_tpf():
         assert hdul[0].header["BG_CORR"].strip() == "linear_model"
         assert hdul[0].header["SL_CORR"].strip() == "all_time"
         assert hdul[0].header["VMAG"] > 0
+        assert hdul[0].header["HMAG"] > 0
         assert hdul[0].header["TESSMAG"] == 0
         assert hdul[0].header["TESSMAG0"] == 0
         assert "SPOCDATE" in hdul[0].header.keys()
@@ -345,6 +346,16 @@ def test_make_tpf():
 
         # Check the UTC to TDB conversion has been applied.
         assert (hdul[1].data["TIME"] != hdul[3].data["ORIGINAL_TIME"]).all()
+
+        # 1998 YT6 is a main-belt asteroid, ensure the orbital elements are physical:
+        assert hdul[0].header["ORBECC"] >= 0 and hdul[0].header["ORBECC"] < 1
+        assert hdul[0].header["ORBINC"] >= 0 and hdul[0].header["ORBINC"] <= 180
+        assert hdul[0].header["PERIHEL"] > 1.5 and hdul[0].header["PERIHEL"] < 5
+
+        # Check PIXVEL is consisent with RARATE and DECRATE:
+        assert round(
+            np.hypot(hdul[0].header["RARATE"], hdul[0].header["DECRATE"]) / 21, 1
+        ) == round(hdul[0].header["PIXVEL"], 1)
 
     # Check the file can be opened with lightkurve
     tpf = lk.read(
@@ -475,6 +486,7 @@ def test_make_lc():
         assert hdul[0].header["BG_CORR"].strip() == "rolling"
         assert hdul[0].header["SL_CORR"].strip() == "n/a"
         assert hdul[0].header["VMAG"] > 0
+        assert hdul[0].header["HMAG"] > 0
         assert hdul[0].header["TESSMAG"] > 0
         assert hdul[0].header["TESSMAG0"] > 0
         assert "SPOCDATE" in hdul[0].header.keys()
@@ -496,6 +508,16 @@ def test_make_lc():
         # Check the UTC to TDB conversion has been applied.
         assert (hdul[1].data["TIME"] != hdul[1].data["ORIGINAL_TIME"]).all()
 
+        # 1998 YT6 is a main-belt asteroid, ensure the orbital elements are physical:
+        assert hdul[0].header["ORBECC"] >= 0 and hdul[0].header["ORBECC"] < 1
+        assert hdul[0].header["ORBINC"] >= 0 and hdul[0].header["ORBINC"] <= 180
+        assert hdul[0].header["PERIHEL"] > 1.5 and hdul[0].header["PERIHEL"] < 5
+
+        # Check PIXVEL is consisent with RARATE and DECRATE:
+        assert round(
+            np.hypot(hdul[0].header["RARATE"], hdul[0].header["DECRATE"]) / 21, 1
+        ) == round(hdul[0].header["PIXVEL"], 1)
+
     # Check the file can be opened with lightkurve
     lc = lk.io.tess.read_tess_lightcurve(
         "tests/tess-1998YT6-s0006-1-1-shape11x11_lc.fits",
@@ -512,3 +534,31 @@ def test_make_lc():
 
     # Delete the file
     os.remove("tests/tess-1998YT6-s0006-1-1-shape11x11_lc.fits")
+
+
+def test_comet():
+    """
+    Check that tess_asteriods runs successfully for an example comet.
+    """
+
+    # Make TPF and LCF for comet C/2016 N6
+    target = MovingTPF.from_name("C/2016 N6", sector=7)
+    target.make_tpf(shape=(20, 20), bg_method="rolling", save=True, outdir="tests")
+    target.make_lc(save=True, outdir="tests")
+    target.animate_tpf(save=True, outdir="tests")
+
+    # Check the files exist
+    assert os.path.exists("tests/tess-C2016N6-s0007-2-1-shape20x20-moving_tp.fits")
+    assert os.path.exists("tests/tess-C2016N6-s0007-2-1-shape20x20-moving_tp.gif")
+    assert os.path.exists("tests/tess-C2016N6-s0007-2-1-shape20x20_lc.fits")
+
+    # Open the TPF with astropy and check header attributes
+    with fits.open("tests/tess-C2016N6-s0007-2-1-shape20x20-moving_tp.fits") as hdul:
+        # Check primary header
+        assert hdul[0].header["OBJECT"].strip() == "C/2016 N6"
+        assert hdul[0].header["HMAG"] == 0
+
+    # Delete the files
+    os.remove("tests/tess-C2016N6-s0007-2-1-shape20x20-moving_tp.fits")
+    os.remove("tests/tess-C2016N6-s0007-2-1-shape20x20-moving_tp.gif")
+    os.remove("tests/tess-C2016N6-s0007-2-1-shape20x20_lc.fits")

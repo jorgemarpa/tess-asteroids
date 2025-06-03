@@ -15,7 +15,7 @@ straps = pd.read_csv(f"{loc}/data/straps.csv", comment="#")
 TESSmag_zero_point = 20.44
 TESSmag_zero_point_err = 0.05
 
-__version__ = "1.2.2"
+__version__ = "1.2.3"
 __all__ = ["MovingTPF"]
 
 from .movingtpf import MovingTPF  # noqa: E402
