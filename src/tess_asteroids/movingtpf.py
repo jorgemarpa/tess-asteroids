@@ -2508,11 +2508,17 @@ class MovingTPF:
 
         # RA and Dec rates are computed from predicted coordinates so TPF and LCF can use
         # consistent values.
+        # Use np.unwrap() for RA to ensure angles correctly wrap at 0/360.
         hdu.header.set(
             "RARATE",
             round(
                 np.nanmean(
-                    np.gradient([coord.ra.value for coord in self.coords], self.time)
+                    np.gradient(
+                        np.unwrap(
+                            [coord.ra.value for coord in self.coords], period=360
+                        ),
+                        self.time,
+                    )
                     * 3600
                     / 24
                 ),
