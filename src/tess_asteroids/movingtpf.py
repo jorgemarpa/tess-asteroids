@@ -61,12 +61,11 @@ class MovingTPF:
         If 'utc', the input 'time' must be in UTC measured at the spacecraft. This can be recovered from the SPOC data
             products: for FFIs subtract header keyword 'BARYCORR' from 'TSTART'/'TSTOP' and for TPFs/LCFs subtract the
             'TIMECORR' column from the 'TIME' column.
-    ecc : float
-        Target's orbital eccentricity. This is saved in the TPF/LCF headers.
-    inc : float
-        Target's orbital inclination, in degrees. This is saved in the TPF/LCF headers.
-    peri : float
-        Target's perihelion distance, in AU. This is saved in the TPF/LCF headers.
+    metadata : dict
+        A dictionary with optional keys {'eccentricity': float, 'inclination': float, 'perihelion': float}.
+            'eccentricity' : Target's orbital eccentricity. This is saved in the TPF/LCF headers.
+            'inclination' : Target's orbital inclination, in degrees. This is saved in the TPF/LCF headers.
+            'perihelion' : Target's perihelion distance, in AU. This is saved in the TPF/LCF headers.
     """
 
     def __init__(
@@ -74,9 +73,7 @@ class MovingTPF:
         target: str,
         ephem: pd.DataFrame,
         time_scale: str = "tdb",
-        ecc: Optional[float] = None,
-        inc: Optional[float] = None,
-        peri: Optional[float] = None,
+        metadata: dict = {},
     ):
         self.target = target
         self.ephem = ephem
@@ -115,8 +112,8 @@ class MovingTPF:
             )
 
         # Save orbital elements and check the values are physical.
-        if ecc is not None:
-            self.ecc = ecc
+        if "eccentricity" in metadata:
+            self.ecc = float(metadata["eccentricity"])
             # Eccentricity cannot be negative:
             if self.ecc < 0:
                 raise ValueError(
@@ -124,8 +121,8 @@ class MovingTPF:
                         self.ecc
                     )
                 )
-        if inc is not None:
-            self.inc = inc
+        if "inclination" in metadata:
+            self.inc = float(metadata["inclination"])
             # Orbital inclination runs from 0 to 180 degrees:
             if self.inc < 0 or self.inc > 180:
                 raise ValueError(
@@ -133,8 +130,8 @@ class MovingTPF:
                         self.inc
                     )
                 )
-        if peri is not None:
-            self.peri = peri
+        if "perihelion" in metadata:
+            self.peri = float(metadata["perihelion"])
             # Perihelion distance cannot be negative:
             if self.peri < 0:
                 raise ValueError(
@@ -3293,11 +3290,10 @@ class MovingTPF:
             ]
         ].reset_index(drop=True)
 
+        # Rename keys in orbital_elements dictionary
+        orbital_elements["inclination"] = orbital_elements.pop("orbital_inclination")
+        orbital_elements["perihelion"] = orbital_elements.pop("perihelion_distance")
+
         return MovingTPF(
-            target=target,
-            ephem=df_ephem,
-            time_scale="utc",
-            ecc=orbital_elements["eccentricity"],
-            inc=orbital_elements["orbital_inclination"],
-            peri=orbital_elements["perihelion_distance"],
+            target=target, ephem=df_ephem, time_scale="utc", metadata=orbital_elements
         )
