@@ -1,1 +1,52 @@
-site_name: My Docs
+site_name: tess-asteroids
+
+nav:
+  - Home: README.md
+  #- API: movingtpf.md
+
+repo_url: https://github.com/altuson/tess-asteroids
+
+copyright: Copyright &copy; 2024 Amy Tuson
+
+theme:
+  name: "material"
+
+  icon:
+    logo: material/home
+    repo: fontawesome/brands/github
+
+  features:
+    - navigation.footer
+    - navigation.tabs
+    - navigation.path
+    - content.code.copy
+    - toc.integrate
+
+  palette:
+    # Palette toggle for light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to dark mode
+      primary: pink
+      accent: indigo
+
+    # Palette toggle for dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-night
+        name: Switch to light mode
+
+plugins:
+  - search
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
