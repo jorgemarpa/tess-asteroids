@@ -34,7 +34,7 @@ def calculate_TESSmag(
     flux_err : float or ndarray
         Error on target flux, in electrons/second.
     flux_fraction : float or ndarray
-        Fraction of target flux inside aperture. Must satisfy: 0 < flux_fraction <= 1.
+        Fraction of target flux inside aperture. Must satisfy: 0 < `flux_fraction` <= 1.
 
     Returns
     -------
@@ -130,7 +130,7 @@ def compute_moments(
     Computes first and second order moments of a 2d distribution over time
     using a coordinate grid with the same shape as `flux` (nt, nrows, ncols).
     First order moments (X,Y) are the centroid positions. The X,Y centroids are in
-    the range [0, 'ncols'), [0, 'nrows'), respectively i.e. they are zero-indexed.
+    the range [0, ncols), [0, nrows), respectively i.e. they are zero-indexed.
     Second order moments (X2, Y2, XY) represent the spatial spread of the distribution.
 
     Parameters
@@ -140,7 +140,7 @@ def compute_moments(
     mask: ndarray
         Mask to select pixels used for computing moments. Shape could
         be 3D (nt, nrows, ncols) or 2D (nrows, ncols). If a 2D mask is given,
-        it is used for all frames `nt`.
+        it is used for all frames.
     second_order: bool
         If True, returns first and second order moments, else returns only first
         order moments.
@@ -306,13 +306,13 @@ def plot_img_aperture(
     cnorm: Optional[colors.Normalize] = None,
 ):
     """
-    Plots an image with an optional aperture mask overlay.
+    Plots an image with an optional aperture mask.
 
     This function displays an image, optionally overlaying an aperture mask, and
     provides several customization options such as color scaling, title, and axis control.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     img : 2D array
         The image data to be plotted, typically a 2D array or matrix representing pixel values.
     aperture_mask : 2D array, default=None
@@ -336,8 +336,8 @@ def plot_img_aperture(
         Color matplotlib normalization object (e.g. astropy.visualization.simple_norm). If provided,
         then `vmax` and `vmin` are not used.
 
-    Returns:
-    --------
+    Returns
+    -------
     ax : matplotlib.axes.Axes
         The axes object containing the plot.
     """
@@ -426,8 +426,8 @@ def animate_cube(
     This function animates the slices of a 3D image cube, optionally overlaying an aperture mask,
     and provides controls for animation speed, title, and tracking information.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     cube : 3D array
         A 3D array representing the image cube (e.g., a stack of 2D images over time).
     aperture_mask : 2D or 3D array, optional
@@ -437,8 +437,8 @@ def animate_cube(
         The (row, column) coordinates of the lower left corner of the image.
     ephemeris : 2D array, optional, default=None
         A 2D array of object positions (row, column) to be displayed on the plot.
-        For proper display of object position, if corner is [0, 0] then track needs to be relative to corner.
-        If corner is provided, track needs to be absolute.
+        For proper display of object position, if `corner` is [0, 0] then `ephemeris` needs to be relative to `corner`.
+        If `corner` is provided, `ephemeris` needs to be absolute.
         If None, no tracking information is shown.
     cadenceno : int, optional, default=None
         The cadence number of the frames, used for information display.
@@ -463,8 +463,8 @@ def animate_cube(
         It can be used to provide additional context or information about the animated data,
         for example the target name or observing sector/camera/ccd.
 
-    Returns:
-    --------
+    Returns
+    -------
     ani : matplotlib.animation.FuncAnimation
         The animation object that can be displayed or saved.
     """

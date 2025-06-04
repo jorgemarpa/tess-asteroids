@@ -47,25 +47,28 @@ class MovingTPF:
     target : str
         Target ID. This is only used when saving the TPF.
     ephem : DataFrame
-        Target ephemeris with columns ['time','sector','camera','ccd','column','row']. Optional columns: ['vmag','hmag'].
-            'time' : float in format (JD - 2457000). See also `time_scale` below.
-            'sector', 'camera', 'ccd' : int
-            'column', 'row' : float. These must be one-indexed, where the lower left pixel of the FFI is (1,1).
-            'vmag' : float, optional. Visual magnitude.
-            'hmag' : float, optional. Absolute magnitude.
+        Target ephemeris with columns ['time', 'sector', 'camera', 'ccd', 'column', 'row']. Optional columns: ['vmag', 'hmag'].
+        
+        - 'time' : float in format (JD - 2457000). See also `time_scale` below.
+        - 'sector', 'camera', 'ccd' : int
+        - 'column', 'row' : float. These must be one-indexed, where the lower left pixel of the FFI is (1,1).
+        - 'vmag' : float, optional. Visual magnitude.
+        - 'hmag' : float, optional. Absolute magnitude.
     time_scale : str
-        Time scale of input 'time'. One of ['tdb', 'utc']. Default is 'tdb'.
-        If 'tdb', the input 'time' must be in TDB measured at the solar system barycenter from the TESS FFI header.
+        Time scale of input `ephem['time']`. One of ['tdb', 'utc']. Default is 'tdb'.
+        
+        - If 'tdb', the input `ephem['time']` must be in TDB measured at the solar system barycenter from the TESS FFI header.
             This is the scale used for the 'TSTART'/'TSTOP' keywords in SPOC FFI headers and the 'TIME' column in SPOC
             TPFs and LCFs.
-        If 'utc', the input 'time' must be in UTC measured at the spacecraft. This can be recovered from the SPOC data
+        - If 'utc', the input `ephem['time']` must be in UTC measured at the spacecraft. This can be recovered from the SPOC data
             products: for FFIs subtract header keyword 'BARYCORR' from 'TSTART'/'TSTOP' and for TPFs/LCFs subtract the
             'TIMECORR' column from the 'TIME' column.
     metadata : dict
         A dictionary with optional keys {'eccentricity': float, 'inclination': float, 'perihelion': float}.
-            'eccentricity' : Target's orbital eccentricity. This is saved in the TPF/LCF headers.
-            'inclination' : Target's orbital inclination, in degrees. This is saved in the TPF/LCF headers.
-            'perihelion' : Target's perihelion distance, in AU. This is saved in the TPF/LCF headers.
+        
+        - 'eccentricity' : Target's orbital eccentricity. This is saved in the TPF/LCF headers.
+        - 'inclination' : Target's orbital inclination, in degrees. This is saved in the TPF/LCF headers.
+        - 'perihelion' : Target's perihelion distance, in AU. This is saved in the TPF/LCF headers.
     """
 
     def __init__(
@@ -173,16 +176,16 @@ class MovingTPF:
             One of [`rolling`, `linear_model`].
         ap_method : str
             Method used to create aperture.
-            One of ['threshold', 'prf', 'ellipse'].
+            One of [`threshold`, `prf`, `ellipse`].
         save : bool, default=False
             If True, save the TPF HDUList to a FITS file.
         outdir : str
             If `save`, this is the directory into which the file will be saved.
         file_name : str
-            If `save`, this is the filename that will be used. Format must be `.fits`.
+            If `save`, this is the filename that will be used. Format must be '.fits'.
             If no filename is given, a default one will be generated.
         **kwargs
-            Keyword arguments to be passed to `create_pixel_quality()`, `background_correction()`,
+            Keyword arguments passed to `create_pixel_quality()`, `background_correction()`,
             `create_aperture()` and `to_fits()`.
 
         Returns
@@ -212,16 +215,16 @@ class MovingTPF:
         Parameters
         ----------
         method : str
-            Method to extract lightcurve. One of `aperture` or `psf`.
+            Method to extract lightcurve. One of [`aperture`, `psf`].
         save : bool
             If True, save the lightcurve HDUList to a FITS file.
         outdir : str
             If `save`, this is the directory into which the file will be saved.
         file_name : str
-            If `save`, this is the filename that will be used. Format must be `.fits`.
+            If `save`, this is the filename that will be used. Format must be '.fits'.
             If no filename is given, a default one will be generated.
         **kwargs
-            Keyword arguments to be passed to `to_lightcurve()` and `to_fits()`.
+            Keyword arguments passed to `to_lightcurve()` and `to_fits()`.
 
         Returns
         -------
@@ -472,12 +475,6 @@ class MovingTPF:
     def reshape_data(self):
         """
         Reshape flux data into cube with shape (len(self.time), self.shape).
-
-        Parameters
-        ----------
-
-        Returns
-        -------
         """
         if not hasattr(self, "all_flux"):
             raise AttributeError("Must run `get_data()` before reshaping data.")
@@ -501,9 +498,9 @@ class MovingTPF:
         Parameters
         ----------
         method : str
-            Method used for background correction. One of [`rolling`,`linear_model`].
+            Method used for background correction. One of [`rolling`, `linear_model`].
         **kwargs
-            Keyword arguments to be passed to `_bg_rolling_median()` and `_bg_linear_model()`.
+            Keyword arguments passed to `_bg_rolling_median()` and `_bg_linear_model()`.
 
         Returns
         -------
@@ -1290,13 +1287,13 @@ class MovingTPF:
 
     def create_aperture(self, method: str = "prf", **kwargs):
         """
-        Creates an aperture mask using a method ['threshold', 'prf', 'ellipse'].
+        Creates an aperture mask using method `threshold`, `prf` or `ellipse`.
         It creates the `self.aperture_mask` attribute with the 3D mask.
 
         Parameters
         ----------
         method : str
-            Method used for aperture estimation. One of ['threshold', 'prf', 'ellipse'].
+            Method used for aperture estimation. One of [`threshold`, `prf`, `ellipse`].
         kwargs : dict
             Keywords arguments passed to aperture mask method, e.g
             `self._create_threshold_mask` takes `threshold` and `reference_pixel`.
@@ -1808,18 +1805,16 @@ class MovingTPF:
         self, sat_level: float = 1e5, sat_buffer_rad: int = 1, **kwargs
     ):
         """
-        Create 3D pixel quality mask. The mask is a bit-wise combination of
-        the following flags:
+        Create a 3D pixel quality mask. The mask is a bit-wise combination of
+        the following flags (Bit - Description):
 
-        Bit - Description
-        ----------------
-        1 - pixel is outside of science array
-        2 - pixel is in a strap column
-        3 - pixel is saturated
-        4 - pixel is within `sat_buffer_rad` pixels of a saturated pixel
-        5 - pixel has no scattered light correction. Only relevant if `linear_model` background correction was used.
-        6 - pixel had no background linear model, value was infilled. Only relevant if `linear_model` background correction was used.
-        7 - pixel had negative flux value BEFORE background correction was applied.
+        - 1 - pixel is outside of science array
+        - 2 - pixel is in a strap column
+        - 3 - pixel is saturated
+        - 4 - pixel is within `sat_buffer_rad` pixels of a saturated pixel
+        - 5 - pixel has no scattered light correction. Only relevant if `linear_model` background correction was used.
+        - 6 - pixel had no background linear model, value was infilled. Only relevant if `linear_model` background correction was used.
+        - 7 - pixel had negative flux value BEFORE background correction was applied.
             This can happen near bleed columns from saturated stars (e.g. see Sector 6, Camera 1, CCD 4).
 
         Parameters
@@ -2271,7 +2266,7 @@ class MovingTPF:
         Parameters
         ----------
         file_type : str
-            Type of file to be converted to FITS. One of ['tpf', 'lc'].
+            Type of file to be converted to FITS. One of [`tpf`, `lc`].
         save : bool
             If True, write the HDUList to a file.
         overwrite : bool
@@ -2280,7 +2275,7 @@ class MovingTPF:
         outdir : str
             If `save`, this is the directory into which the file will be saved.
         file_name : str
-            If `save`, this is the filename that will be used. Format must be `.fits`.
+            If `save`, this is the filename that will be used. Format must be '.fits'.
             If no filename is given, a default one will be generated.
 
         Returns
@@ -3124,30 +3119,31 @@ class MovingTPF:
         """
         Plot animation of TPF data with optional information overlay.
 
-        Parameters:
+        Parameters
         ----------
         show_aperture : bool
-            If True, the aperture used for photometry is displayed in the animation. Default is True.
+            If True, the aperture used for photometry is displayed in the animation.
         show_ephemeris : bool
-            If True, the predicted position of the target is included in the animation. Default is True.
+            If True, the predicted position of the target is included in the animation.
         step : int or None
             Spacing between frames, i.e. plot every nth frame.  If `None`, the spacing will be determined such
             that about 50 frames are shown. Showing more frames will increase the runtime and, if `save`, the
             file size.
         save : bool
-            If True, save the animation. Default is False.
+            If True, save the animation.
         outdir : str
             If `save`, this is the directory into which the file will be saved.
         file_name : str or None
-            If `save`, this is the filename that will be used. Format must be `.gif`.
+            If `save`, this is the filename that will be used. Format must be '.gif'.
             If no filename is given, a default one will be generated.
         kwargs:
-            Keyword arguments passed to `utils.animate_cube` such as [`interval`, `repeat_delay`, `cnorm`,
-            `vmin`, `vmax`].
+            Keyword arguments passed to `utils.animate_cube` such as `interval`, `repeat_delay`, `cnorm`,
+            `vmin`, `vmax`.
 
-        Returns:
+        Returns
         --------
-        Animation in HTML format. If in notebook environment, this allows animation to be displayed.
+        animation : html
+            If in a notebook environment, the animation is returned in HTML format for display purposes.
         """
 
         # Attribute checks
@@ -3224,8 +3220,8 @@ class MovingTPF:
         time_step: float = 0.1,
     ):
         """
-        Initialises MovingTPF from target name and TESS sector. Specifying a camera and
-        CCD will only use the ephemeris from that camera/ccd.
+        Initialises MovingTPF from target name and TESS sector. Uses JPL/Horizons to retrieve ephemeris of target. 
+        Specifying a camera and CCD will only use the ephemeris from that camera/ccd.
 
         Parameters
         ----------
@@ -3246,12 +3242,13 @@ class MovingTPF:
         -------
         MovingTPF :
             Initialised MovingTPF with ephemeris and orbital elements from JPL/Horizons.
-            Target ephemeris has columns ['time','sector','camera','ccd','column','row','vmag','hmag'].
-                'time' : float with units (JD - 2457000) in UTC at spacecraft.
-                'sector', 'camera', 'ccd' : int
-                'column', 'row' : float. These are one-indexed, where the lower left pixel of the FFI is (1,1).
-                'vmag' : float. Visual magnitude.
-                'hmag' : float. Absolute magntiude.
+            Target ephemeris has columns ['time', 'sector', 'camera', 'ccd', 'column', 'row', 'vmag', 'hmag'].
+            
+            - 'time' : float with units (JD - 2457000) in UTC at spacecraft.
+            - 'sector', 'camera', 'ccd' : int
+            - 'column', 'row' : float. These are one-indexed, where the lower left pixel of the FFI is (1,1).
+            - 'vmag' : float. Visual magnitude.
+            - 'hmag' : float. Absolute magntiude.
         """
 
         # Get target ephemeris and orbital elements using tess-ephem
