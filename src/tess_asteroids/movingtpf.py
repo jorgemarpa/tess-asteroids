@@ -48,7 +48,7 @@ class MovingTPF:
         Target ID. This is only used when saving the TPF.
     ephem : DataFrame
         Target ephemeris with columns ['time', 'sector', 'camera', 'ccd', 'column', 'row']. Optional columns: ['vmag', 'hmag'].
-        
+
         - 'time' : float in format (JD - 2457000). See also `time_scale` below.
         - 'sector', 'camera', 'ccd' : int
         - 'column', 'row' : float. These must be one-indexed, where the lower left pixel of the FFI is (1,1).
@@ -56,7 +56,7 @@ class MovingTPF:
         - 'hmag' : float, optional. Absolute magnitude.
     time_scale : str
         Time scale of input `ephem['time']`. One of ['tdb', 'utc']. Default is 'tdb'.
-        
+
         - If 'tdb', the input `ephem['time']` must be in TDB measured at the solar system barycenter from the TESS FFI header.
             This is the scale used for the 'TSTART'/'TSTOP' keywords in SPOC FFI headers and the 'TIME' column in SPOC
             TPFs and LCFs.
@@ -65,7 +65,7 @@ class MovingTPF:
             'TIMECORR' column from the 'TIME' column.
     metadata : dict
         A dictionary with optional keys {'eccentricity': float, 'inclination': float, 'perihelion': float}.
-        
+
         - 'eccentricity' : Target's orbital eccentricity. This is saved in the TPF/LCF headers.
         - 'inclination' : Target's orbital inclination, in degrees. This is saved in the TPF/LCF headers.
         - 'perihelion' : Target's perihelion distance, in AU. This is saved in the TPF/LCF headers.
@@ -3220,7 +3220,7 @@ class MovingTPF:
         time_step: float = 0.1,
     ):
         """
-        Initialises MovingTPF from target name and TESS sector. Uses JPL/Horizons to retrieve ephemeris of target. 
+        Initialises MovingTPF from target name and TESS sector. Uses JPL/Horizons to retrieve ephemeris of target.
         Specifying a camera and CCD will only use the ephemeris from that camera/ccd.
 
         Parameters
@@ -3243,7 +3243,7 @@ class MovingTPF:
         MovingTPF :
             Initialised MovingTPF with ephemeris and orbital elements from JPL/Horizons.
             Target ephemeris has columns ['time', 'sector', 'camera', 'ccd', 'column', 'row', 'vmag', 'hmag'].
-            
+
             - 'time' : float with units (JD - 2457000) in UTC at spacecraft.
             - 'sector', 'camera', 'ccd' : int
             - 'column', 'row' : float. These are one-indexed, where the lower left pixel of the FFI is (1,1).
