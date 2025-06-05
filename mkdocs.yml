@@ -17,7 +17,7 @@ theme:
   name: "material"
 
   icon:
-    logo: material/home
+    logo: fontawesome/solid/meteor #material/home
     repo: fontawesome/brands/github
 
   features:

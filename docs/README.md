@@ -2,6 +2,7 @@
 [![mypy](https://github.com/altuson/tess-asteroids/actions/workflows/mypy.yml/badge.svg)](https://github.com/altuson/tess-asteroids/actions/workflows/mypy.yml/)
 [![ruff](https://github.com/altuson/tess-asteroids/actions/workflows/ruff.yml/badge.svg)](https://github.com/altuson/tess-asteroids/actions/workflows/ruff.yml)
 [![PyPI](https://img.shields.io/pypi/v/tess-asteroids.svg)](https://pypi.python.org/pypi/tess-asteroids)
+[![Generic badge](https://img.shields.io/badge/documentation-live-blue.svg)](https://altuson.github.io/tess-asteroids/movingtpf/)
 
 # tess-asteroids
 
