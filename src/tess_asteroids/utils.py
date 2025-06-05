@@ -109,7 +109,7 @@ def target_observability(
 
     df_ephem = ephem(target, sector=sector)
 
-    obs = {"sector": [], "camera": [], "ccd": [], "dur": []} # type: dict
+    obs = {"sector": [], "camera": [], "ccd": [], "dur": []}  # type: dict
     if len(df_ephem) != 0:
         unique_combinations = df_ephem[["sector", "camera", "ccd"]].drop_duplicates()
         for i, sector in enumerate(unique_combinations["sector"]):
