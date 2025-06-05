@@ -3260,7 +3260,9 @@ class MovingTPF:
         # Check whether target was observed in sector.
         if len(df_ephem) == 0:
             raise ValueError(
-                "Target {} was not observed in sector {}.".format(target, sector)
+                "Target {} was not observed in sector {}. Try using the utils function `target_observability()` to find out if/when TESS observed this target.".format(
+                    target, sector
+                )
             )
 
         # Filter ephemeris using camera/ccd.

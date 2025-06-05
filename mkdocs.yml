@@ -5,6 +5,9 @@ nav:
   - API: 
       - movingtpf.md
       - utils.md
+  - Tutorials:
+    - Tutorial 1 - Basics: tutorials/tutorial1_basics.ipynb
+    - Tutorial 2 - Measuring rotation period: tutorials/tutorial2_rotation_periods.ipynb
 
 repo_url: https://github.com/altuson/tess-asteroids
 
@@ -61,6 +64,10 @@ plugins:
             show_signature_annotations: true
             separate_signature: true
             signature_crossrefs: true
+  - mkdocs-jupyter:
+      execute: false
+      include_source: true
+      ignore_h1_titles: true
 
 markdown_extensions:
   - pymdownx.highlight:

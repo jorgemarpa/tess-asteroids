@@ -34,6 +34,7 @@ pytest = "^8.3.2"
 mypy = "^1.11.2"
 lightkurve = "^2.5.0"
 mkdocstrings = {extras = ["python"], version = "^0.29.1"}
+mkdocs-jupyter = "^0.25.1"
 
 [build-system]
 requires = ["poetry-core"]

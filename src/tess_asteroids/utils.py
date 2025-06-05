@@ -11,6 +11,7 @@ from astropy.coordinates import SkyCoord
 from astropy.visualization import simple_norm
 from astropy.wcs.utils import fit_wcs_from_points
 from matplotlib import animation, colors, patches
+from tess_ephem import ephem
 
 from . import TESSmag_zero_point, TESSmag_zero_point_err
 
@@ -74,6 +75,61 @@ def calculate_TESSmag(
     )
 
     return mag, mag_err
+
+
+def target_observability(
+    target: str, sector: Optional[int] = None, return_ephem: bool = False
+):
+    """
+    Determine if a target has been observed by TESS and, if so, during which sector/camera/CCD. This function will also
+    give an estimate of the length of time, in days, for which the target was observed on each sector/camera/CCD.
+
+    Parameters
+    ----------
+    target : str
+        JPL/Horizons target ID of e.g. asteroid, comet.
+    sector : int
+        TESS sector number. If you want to know whether your target was observed during a specific sector, set this parameter.
+        If None, all available sectors will be checked.
+    return_ephem : bool
+        If True, this will return the full ephemeris of the target in addition to the observability summary.
+
+    Returns
+    -------
+    obs : dict
+        A summary of the TESS observations of the target. There is one entry for each unique combination of
+        sector/camera/CCD. The dictionary has the following keys:
+
+        - 'sector', 'camera', 'ccd': sector/camera/CCD target was observed by.
+        - 'dur': approximate duration for which target was observed by this sector/camera/CCD, in days.
+    df_ephem : DataFrame
+        If `return_ephem` = True, the ephemeris will also be returned. This includes the pixel 'row' and 'column'
+        of the target over time.
+    """
+
+    df_ephem = ephem(target, sector=sector)
+
+    obs = {"sector": [], "camera": [], "ccd": [], "dur": []}
+    if len(df_ephem) != 0:
+        unique_combinations = df_ephem[["sector", "camera", "ccd"]].drop_duplicates()
+        for i, sector in enumerate(unique_combinations["sector"]):
+            obs["sector"].append(sector)
+            obs["camera"].append(unique_combinations["camera"][i])
+            obs["ccd"].append(unique_combinations["ccd"][i])
+            time = df_ephem[
+                np.logical_and(
+                    df_ephem["sector"] == sector,
+                    np.logical_and(
+                        df_ephem["camera"] == obs["camera"][-1],
+                        df_ephem["ccd"] == obs["ccd"][-1],
+                    ),
+                )
+            ].index
+            obs["dur"].append((np.nanmax(time) - np.nanmin(time)).value)
+
+    if return_ephem:
+        return obs, df_ephem
+    return obs
 
 
 def inside_ellipse(
