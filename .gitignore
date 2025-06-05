@@ -6,3 +6,6 @@ tests/*.fits
 
 # mkdocs documentation
 /site
+
+# Jupyter notebooks
+.ipynb_checkpoints
