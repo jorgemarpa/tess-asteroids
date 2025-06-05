@@ -8,6 +8,8 @@
 
 `tess-asteroids` allows you to make Target Pixel Files (TPFs) and Light Curve Files (LCFs) for any object that moves through the TESS field of view, for example solar system asteroids, comets or minor planets.
 
+See the full documentation, including tutorials, [here](https://altuson.github.io/tess-asteroids/). 
+
 ## Installation
 
 The easiest way to install `tess-asteroids` and all of its dependencies is to run the following command in a terminal window:
