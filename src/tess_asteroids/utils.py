@@ -7,10 +7,12 @@ from typing import Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 from astropy.coordinates import SkyCoord
 from astropy.visualization import simple_norm
 from astropy.wcs.utils import fit_wcs_from_points
 from matplotlib import animation, colors, patches
+from tess_ephem import ephem
 
 from . import TESSmag_zero_point, TESSmag_zero_point_err
 
@@ -34,7 +36,7 @@ def calculate_TESSmag(
     flux_err : float or ndarray
         Error on target flux, in electrons/second.
     flux_fraction : float or ndarray
-        Fraction of target flux inside aperture. Must satisfy: 0 < flux_fraction <= 1.
+        Fraction of target flux inside aperture. Must satisfy: 0 < `flux_fraction` <= 1.
 
     Returns
     -------
@@ -74,6 +76,61 @@ def calculate_TESSmag(
     )
 
     return mag, mag_err
+
+
+def target_observability(
+    target: str, sector: Optional[int] = None, return_ephem: bool = False
+):
+    """
+    Determine if a target has been observed by TESS and, if so, during which sector/camera/CCD. This function will also
+    give an estimate of the length of time, in days, for which the target was observed on each sector/camera/CCD.
+
+    Parameters
+    ----------
+    target : str
+        JPL/Horizons target ID of e.g. asteroid, comet.
+    sector : int
+        TESS sector number. If you want to know whether your target was observed during a specific sector, set this parameter.
+        If None, all available sectors will be checked.
+    return_ephem : bool
+        If True, this will return the full ephemeris of the target in addition to the observability summary.
+
+    Returns
+    -------
+    obs : DataFrame
+        A summary of the TESS observations of the target. There is one entry for each unique combination of
+        sector/camera/CCD. The DataFrame has the following columns:
+
+        - 'sector', 'camera', 'ccd': sector/camera/CCD target was observed in.
+        - 'dur': approximate duration for which target was observed in this sector/camera/CCD, in days.
+    df_ephem : DataFrame
+        If `return_ephem` = True, the ephemeris will also be returned. This includes the pixel 'row' and 'column'
+        of the target over time.
+    """
+
+    df_ephem = ephem(target, sector=sector)
+
+    obs = {"sector": [], "camera": [], "ccd": [], "dur": []}  # type: dict
+    if len(df_ephem) != 0:
+        unique_combinations = df_ephem[["sector", "camera", "ccd"]].drop_duplicates()
+        for _, combo in unique_combinations.iterrows():
+            obs["sector"].append(combo["sector"])
+            obs["camera"].append(combo["camera"])
+            obs["ccd"].append(combo["ccd"])
+            time = df_ephem[
+                np.logical_and(
+                    df_ephem["sector"] == obs["sector"][-1],
+                    np.logical_and(
+                        df_ephem["camera"] == obs["camera"][-1],
+                        df_ephem["ccd"] == obs["ccd"][-1],
+                    ),
+                )
+            ].index
+            obs["dur"].append((np.nanmax(time) - np.nanmin(time)).value)
+
+    if return_ephem:
+        return pd.DataFrame(obs), df_ephem
+    return pd.DataFrame(obs)
 
 
 def inside_ellipse(
@@ -130,7 +187,7 @@ def compute_moments(
     Computes first and second order moments of a 2d distribution over time
     using a coordinate grid with the same shape as `flux` (nt, nrows, ncols).
     First order moments (X,Y) are the centroid positions. The X,Y centroids are in
-    the range [0, 'ncols'), [0, 'nrows'), respectively i.e. they are zero-indexed.
+    the range [0, ncols), [0, nrows), respectively i.e. they are zero-indexed.
     Second order moments (X2, Y2, XY) represent the spatial spread of the distribution.
 
     Parameters
@@ -140,7 +197,7 @@ def compute_moments(
     mask: ndarray
         Mask to select pixels used for computing moments. Shape could
         be 3D (nt, nrows, ncols) or 2D (nrows, ncols). If a 2D mask is given,
-        it is used for all frames `nt`.
+        it is used for all frames.
     second_order: bool
         If True, returns first and second order moments, else returns only first
         order moments.
@@ -306,13 +363,13 @@ def plot_img_aperture(
     cnorm: Optional[colors.Normalize] = None,
 ):
     """
-    Plots an image with an optional aperture mask overlay.
+    Plots an image with an optional aperture mask.
 
     This function displays an image, optionally overlaying an aperture mask, and
     provides several customization options such as color scaling, title, and axis control.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     img : 2D array
         The image data to be plotted, typically a 2D array or matrix representing pixel values.
     aperture_mask : 2D array, default=None
@@ -336,8 +393,8 @@ def plot_img_aperture(
         Color matplotlib normalization object (e.g. astropy.visualization.simple_norm). If provided,
         then `vmax` and `vmin` are not used.
 
-    Returns:
-    --------
+    Returns
+    -------
     ax : matplotlib.axes.Axes
         The axes object containing the plot.
     """
@@ -426,8 +483,8 @@ def animate_cube(
     This function animates the slices of a 3D image cube, optionally overlaying an aperture mask,
     and provides controls for animation speed, title, and tracking information.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     cube : 3D array
         A 3D array representing the image cube (e.g., a stack of 2D images over time).
     aperture_mask : 2D or 3D array, optional
@@ -437,8 +494,8 @@ def animate_cube(
         The (row, column) coordinates of the lower left corner of the image.
     ephemeris : 2D array, optional, default=None
         A 2D array of object positions (row, column) to be displayed on the plot.
-        For proper display of object position, if corner is [0, 0] then track needs to be relative to corner.
-        If corner is provided, track needs to be absolute.
+        For proper display of object position, if `corner` is [0, 0] then `ephemeris` needs to be relative to `corner`.
+        If `corner` is provided, `ephemeris` needs to be absolute.
         If None, no tracking information is shown.
     cadenceno : int, optional, default=None
         The cadence number of the frames, used for information display.
@@ -463,8 +520,8 @@ def animate_cube(
         It can be used to provide additional context or information about the animated data,
         for example the target name or observing sector/camera/ccd.
 
-    Returns:
-    --------
+    Returns
+    -------
     ani : matplotlib.animation.FuncAnimation
         The animation object that can be displayed or saved.
     """
