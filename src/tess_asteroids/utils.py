@@ -7,6 +7,7 @@ from typing import Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 from astropy.coordinates import SkyCoord
 from astropy.visualization import simple_norm
 from astropy.wcs.utils import fit_wcs_from_points
@@ -96,12 +97,12 @@ def target_observability(
 
     Returns
     -------
-    obs : dict
+    obs : DataFrame
         A summary of the TESS observations of the target. There is one entry for each unique combination of
-        sector/camera/CCD. The dictionary has the following keys:
+        sector/camera/CCD. The DataFrame has the following columns:
 
-        - 'sector', 'camera', 'ccd': sector/camera/CCD target was observed by.
-        - 'dur': approximate duration for which target was observed by this sector/camera/CCD, in days.
+        - 'sector', 'camera', 'ccd': sector/camera/CCD target was observed in.
+        - 'dur': approximate duration for which target was observed in this sector/camera/CCD, in days.
     df_ephem : DataFrame
         If `return_ephem` = True, the ephemeris will also be returned. This includes the pixel 'row' and 'column'
         of the target over time.
@@ -112,13 +113,13 @@ def target_observability(
     obs = {"sector": [], "camera": [], "ccd": [], "dur": []}  # type: dict
     if len(df_ephem) != 0:
         unique_combinations = df_ephem[["sector", "camera", "ccd"]].drop_duplicates()
-        for i, sector in enumerate(unique_combinations["sector"]):
-            obs["sector"].append(sector)
-            obs["camera"].append(unique_combinations["camera"][i])
-            obs["ccd"].append(unique_combinations["ccd"][i])
+        for _, combo in unique_combinations.iterrows():
+            obs["sector"].append(combo["sector"])
+            obs["camera"].append(combo["camera"])
+            obs["ccd"].append(combo["ccd"])
             time = df_ephem[
                 np.logical_and(
-                    df_ephem["sector"] == sector,
+                    df_ephem["sector"] == obs["sector"][-1],
                     np.logical_and(
                         df_ephem["camera"] == obs["camera"][-1],
                         df_ephem["ccd"] == obs["ccd"][-1],
@@ -128,8 +129,8 @@ def target_observability(
             obs["dur"].append((np.nanmax(time) - np.nanmin(time)).value)
 
     if return_ephem:
-        return obs, df_ephem
-    return obs
+        return pd.DataFrame(obs), df_ephem
+    return pd.DataFrame(obs)
 
 
 def inside_ellipse(
