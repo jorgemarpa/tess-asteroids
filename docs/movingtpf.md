@@ -1,6 +1,6 @@
 # `MovingTPF`
 
-::: src.tess_asteroids.MovingTPF
+::: tess_asteroids.MovingTPF
     handler: python
     options:
       summary: false
