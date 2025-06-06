@@ -1,6 +1,6 @@
 # `utils`
 
-::: src.tess_asteroids.utils
+::: tess_asteroids.utils
     handler: python
     options:
       summary: false
