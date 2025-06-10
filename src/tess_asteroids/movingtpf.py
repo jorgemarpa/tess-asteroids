@@ -7,6 +7,7 @@ import lkprf
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import tesswcs
 from astropy.io import fits
 from astropy.stats import sigma_clip
 from astropy.time import Time
@@ -23,8 +24,14 @@ from tesscube.query import async_get_primary_hdu
 from tesscube.utils import _sync_call, convert_coordinates_to_runs
 from tqdm import tqdm
 
-from . import __version__, logger, straps
-from .utils import animate_cube, compute_moments, inside_ellipse, make_wcs_header
+from . import TESSmag_zero_point, __version__, logger, straps
+from .utils import (
+    animate_cube,
+    calculate_TESSmag,
+    compute_moments,
+    inside_ellipse,
+    make_wcs_header,
+)
 
 
 class MovingTPF:
@@ -40,25 +47,44 @@ class MovingTPF:
     target : str
         Target ID. This is only used when saving the TPF.
     ephem : DataFrame
-        Target ephemeris with columns ['time','sector','camera','ccd','column','row']. Optional columns: ['vmag'].
-            'time' : float in format (JD - 2457000). See also `time_scale` below.
-            'sector', 'camera', 'ccd' : int
-            'column', 'row' : float. These must be one-indexed, where the lower left pixel of the FFI is (1,1).
-            'vmag' : float, optional. Visual magnitude.
+        Target ephemeris with columns ['time', 'sector', 'camera', 'ccd', 'column', 'row']. Optional columns: ['vmag', 'hmag'].
+
+        - 'time' : float in format (JD - 2457000). See also `time_scale` below.
+        - 'sector', 'camera', 'ccd' : int
+        - 'column', 'row' : float. These must be one-indexed, where the lower left pixel of the FFI is (1,1).
+        - 'vmag' : float, optional. Visual magnitude.
+        - 'hmag' : float, optional. Absolute magnitude.
     time_scale : str
-        Time scale of input 'time'. One of ['tdb', 'utc']. Default is 'tdb'.
-        If 'tdb', the input 'time' must be in TDB measured at the solar system barycenter from the TESS FFI header.
+        Time scale of input `ephem['time']`. One of ['tdb', 'utc']. Default is 'tdb'.
+
+        - If 'tdb', the input `ephem['time']` must be in TDB measured at the solar system barycenter from the TESS FFI header.
             This is the scale used for the 'TSTART'/'TSTOP' keywords in SPOC FFI headers and the 'TIME' column in SPOC
             TPFs and LCFs.
-        If 'utc', the input 'time' must be in UTC measured at the spacecraft. This can be recovered from the SPOC data
+        - If 'utc', the input `ephem['time']` must be in UTC measured at the spacecraft. This can be recovered from the SPOC data
             products: for FFIs subtract header keyword 'BARYCORR' from 'TSTART'/'TSTOP' and for TPFs/LCFs subtract the
             'TIMECORR' column from the 'TIME' column.
+    metadata : dict
+        A dictionary with optional keys {'eccentricity': float, 'inclination': float, 'perihelion': float}.
+
+        - 'eccentricity' : Target's orbital eccentricity. This is saved in the TPF/LCF headers.
+        - 'inclination' : Target's orbital inclination, in degrees. This is saved in the TPF/LCF headers.
+        - 'perihelion' : Target's perihelion distance, in AU. This is saved in the TPF/LCF headers.
     """
 
-    def __init__(self, target: str, ephem: pd.DataFrame, time_scale: str = "tdb"):
+    def __init__(
+        self,
+        target: str,
+        ephem: pd.DataFrame,
+        time_scale: str = "tdb",
+        metadata: dict = {},
+    ):
         self.target = target
         self.ephem = ephem
         self.time_scale = time_scale
+
+        # Check self.ephem has more than one row
+        if len(self.ephem) < 2:
+            raise ValueError("ephem must have at least two rows.")
 
         # Check self.ephem['time'] has correct units
         if min(self.ephem["time"]) >= 2457000:
@@ -87,6 +113,35 @@ class MovingTPF:
             raise NotImplementedError(
                 "Target crosses multiple camera/ccd. Not yet implemented."
             )
+
+        # Save orbital elements and check the values are physical.
+        if "eccentricity" in metadata:
+            self.ecc = float(metadata["eccentricity"])
+            # Eccentricity cannot be negative:
+            if self.ecc < 0:
+                raise ValueError(
+                    "`ecc` is the orbital eccentricity and it must satisfy: ecc >= 0. Not `{0}`".format(
+                        self.ecc
+                    )
+                )
+        if "inclination" in metadata:
+            self.inc = float(metadata["inclination"])
+            # Orbital inclination runs from 0 to 180 degrees:
+            if self.inc < 0 or self.inc > 180:
+                raise ValueError(
+                    "`inc` is the orbital inclination in degrees and it must satisfy: 0 <= inc <= 180. Not `{0}`".format(
+                        self.inc
+                    )
+                )
+        if "perihelion" in metadata:
+            self.peri = float(metadata["perihelion"])
+            # Perihelion distance cannot be negative:
+            if self.peri < 0:
+                raise ValueError(
+                    "`peri` is the perihelion distance in AU and it must satisfy: peri >= 0. Not `{0}`".format(
+                        self.peri
+                    )
+                )
 
         # Initialise tesscube
         self.cube = TESSCube(sector=self.sector, camera=self.camera, ccd=self.ccd)
@@ -121,16 +176,16 @@ class MovingTPF:
             One of [`rolling`, `linear_model`].
         ap_method : str
             Method used to create aperture.
-            One of ['threshold', 'prf', 'ellipse'].
+            One of [`threshold`, `prf`, `ellipse`].
         save : bool, default=False
             If True, save the TPF HDUList to a FITS file.
         outdir : str
             If `save`, this is the directory into which the file will be saved.
         file_name : str
-            If `save`, this is the filename that will be used. Format must be `.fits`.
+            If `save`, this is the filename that will be used. Format must be '.fits'.
             If no filename is given, a default one will be generated.
         **kwargs
-            Keyword arguments to be passed to `create_pixel_quality()`, `background_correction()`,
+            Keyword arguments passed to `create_pixel_quality()`, `background_correction()`,
             `create_aperture()` and `to_fits()`.
 
         Returns
@@ -160,16 +215,16 @@ class MovingTPF:
         Parameters
         ----------
         method : str
-            Method to extract lightcurve. One of `aperture` or `psf`.
+            Method to extract lightcurve. One of [`aperture`, `psf`].
         save : bool
             If True, save the lightcurve HDUList to a FITS file.
         outdir : str
             If `save`, this is the directory into which the file will be saved.
         file_name : str
-            If `save`, this is the filename that will be used. Format must be `.fits`.
+            If `save`, this is the filename that will be used. Format must be '.fits'.
             If no filename is given, a default one will be generated.
         **kwargs
-            Keyword arguments to be passed to `to_lightcurve()` and `to_fits()`.
+            Keyword arguments passed to `to_lightcurve()` and `to_fits()`.
 
         Returns
         -------
@@ -362,15 +417,18 @@ class MovingTPF:
             )
         self.target_mask = np.asarray(target_mask)
 
-        # Convert (row,column) ephemeris to (ra,dec) using average WCS from observing sector.
+        # Convert (row,column) ephemeris to (ra,dec) using WCS from tesswcs.
         # Note: if MovingTPF was initialised from_name, then tess-ephem
-        # internally converted (ra,dec) to (row,column) using the average WCS
-        # from the observing sector. `self.coords` does not recover these original values
-        # because the ephemeris has been interpolated.
+        # internally converted (ra,dec) to (row,column) using tesswcs.
+        # `self.coords` does not recover these original values because the
+        # ephemeris has since been interpolated.
         # Note: pixel_to_world() assumes zero-indexing so subtract one from (row,col).
+        self.wcs = tesswcs.WCS.from_archive(
+            sector=self.sector, camera=self.camera, ccd=self.ccd
+        )
         self.coords = np.asarray(
             [
-                self.cube.wcs.pixel_to_world(
+                self.wcs.pixel_to_world(
                     self.ephemeris[t, 1] - 1, self.ephemeris[t, 0] - 1
                 )
                 for t in range(len(self.time_original))
@@ -417,12 +475,6 @@ class MovingTPF:
     def reshape_data(self):
         """
         Reshape flux data into cube with shape (len(self.time), self.shape).
-
-        Parameters
-        ----------
-
-        Returns
-        -------
         """
         if not hasattr(self, "all_flux"):
             raise AttributeError("Must run `get_data()` before reshaping data.")
@@ -446,9 +498,9 @@ class MovingTPF:
         Parameters
         ----------
         method : str
-            Method used for background correction. One of [`rolling`,`linear_model`].
+            Method used for background correction. One of [`rolling`, `linear_model`].
         **kwargs
-            Keyword arguments to be passed to `_bg_rolling_median()` and `_bg_linear_model()`.
+            Keyword arguments passed to `_bg_rolling_median()` and `_bg_linear_model()`.
 
         Returns
         -------
@@ -1090,16 +1142,23 @@ class MovingTPF:
                     prior_sigma[0] = np.abs(prior_mu[0]) ** 0.5
 
                     # Use weighted Bayesian LS.
-                    sigma_w_inv = X[k].T.dot(
-                        X[k] / sl_corr_flux_err[adx:bdx][k, pdx, None] ** 2
-                    ) + np.diag(1 / prior_sigma**2)
-                    B = (
-                        X[k].T.dot(
-                            sl_corr_flux[adx:bdx][k, pdx]
-                            / sl_corr_flux_err[adx:bdx][k, pdx] ** 2
+                    with warnings.catch_warnings():
+                        warnings.filterwarnings(
+                            "ignore", message="divide by zero encountered in divide"
                         )
-                        + prior_mu / prior_sigma**2
-                    )
+                        warnings.filterwarnings(
+                            "ignore", message="invalid value encountered in divide"
+                        )
+                        sigma_w_inv = X[k].T.dot(
+                            X[k] / sl_corr_flux_err[adx:bdx][k, pdx, None] ** 2
+                        ) + np.diag(1 / prior_sigma**2)
+                        B = (
+                            X[k].T.dot(
+                                sl_corr_flux[adx:bdx][k, pdx]
+                                / sl_corr_flux_err[adx:bdx][k, pdx] ** 2
+                            )
+                            + prior_mu / prior_sigma**2
+                        )
 
                     # Find the best-fitting weights and errors and turn it into a distribution
                     w = np.linalg.solve(sigma_w_inv, B)
@@ -1228,13 +1287,13 @@ class MovingTPF:
 
     def create_aperture(self, method: str = "prf", **kwargs):
         """
-        Creates an aperture mask using a method ['threshold', 'prf', 'ellipse'].
+        Creates an aperture mask using method `threshold`, `prf` or `ellipse`.
         It creates the `self.aperture_mask` attribute with the 3D mask.
 
         Parameters
         ----------
         method : str
-            Method used for aperture estimation. One of ['threshold', 'prf', 'ellipse'].
+            Method used for aperture estimation. One of [`threshold`, `prf`, `ellipse`].
         kwargs : dict
             Keywords arguments passed to aperture mask method, e.g
             `self._create_threshold_mask` takes `threshold` and `reference_pixel`.
@@ -1746,17 +1805,17 @@ class MovingTPF:
         self, sat_level: float = 1e5, sat_buffer_rad: int = 1, **kwargs
     ):
         """
-        Create 3D pixel quality mask. The mask is a bit-wise combination of
-        the following flags:
+        Create a 3D pixel quality mask. The mask is a bit-wise combination of
+        the following flags (Bit - Description):
 
-        Bit - Description
-        ----------------
-        1 - pixel is outside of science array
-        2 - pixel is in a strap column
-        3 - pixel is saturated
-        4 - pixel is within `sat_buffer_rad` pixels of a saturated pixel
-        5 - pixel has no scattered light correction. Only relevant if `linear_model` background correction was used.
-        6 - pixel had no background linear model, value was infilled. Only relevant if `linear_model` background correction was used.
+        - 1 - pixel is outside of science array
+        - 2 - pixel is in a strap column
+        - 3 - pixel is saturated
+        - 4 - pixel is within `sat_buffer_rad` pixels of a saturated pixel
+        - 5 - pixel has no scattered light correction. Only relevant if `linear_model` background correction was used.
+        - 6 - pixel had no background linear model, value was infilled. Only relevant if `linear_model` background correction was used.
+        - 7 - pixel had negative flux value BEFORE background correction was applied.
+            This can happen near bleed columns from saturated stars (e.g. see Sector 6, Camera 1, CCD 4).
 
         Parameters
         ----------
@@ -1790,7 +1849,10 @@ class MovingTPF:
         # Pixel mask that identifies saturated pixels
         sat_mask = self.flux > sat_level
 
-        # >>>>> ADD A MASK FOR OTHER SATURATION FEATURES <<<<<
+        # Pixel mask that identifies negative flux values
+        negative_mask = self.flux < 0
+
+        # >>>>> ADD A MASK FOR OTHER SATURATION FEATURES? <<<<<
 
         # Combine masks
         pixel_quality = []
@@ -1833,6 +1895,7 @@ class MovingTPF:
                         self.shape
                     ),
                 },
+                "negative_mask": {"bit": 7, "value": negative_mask[t]},
             }
             # Compute bit-wise mask
             pixel_quality.append(
@@ -1877,6 +1940,7 @@ class MovingTPF:
                 row_cen,
                 col_cen_err,
                 row_cen_err,
+                measured_coords,
                 flux_fraction,
             ) = self._aperture_photometry(**kwargs)
             quality = self._create_lc_quality()
@@ -1892,6 +1956,8 @@ class MovingTPF:
                 "row_cen_err": row_cen_err,
                 "quality": quality,
                 "flux_fraction": flux_fraction,
+                "ra": [coord.ra.value for coord in measured_coords],
+                "dec": [coord.dec.value for coord in measured_coords],
             }
 
         elif method == "psf":
@@ -1901,7 +1967,18 @@ class MovingTPF:
                 f"Method must be one of: ['aperture', 'psf']. Not '{method}'"
             )
 
-    def _aperture_photometry(self, bad_bits: list = [1, 3], **kwargs):
+        # Convert measured flux to TESS magnitude.
+        # If "prf" method was used to compute the aperture, there are meaningful flux fractions.
+        # Otherwise, assume 100% of the flux is inside the aperture.
+        self.lc[method]["TESSmag"], self.lc[method]["TESSmag_err"] = calculate_TESSmag(
+            self.lc[method]["flux"],
+            self.lc[method]["flux_err"],
+            self.lc[method]["flux_fraction"]
+            if self.ap_method == "prf"
+            else np.ones_like(self.lc[method]["flux_fraction"]),
+        )
+
+    def _aperture_photometry(self, bad_bits: list = [1, 3, 7], **kwargs):
         """
         Gets flux and BG flux inside aperture and computes flux-weighted centroid.
 
@@ -1909,15 +1986,16 @@ class MovingTPF:
         ----------
         bad_bits : list
             Bits to mask during computation of aperture flux, BG flux and centroid. These bits correspond
-            to the `self.pixel_quality` flags. By default, bits 1 (non-science pixel) and 3 (saturated pixel)
-            are masked.
+            to the `self.pixel_quality` flags. By default, bits 1 (non-science pixel), 3 (saturated pixel)
+            and 7 (negative flux before BG correction) are masked.
 
         Returns
         -------
-        ap_flux, ap_flux_err, ap_bg, ap_bg_err, col_cen, row_cen, col_cen_err, row_cen_err, flux_fraction : ndarrays
+        ap_flux, ap_flux_err, ap_bg, ap_bg_err, col_cen, row_cen, col_cen_err, row_cen_err, measured_coords, flux_fraction : ndarrays
             Sum of flux inside aperture and error (ap_flux, ap_flux_err), sum of background flux inside
             aperture and error (ap_bg, ap_bg_err), flux-weighted centroids inside aperture and errors
-            (col_cen, row_cen, col_cen_err, row_cen_err) and fraction of PRF model flux inside aperture (flux_fraction).
+            (col_cen, row_cen, col_cen_err, row_cen_err), flux-weighted centroids converted to world coordinates using WCS (measured_coords)
+            and fraction of PRF model flux inside aperture (flux_fraction).
             The row and column centroids are one-indexed and correspond to the position in the full FFI, where the
             lower left pixel has the value (1,1). Flux fraction will be nan unless `prf` aperture is used.
         """
@@ -1996,6 +2074,15 @@ class MovingTPF:
         col_cen += self.corner[:, 1]
         row_cen += self.corner[:, 0]
 
+        # Convert measured centroid from (row,col) to (ra,dec) using WCS from tesswcs.
+        # Note: pixel_to_world() assumes zero-indexing so subtract one from (row,col).
+        measured_coords = np.asarray(
+            [
+                self.wcs.pixel_to_world(col_cen[t] - 1, row_cen[t] - 1)
+                for t in range(len(self.time_original))
+            ]
+        )
+
         return (
             np.asarray(ap_flux),
             np.asarray(ap_flux_err),
@@ -2005,6 +2092,7 @@ class MovingTPF:
             row_cen,
             col_cen_err,
             row_cen_err,
+            measured_coords,
             np.asarray(flux_fraction),
         )
 
@@ -2015,18 +2103,19 @@ class MovingTPF:
 
         Bit - Description
         ----------------
-        1 - no pixels inside aperture.
-        2 - at least one non-science pixel inside aperture.
-        3 - at least one pixel inside aperture is in a strap column.
-        4 - at least one saturated pixel inside aperture.
-        5 - at least one pixel inside aperture is 4-adjacent to a saturated pixel.
-        6 - all pixels inside aperture are `bad_bits`.
-        7 - PRF model contained nans.
-            Only relevant if `prf` aperture was used.
-        8 - at least one pixel inside aperture does not have scattered light correction.
-            Only relevant if `linear_model` background correction was used.
-        9 - at least one pixel inside aperture had no background linear model, value was infilled.
-            Only relevant if `linear_model` background correction was used.
+        1  - no pixels inside aperture.
+        2  - at least one non-science pixel inside aperture.
+        3  - at least one pixel inside aperture is in a strap column.
+        4  - at least one saturated pixel inside aperture.
+        5  - at least one pixel inside aperture is 4-adjacent to a saturated pixel.
+        6  - all pixels inside aperture are `bad_bits`.
+        7  - PRF model contained nans.
+             Only relevant if `prf` aperture was used.
+        8  - at least one pixel inside aperture does not have scattered light correction.
+             Only relevant if `linear_model` background correction was used.
+        9  - at least one pixel inside aperture had no background linear model, value was infilled.
+             Only relevant if `linear_model` background correction was used.
+        10 - at least one pixel inside aperture had negative value BEFORE background correction was applied.
 
         Parameters
         ----------
@@ -2130,7 +2219,15 @@ class MovingTPF:
                         for t in range(len(self.time))
                     ],
                 },
-                # Add flag for negative pixels in aperture?
+                # Negative pixel (before BG correction) in aperture
+                "negative_mask": {
+                    "bit": 10,
+                    "value": [
+                        (self.pixel_quality[t][self.aperture_mask[t]] & 64 != 0).any()
+                        for t in range(len(self.time))
+                    ],
+                },
+                # Add flag for negative pixels (after BG correction) in aperture?
             }
 
         elif method == "psf":
@@ -2169,7 +2266,7 @@ class MovingTPF:
         Parameters
         ----------
         file_type : str
-            Type of file to be converted to FITS. One of ['tpf', 'lc'].
+            Type of file to be converted to FITS. One of [`tpf`, `lc`].
         save : bool
             If True, write the HDUList to a file.
         overwrite : bool
@@ -2178,7 +2275,7 @@ class MovingTPF:
         outdir : str
             If `save`, this is the directory into which the file will be saved.
         file_name : str
-            If `save`, this is the filename that will be used. Format must be `.fits`.
+            If `save`, this is the filename that will be used. Format must be '.fits'.
             If no filename is given, a default one will be generated.
 
         Returns
@@ -2255,7 +2352,23 @@ class MovingTPF:
         hdu.header.set("PROCVER", __version__)
         hdu.header.set("DATA_REL", comment="SPOC data release version number")
         hdu.header.set("OBJECT", self.target, comment="object name")
-        # Future: update TESSMAG with measured value.
+
+        # Add average measured TESS magnitude of target and zero-point
+        hdu.header.set(
+            "TESSMAG",
+            round(np.nanmedian(self.lc["aperture"]["TESSmag"]), 3)
+            if file_type == "lc" and hasattr(self, "lc") and "aperture" in self.lc
+            else 0.0,
+            comment="[mag] measured TESS magnitude",
+        )
+        hdu.header.set(
+            "TESSMAG0",
+            round(TESSmag_zero_point, 3)
+            if file_type == "lc" and hasattr(self, "lc") and "aperture" in self.lc
+            else 0.0,
+            comment="[mag] TESS zero-point magnitude",
+            after="TESSMAG",
+        )
 
         # Add keywords from original FFI header
         hdu.header.set(
@@ -2337,17 +2450,107 @@ class MovingTPF:
             )
             if "vmag" in self.ephem
             else 0.0,
-            comment="V magnitude",
+            comment="[mag] predicted V magnitude",
             after="TICVER",
         )
-        hdu.header.set("HMAG", 0.0, comment="H absolute magnitude", after="VMAG")
-        hdu.header.set("PERIHEL", 0.0, comment="[AU] perihelion", after="HMAG")
-        hdu.header.set("ORBECC", 0.0, comment="orbit eccentricity", after="PERIHEL")
-        hdu.header.set("ORBINC", 0.0, comment="[deg] orbit inclination", after="ORBECC")
         hdu.header.set(
-            "RARATE", 0.0, comment='["/h] right ascension rate', after="ORBINC"
+            "HMAG",
+            round(
+                np.nanmean(
+                    self.ephem.loc[
+                        np.logical_and(
+                            self.ephem["time"]
+                            >= (
+                                self.time_original[0]
+                                if self.time_scale == "tdb"
+                                else self.time_original[0] - self.timecorr_original[0]
+                            ),
+                            self.ephem["time"]
+                            <= (
+                                self.time_original[-1]
+                                if self.time_scale == "tdb"
+                                else self.time_original[-1] - self.timecorr_original[-1]
+                            ),
+                        ),
+                        "hmag",
+                    ]
+                ),
+                3,
+            )
+            if "hmag" in self.ephem and ~np.isnan(self.ephem["hmag"]).all()
+            else 0.0,
+            comment="[mag] H absolute magnitude",
+            after="VMAG",
         )
-        hdu.header.set("DECRATE", 0.0, comment='["/h] declination rate', after="RARATE")
+        hdu.header.set(
+            "PERIHEL",
+            round(self.peri, 3) if hasattr(self, "peri") else 0.0,
+            comment="[AU] perihelion distance",
+            after="HMAG",
+        )
+        hdu.header.set(
+            "ORBECC",
+            round(self.ecc, 3) if hasattr(self, "ecc") else 0.0,
+            comment="orbit eccentricity",
+            after="PERIHEL",
+        )
+        hdu.header.set(
+            "ORBINC",
+            round(self.inc, 3) if hasattr(self, "inc") else 0.0,
+            comment="[deg] orbit inclination",
+            after="ORBECC",
+        )
+
+        # RA and Dec rates are computed from predicted coordinates so TPF and LCF can use
+        # consistent values.
+        # Use np.unwrap() for RA to ensure angles correctly wrap at 0/360.
+        hdu.header.set(
+            "RARATE",
+            round(
+                np.nanmean(
+                    np.gradient(
+                        np.unwrap(
+                            [coord.ra.value for coord in self.coords], period=360
+                        ),
+                        self.time,
+                    )
+                    * 3600
+                    / 24
+                ),
+                3,
+            ),
+            comment='["/h] average RA rate',
+            after="ORBINC",
+        )
+        hdu.header.set(
+            "DECRATE",
+            round(
+                np.nanmean(
+                    np.gradient([coord.dec.value for coord in self.coords], self.time)
+                    * 3600
+                    / 24
+                ),
+                3,
+            ),
+            comment='["/h] average Dec rate',
+            after="RARATE",
+        )
+        # Pixel speed is computed from input ephemeris so TPF and LCF can use consistent values.
+        hdu.header.set(
+            "PIXVEL",
+            round(
+                np.nanmean(
+                    np.hypot(
+                        np.gradient(self.ephemeris[:, 0], self.time),
+                        np.gradient(self.ephemeris[:, 1], self.time),
+                    )
+                    / 24
+                ),
+                3,
+            ),
+            comment="[pix/h] average speed",
+            after="DECRATE",
+        )
 
         return hdu
 
@@ -2406,10 +2609,10 @@ class MovingTPF:
             # RAW_CNTS is included to give the files the same structure as the SPOC files
             fits.Column(
                 name="RAW_CNTS",
-                format=tform,
+                format=tform.replace("E", "I"),
                 dim=dims,
                 unit="e-/s",
-                disp="E14.7",
+                disp="I8",
                 array=np.zeros_like(self.corr_flux),
             ),
             fits.Column(
@@ -2519,16 +2722,16 @@ class MovingTPF:
                 disp="E14.7",
                 array=self.timecorr_original,
             ),
-            # Predicted position of target in world coordinates.
+            # Predicted position of target, in world coordinates.
             fits.Column(
-                name="RA",
+                name="RA_PRED",
                 format="E",
                 unit="deg",
                 disp="E14.7",
                 array=[coord.ra.value for coord in self.coords],
             ),
             fits.Column(
-                name="DEC",
+                name="DEC_PRED",
                 format="E",
                 unit="deg",
                 disp="E14.7",
@@ -2551,7 +2754,7 @@ class MovingTPF:
             # 3D pixel quality mask
             fits.Column(
                 name="PIXEL_QUALITY",
-                format=str(self.corr_flux[0].size) + "I",
+                format=tform.replace("E", "I"),
                 dim=dims,
                 disp="B16.16",
                 array=self.pixel_quality,
@@ -2561,7 +2764,7 @@ class MovingTPF:
             # This format is used to be consistent with the aperture HDU from SPOC.
             fits.Column(
                 name="APERTURE",
-                format=str(self.corr_flux[0].size) + "J",
+                format=tform.replace("E", "J"),
                 dim=dims,
                 array=self.aperture_mask.astype("int32") * 2,
             ),
@@ -2648,42 +2851,61 @@ class MovingTPF:
             # Sum of flux inside aperture and err
             fits.Column(
                 name="FLUX",
-                format="D",
+                format="E",
                 unit="e-/s",
-                disp="D14.7",
+                disp="E14.7",
                 array=self.lc["aperture"]["flux"]
                 if "aperture" in self.lc
                 else np.full(len(self.time), np.nan),
             ),
             fits.Column(
                 name="FLUX_ERR",
-                format="D",
+                format="E",
                 unit="e-/s",
-                disp="D14.7",
+                disp="E14.7",
                 array=self.lc["aperture"]["flux_err"]
+                if "aperture" in self.lc
+                else np.full(len(self.time), np.nan),
+            ),
+            # TESS magnitude and error
+            fits.Column(
+                name="TESSMAG",
+                format="E",
+                unit="mag",
+                disp="E14.7",
+                array=self.lc["aperture"]["TESSmag"]
+                if "aperture" in self.lc
+                else np.full(len(self.time), np.nan),
+            ),
+            fits.Column(
+                name="TESSMAG_ERR",
+                format="E",
+                unit="mag",
+                disp="E14.7",
+                array=self.lc["aperture"]["TESSmag_err"]
                 if "aperture" in self.lc
                 else np.full(len(self.time), np.nan),
             ),
             # Sum of BG flux inside aperture and err
             fits.Column(
                 name="FLUX_BKG",
-                format="D",
+                format="E",
                 unit="e-/s",
-                disp="D14.7",
+                disp="E14.7",
                 array=self.lc["aperture"]["bg"]
                 if "aperture" in self.lc
                 else np.full(len(self.time), np.nan),
             ),
             fits.Column(
                 name="FLUX_BKG_ERR",
-                format="D",
+                format="E",
                 unit="e-/s",
-                disp="D14.7",
+                disp="E14.7",
                 array=self.lc["aperture"]["bg_err"]
                 if "aperture" in self.lc
                 else np.full(len(self.time), np.nan),
             ),
-            # Column centroid and err
+            # Measured column centroid and err
             fits.Column(
                 name="MOM_CENTR1",
                 format="E",
@@ -2702,7 +2924,7 @@ class MovingTPF:
                 if "aperture" in self.lc
                 else np.full(len(self.time), np.nan),
             ),
-            # Row centroid and err
+            # Measured row centroid and err
             fits.Column(
                 name="MOM_CENTR2",
                 format="E",
@@ -2718,6 +2940,25 @@ class MovingTPF:
                 unit="pixel",
                 disp="E14.7",
                 array=self.lc["aperture"]["row_cen_err"]
+                if "aperture" in self.lc
+                else np.full(len(self.time), np.nan),
+            ),
+            # Measured position of target, in world coordinates.
+            fits.Column(
+                name="RA",
+                format="E",
+                unit="deg",
+                disp="E14.7",
+                array=self.lc["aperture"]["ra"]
+                if "aperture" in self.lc
+                else np.full(len(self.time), np.nan),
+            ),
+            fits.Column(
+                name="DEC",
+                format="E",
+                unit="deg",
+                disp="E14.7",
+                array=self.lc["aperture"]["dec"]
                 if "aperture" in self.lc
                 else np.full(len(self.time), np.nan),
             ),
@@ -2738,74 +2979,6 @@ class MovingTPF:
                 disp="E14.7",
                 array=self.lc["aperture"]["flux_fraction"]
                 if "aperture" in self.lc
-                else np.full(len(self.time), np.nan),
-            ),
-            # --------------
-            # PSF photometry
-            # Flux and err
-            fits.Column(
-                name="PSF_FLUX",
-                format="D",
-                unit="e-/s",
-                disp="D14.7",
-                array=self.lc["psf"]["flux"]
-                if "psf" in self.lc
-                else np.full(len(self.time), np.nan),
-            ),
-            fits.Column(
-                name="PSF_FLUX_ERR",
-                format="D",
-                unit="e-/s",
-                disp="D14.7",
-                array=self.lc["psf"]["flux_err"]
-                if "psf" in self.lc
-                else np.full(len(self.time), np.nan),
-            ),
-            # Column centroid and err
-            fits.Column(
-                name="PSF_CENTR1",
-                format="E",
-                unit="pixel",
-                disp="E14.7",
-                array=self.lc["psf"]["col_cen"]
-                if "psf" in self.lc
-                else np.full(len(self.time), np.nan),
-            ),
-            fits.Column(
-                name="PSF_CENTR1_ERR",
-                format="E",
-                unit="pixel",
-                disp="E14.7",
-                array=self.lc["psf"]["col_cen_err"]
-                if "psf" in self.lc
-                else np.full(len(self.time), np.nan),
-            ),
-            # Row centroid and err
-            fits.Column(
-                name="PSF_CENTR2",
-                format="E",
-                unit="pixel",
-                disp="E14.7",
-                array=self.lc["psf"]["row_cen"]
-                if "psf" in self.lc
-                else np.full(len(self.time), np.nan),
-            ),
-            fits.Column(
-                name="PSF_CENTR2_ERR",
-                format="E",
-                unit="pixel",
-                disp="E14.7",
-                array=self.lc["psf"]["row_cen_err"]
-                if "psf" in self.lc
-                else np.full(len(self.time), np.nan),
-            ),
-            # Quality from _create_lc_quality()
-            fits.Column(
-                name="PSF_QUALITY",
-                format="I" if "psf" in self.lc else "E",
-                disp="B16.16",
-                array=self.lc["psf"]["quality"]
-                if "psf" in self.lc
                 else np.full(len(self.time), np.nan),
             ),
             # --------------
@@ -2839,16 +3012,16 @@ class MovingTPF:
                 disp="E14.7",
                 array=self.ephemeris[:, 0],
             ),
-            # Predicted position of target in world coordinates.
+            # Predicted position of target, in world coordinates.
             fits.Column(
-                name="RA",
+                name="RA_PRED",
                 format="E",
                 unit="deg",
                 disp="E14.7",
                 array=[coord.ra.value for coord in self.coords],
             ),
             fits.Column(
-                name="DEC",
+                name="DEC_PRED",
                 format="E",
                 unit="deg",
                 disp="E14.7",
@@ -2898,7 +3071,7 @@ class MovingTPF:
         # Create default file name
         if file_name is None:
             file_name = "tess-{0}-s{1:04}-{2}-{3}-shape{4}x{5}".format(
-                str(self.target).replace(" ", ""),
+                str(self.target).replace(" ", "").replace("/", ""),
                 self.sector,
                 self.camera,
                 self.ccd,
@@ -2946,30 +3119,31 @@ class MovingTPF:
         """
         Plot animation of TPF data with optional information overlay.
 
-        Parameters:
+        Parameters
         ----------
         show_aperture : bool
-            If True, the aperture used for photometry is displayed in the animation. Default is True.
+            If True, the aperture used for photometry is displayed in the animation.
         show_ephemeris : bool
-            If True, the predicted position of the target is included in the animation. Default is True.
+            If True, the predicted position of the target is included in the animation.
         step : int or None
             Spacing between frames, i.e. plot every nth frame.  If `None`, the spacing will be determined such
             that about 50 frames are shown. Showing more frames will increase the runtime and, if `save`, the
             file size.
         save : bool
-            If True, save the animation. Default is False.
+            If True, save the animation.
         outdir : str
             If `save`, this is the directory into which the file will be saved.
         file_name : str or None
-            If `save`, this is the filename that will be used. Format must be `.gif`.
+            If `save`, this is the filename that will be used. Format must be '.gif'.
             If no filename is given, a default one will be generated.
         kwargs:
-            Keyword arguments passed to `utils.animate_cube` such as [`interval`, `repeat_delay`, `cnorm`,
-            `vmin`, `vmax`].
+            Keyword arguments passed to `utils.animate_cube` such as `interval`, `repeat_delay`, `cnorm`,
+            `vmin`, `vmax`.
 
-        Returns:
+        Returns
         --------
-        Animation in HTML format. If in notebook environment, this allows animation to be displayed.
+        animation : html
+            If in a notebook environment, the animation is returned in HTML format for display purposes.
         """
 
         # Attribute checks
@@ -3006,7 +3180,7 @@ class MovingTPF:
             if file_name is None:
                 file_name = (
                     "tess-{0}-s{1:04}-{2}-{3}-shape{4}x{5}-moving_tp.gif".format(
-                        str(self.target).replace(" ", ""),
+                        str(self.target).replace(" ", "").replace("/", ""),
                         self.sector,
                         self.camera,
                         self.ccd,
@@ -3043,11 +3217,11 @@ class MovingTPF:
         sector: int,
         camera: Optional[int] = None,
         ccd: Optional[int] = None,
-        time_step: float = 1.0,
+        time_step: float = 0.1,
     ):
         """
-        Initialises MovingTPF from target name and TESS sector. Specifying a camera and
-        CCD will only use the ephemeris from that camera/ccd.
+        Initialises MovingTPF from target name and TESS sector. Uses JPL/Horizons to retrieve ephemeris of target.
+        Specifying a camera and CCD will only use the ephemeris from that camera/ccd.
 
         Parameters
         ----------
@@ -3067,22 +3241,28 @@ class MovingTPF:
         Returns
         -------
         MovingTPF :
-            Initialised MovingTPF with ephemeris from JPL/Horizons.
-            Target ephemeris has columns ['time','sector','camera','ccd','column','row','vmag'].
-                'time' : float with units (JD - 2457000) in UTC at spacecraft.
-                'sector', 'camera', 'ccd' : int
-                'column', 'row' : float. These are one-indexed, where the lower left pixel of the FFI is (1,1).
-                'vmag' : float. Visual magnitude.
+            Initialised MovingTPF with ephemeris and orbital elements from JPL/Horizons.
+            Target ephemeris has columns ['time', 'sector', 'camera', 'ccd', 'column', 'row', 'vmag', 'hmag'].
+
+            - 'time' : float with units (JD - 2457000) in UTC at spacecraft.
+            - 'sector', 'camera', 'ccd' : int
+            - 'column', 'row' : float. These are one-indexed, where the lower left pixel of the FFI is (1,1).
+            - 'vmag' : float. Visual magnitude.
+            - 'hmag' : float. Absolute magntiude.
         """
 
-        # Get target ephemeris using tess-ephem
+        # Get target ephemeris and orbital elements using tess-ephem
         logger.info("Retrieving ephemeris for target {0}.".format(target))
-        df_ephem = ephem(target, sector=sector, time_step=time_step, verbose=True)
+        df_ephem, orbital_elements = ephem(
+            target, sector=sector, time_step=time_step, orbital_elements=True
+        )
 
         # Check whether target was observed in sector.
         if len(df_ephem) == 0:
             raise ValueError(
-                "Target {} was not observed in sector {}.".format(target, sector)
+                "Target {} was not observed in sector {}. Try using the utils function `target_observability()` to find out if/when TESS observed this target.".format(
+                    target, sector
+                )
             )
 
         # Filter ephemeris using camera/ccd.
@@ -3101,7 +3281,24 @@ class MovingTPF:
         # >>>>> Note: tess-ephem returns time in UTC at spacecraft. <<<<<
         df_ephem["time"] = [t.value - 2457000 for t in df_ephem.index.values]
         df_ephem = df_ephem[
-            ["time", "sector", "camera", "ccd", "ra", "dec", "column", "row", "vmag"]
+            [
+                "time",
+                "sector",
+                "camera",
+                "ccd",
+                "ra",
+                "dec",
+                "column",
+                "row",
+                "vmag",
+                "hmag",
+            ]
         ].reset_index(drop=True)
 
-        return MovingTPF(target=target, ephem=df_ephem, time_scale="utc")
+        # Rename keys in orbital_elements dictionary
+        orbital_elements["inclination"] = orbital_elements.pop("orbital_inclination")
+        orbital_elements["perihelion"] = orbital_elements.pop("perihelion_distance")
+
+        return MovingTPF(
+            target=target, ephem=df_ephem, time_scale="utc", metadata=orbital_elements
+        )

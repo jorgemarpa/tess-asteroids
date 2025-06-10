@@ -1,1 +1,79 @@
-site_name: My Docs
+site_name: tess-asteroids
+
+nav:
+  - Home: README.md
+  - API: 
+      - movingtpf.md
+      - utils.md
+  - Tutorials:
+    - Tutorial 1 - Basics: tutorials/tutorial1_basics.ipynb
+    - Tutorial 2 - Measuring rotation period: tutorials/tutorial2_rotation_periods.ipynb
+
+repo_url: https://github.com/altuson/tess-asteroids
+
+copyright: Copyright &copy; 2024 Amy Tuson
+
+theme:
+  name: "material"
+
+  icon:
+    logo: fontawesome/solid/meteor
+    repo: fontawesome/brands/github
+
+  features:
+    - navigation.footer
+    - navigation.tabs
+    - navigation.path
+    - content.code.copy
+    - toc.integrate
+
+  palette:
+    # Palette toggle for light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to dark mode
+      primary: pink
+      accent: indigo
+
+    # Palette toggle for dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-night
+        name: Switch to light mode
+
+plugins:
+  - search
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          paths: [src]
+          options:
+            show_source: false
+            show_root_heading: true
+            show_root_full_path: false
+            show_root_members_full_path: false
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            docstring_style: "numpy"
+            docstring_section_style: list
+            merge_init_into_class: true
+            show_signature_annotations: true
+            separate_signature: true
+            signature_crossrefs: true
+  - mkdocs-jupyter:
+      execute: false
+      include_source: true
+      ignore_h1_titles: true
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences

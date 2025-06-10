@@ -28,3 +28,11 @@ coverage:
 # Perform static type checking using `mypy`
 mypy:
 	$(CMD) mypy $(PYMODULE) $(TESTS)
+
+# Build mkdocs
+build:
+	$(CMD) mkdocs build
+
+# Serve mkdocs
+serve:
+	$(CMD) mkdocs serve
