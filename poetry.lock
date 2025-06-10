@@ -2964,6 +2964,26 @@ dev = ["black", "build", "coverage (>=5.1.0)", "numpy (>=1.17.0)", "pandas (>=0.
 tests = ["numpy (>=1.17.0)", "pandas (>=0.24.0)", "pytest (>=7.0.0)"]
 
 [[package]]
+name = "tess-backml"
+version = "0.3.1"
+description = ""
+optional = false
+python-versions = "<3.13,>=3.9"
+files = [
+    {file = "tess_backml-0.3.1-py3-none-any.whl", hash = "sha256:ff6f58beb40e4c4da0d7deff67e5a096b1a575bb832f2f8b4c77dae5b60aa307"},
+    {file = "tess_backml-0.3.1.tar.gz", hash = "sha256:8100942a441dc0dd5a49eac878f6b64a9fa7494d39f7604212bbf0e67c36fb49"},
+]
+
+[package.dependencies]
+astropy = ">=5.3.4,<7.0"
+matplotlib = ">=3.9.0,<4.0.0"
+numpy = ">1.26,<3.0"
+pandas = ">=2.2.3,<3.0.0"
+scipy = ">=1.13.0,<2.0.0"
+tesscube = ">=1.2.1,<2.0.0"
+tqdm = ">=4.67.1,<5.0.0"
+
+[[package]]
 name = "tess-ephem"
 version = "0.5.1"
 description = "Where are Solar System objects located in TESS FFI data?"
@@ -3458,4 +3478,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.9, <3.13"
-content-hash = "c2f703cef5d7bfe52e023b8fe5d0de4313b1640caea83eb1eae6d23c21133956"
+content-hash = "0fdf41f7104f8738b1e88700943f10c559a00e0cd6464ed0ab7aaa0aba99e557"
