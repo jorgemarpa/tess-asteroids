@@ -23,6 +23,7 @@ from tesscube.fits import get_wcs_header_by_extension
 from tesscube.query import async_get_primary_hdu
 from tesscube.utils import _sync_call, convert_coordinates_to_runs
 from tqdm import tqdm
+from tess_backml import ScatterLightCorrector
 
 from . import TESSmag_zero_point, __version__, logger, straps
 from .utils import (
@@ -734,6 +735,7 @@ class MovingTPF:
             Method used to compute scattered light model. One of [`all_time`, `per_time`].
             If `all_time`, the PCA components are computed for all times at once.
             If `per_time`, the PCA components are computed in a time window around each frame.
+            If `sl_cube`, it will use `tess-backml` to interpolate the SL model from a cube of scattered light.
         ncomponents : int
             Number of PCA components.
         niter : int
@@ -907,6 +909,51 @@ class MovingTPF:
                 # >>>>> Add error on SL model <<<<<
                 sl_model[t] = U[t_window == t].dot(np.diag(s)).dot(V_model)
                 sl_model_err[t] = np.nan
+        elif method == "sl_cube":
+            # initialize the scattered light corrector
+            # this file is hardcoded for now, needs to be changed later
+            fname = "/Users/jimartin/Work/TESS/tess-backml/notebooks/data/ffi_cubes_bin8_sector002_1-1_light.fits"
+            slcorr = ScatterLightCorrector(
+                sector=self.sector, camera=self.camera, ccd=self.ccd, fname=fname
+            )
+            # find the pixel coordinates start and end for evaluation
+            rowi, rowf = self.corner[:, 0].min(), self.corner[:, 0].max()
+            coli, colf = self.corner[:, 1].min(), self.corner[:, 1].max()
+            # pixel array for evaluation
+            row_eval = np.arange(rowi, np.minimum(rowf + self.shape[0], slcorr.rmax))
+            col_eval = np.arange(coli, np.minimum(colf + self.shape[1], slcorr.cmax))
+            # time array for evaluation
+            # ScatterLightCorrector uses tdb times from the FFI header
+            time_eval = self.time_original + slcorr.btjd0
+            # evaluate model, the return arrays are 3D with shape (ntimes, nrows, ncols)
+            sl_flux, sl_fluxerr = slcorr.evaluate_scatterlight_model(
+                row_eval=row_eval, col_eval=col_eval, times=time_eval
+            )
+            # we need to reshape to all_flux shape
+            # Create empty arrays for scattered light model and error.
+            sl_model = np.empty_like(self.all_flux) * np.nan
+            sl_model_err = np.empty_like(self.all_flux) * np.nan
+            # loop through times to fill the model arrays
+            for t in range(len(sl_flux)):
+                # find the row/col indicrs of the corner in the evaluation arrays
+                rindexi = np.where(row_eval == self.corner[t, 0])[0][0]
+                cindexi = np.where(col_eval == self.corner[t, 1])[0][0]
+
+                # extractt the cutout for the current time
+                aux_flux = sl_flux[t, rindexi:rindexi + self.shape[0], cindexi:cindexi + self.shape[1]]
+                aux_fluxerr = sl_fluxerr[t, rindexi:rindexi + self.shape[0], cindexi:cindexi + self.shape[1]]
+
+                # account for out of CCD bound pixels which are nans
+                mask_cutout = self.target_mask[t]
+                mask_finite = np.isfinite(self.all_flux[t, mask_cutout])
+                # Create a combined boolean mask for direct assignment
+                combined_mask = np.zeros_like(self.all_flux[t], dtype=bool)
+                combined_mask[mask_cutout] = mask_finite
+                
+                # Use the combined mask in a single indexing operation
+                sl_model[t, combined_mask] = aux_flux.ravel()
+                sl_model_err[t, combined_mask] = aux_fluxerr.ravel()
+
 
         else:
             raise ValueError(
