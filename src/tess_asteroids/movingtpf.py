@@ -713,6 +713,7 @@ class MovingTPF:
         window_length: float = 1,
         diagnostic_plot: bool = False,
         progress_bar: bool = True,
+        sl_cube_file: Optional[str] = None,
         **kwargs,
     ):
         """
@@ -749,6 +750,8 @@ class MovingTPF:
             If True, shows two diagnostic plots to check the scattered light model.
         progress_bar : bool
             If True and method is `per_time`, this displays a progress bar for model computation.
+        sl_cube_file : str, optional
+            If provided, this is the path to a FITS file containing a cube of scattered light.
         kwargs : dict
             Keywords arguments passed to `self._create_pca_source_mask`, e.g `target_threshold`, `star_flux_threshold`.
 
@@ -912,9 +915,8 @@ class MovingTPF:
         elif method == "sl_cube":
             # initialize the scattered light corrector
             # this file is hardcoded for now, needs to be changed later
-            fname = "/Users/jimartin/Work/TESS/tess-backml/notebooks/data/ffi_cubes_bin8_sector002_1-1_light.fits"
             slcorr = ScatterLightCorrector(
-                sector=self.sector, camera=self.camera, ccd=self.ccd, fname=fname
+                sector=self.sector, camera=self.camera, ccd=self.ccd, fname=sl_cube_file
             )
             # find the pixel coordinates start and end for evaluation
             rowi, rowf = self.corner[:, 0].min(), self.corner[:, 0].max()
@@ -929,7 +931,7 @@ class MovingTPF:
             sl_flux, sl_fluxerr = slcorr.evaluate_scatterlight_model(
                 row_eval=row_eval, col_eval=col_eval, times=time_eval
             )
-            # we need to reshape to all_flux shape
+            # we need to reshape sl_flux to match all_flux shape
             # Create empty arrays for scattered light model and error.
             sl_model = np.empty_like(self.all_flux) * np.nan
             sl_model_err = np.empty_like(self.all_flux) * np.nan
