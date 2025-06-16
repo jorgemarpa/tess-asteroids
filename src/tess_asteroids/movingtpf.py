@@ -928,34 +928,34 @@ class MovingTPF:
             # ScatterLightCorrector uses tdb times from the FFI header
             time_eval = self.time_original + slcorr.btjd0
             # evaluate model, the return arrays are 3D with shape (ntimes, nrows, ncols)
+            # this is overkill, as it evaluates a rectangular pixel grid that contains
+            # the moving target.
+            # NEED TO CHECK HOW TO MAKE IT MORE EFFICIENT
             sl_flux, sl_fluxerr = slcorr.evaluate_scatterlight_model(
                 row_eval=row_eval, col_eval=col_eval, times=time_eval
             )
             # we need to reshape sl_flux to match all_flux shape
+            # first we find the pixel mask that points to the pixels in all_flux
+            sl_model_row, sl_model_col = np.meshgrid(row_eval, col_eval)
+            sl_model_pixels = [
+                f"{r}_{c}" for r, c in zip(sl_model_row.ravel(), sl_model_col.ravel())
+            ]
+            target_pixels = [f"{r}_{c}" for r, c in self.pixels]
+            pixels_in_allflux_mask = np.isin(sl_model_pixels, target_pixels)
+
             # Create empty arrays for scattered light model and error.
             sl_model = np.empty_like(self.all_flux) * np.nan
             sl_model_err = np.empty_like(self.all_flux) * np.nan
-            # loop through times to fill the model arrays
-            for t in range(len(sl_flux)):
-                # find the row/col indicrs of the corner in the evaluation arrays
-                rindexi = np.where(row_eval == self.corner[t, 0])[0][0]
-                cindexi = np.where(col_eval == self.corner[t, 1])[0][0]
-
-                # extractt the cutout for the current time
-                aux_flux = sl_flux[t, rindexi:rindexi + self.shape[0], cindexi:cindexi + self.shape[1]]
-                aux_fluxerr = sl_fluxerr[t, rindexi:rindexi + self.shape[0], cindexi:cindexi + self.shape[1]]
-
-                # account for out of CCD bound pixels which are nans
-                mask_cutout = self.target_mask[t]
-                mask_finite = np.isfinite(self.all_flux[t, mask_cutout])
-                # Create a combined boolean mask for direct assignment
-                combined_mask = np.zeros_like(self.all_flux[t], dtype=bool)
-                combined_mask[mask_cutout] = mask_finite
-                
-                # Use the combined mask in a single indexing operation
-                sl_model[t, combined_mask] = aux_flux.ravel()
-                sl_model_err[t, combined_mask] = aux_fluxerr.ravel()
-
+            # mask for finite values in all_flux
+            mask_finite = np.isfinite(self.all_flux)
+            # asign the values to the sl_model and errors with the right shape, 
+            # elsewhere is nan
+            sl_model[mask_finite] = sl_flux.reshape((len(sl_flux), -1))[
+                :, pixels_in_allflux_mask
+            ].ravel()
+            sl_model_err[mask_finite] = sl_fluxerr.reshape((len(sl_fluxerr), -1))[
+                :, pixels_in_allflux_mask
+            ].ravel()
 
         else:
             raise ValueError(
