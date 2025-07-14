@@ -2519,7 +2519,7 @@ class MovingTPF:
                 ),
                 3,
             ),
-            comment='["/h] average RA rate',
+            comment='[arcsec/h] average RA rate',
             after="ORBINC",
         )
         hdu.header.set(
@@ -2532,7 +2532,7 @@ class MovingTPF:
                 ),
                 3,
             ),
-            comment='["/h] average Dec rate',
+            comment='[arcsec/h] average Dec rate',
             after="RARATE",
         )
         # Pixel speed is computed from input ephemeris so TPF and LCF can use consistent values.
@@ -2611,7 +2611,7 @@ class MovingTPF:
                 name="RAW_CNTS",
                 format=tform.replace("E", "I"),
                 dim=dims,
-                unit="e-/s",
+                unit="ADU",
                 disp="I8",
                 array=np.zeros_like(self.corr_flux),
             ),
