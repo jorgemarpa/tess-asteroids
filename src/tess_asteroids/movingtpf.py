@@ -423,7 +423,7 @@ class MovingTPF:
         # `self.coords` does not recover these original values because the
         # ephemeris has since been interpolated.
         # Note: pixel_to_world() assumes zero-indexing so subtract one from (row,col).
-        self.wcs = tesswcs.WCS.from_archive(
+        self.wcs = tesswcs.WCS.from_sector(
             sector=self.sector, camera=self.camera, ccd=self.ccd
         )
         self.coords = np.asarray(
