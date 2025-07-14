@@ -423,7 +423,7 @@ class MovingTPF:
         # `self.coords` does not recover these original values because the
         # ephemeris has since been interpolated.
         # Note: pixel_to_world() assumes zero-indexing so subtract one from (row,col).
-        self.wcs = tesswcs.WCS.from_archive(
+        self.wcs = tesswcs.WCS.from_sector(
             sector=self.sector, camera=self.camera, ccd=self.ccd
         )
         self.coords = np.asarray(
@@ -1508,9 +1508,13 @@ class MovingTPF:
                 np.sqrt(np.sum(np.diff(self.ephemeris, axis=0) ** 2, axis=1))
             )
             # Pixel resolution at which to evaluate PRF model
-            resolution = 0.1 if track_length > 0.1 else track_length
+            resolution = 0.1
             # Time resolution at which to evaluate PRF model
             time_step = (cadence / track_length) * resolution
+            # If time_step is greater than observing cadence, set time_step a small fraction less
+            # than observing cadence. time_step must be less than cadence for inteprolation.
+            if time_step >= cadence:
+                time_step = 0.99 * cadence
             logger.info(
                 "_create_target_prf_model() calculated a time_step of {0} minutes.".format(
                     time_step
@@ -2519,7 +2523,7 @@ class MovingTPF:
                 ),
                 3,
             ),
-            comment='["/h] average RA rate',
+            comment="[arcsec/h] average RA rate",
             after="ORBINC",
         )
         hdu.header.set(
@@ -2532,7 +2536,7 @@ class MovingTPF:
                 ),
                 3,
             ),
-            comment='["/h] average Dec rate',
+            comment="[arcsec/h] average Dec rate",
             after="RARATE",
         )
         # Pixel speed is computed from input ephemeris so TPF and LCF can use consistent values.
@@ -2611,7 +2615,7 @@ class MovingTPF:
                 name="RAW_CNTS",
                 format=tform.replace("E", "I"),
                 dim=dims,
-                unit="e-/s",
+                unit="ADU",
                 disp="I8",
                 array=np.zeros_like(self.corr_flux),
             ),
