@@ -3248,7 +3248,7 @@ class MovingTPF:
             Initialised MovingTPF with ephemeris and orbital elements from JPL/Horizons.
             Target ephemeris has columns ['time', 'sector', 'camera', 'ccd', 'column', 'row', 'vmag', 'hmag'].
 
-            - 'time' : float with units (JD - 2457000) in UTC at spacecraft.
+            - 'time' : float with units (JD - 2457000) in TDB at spacecraft.
             - 'sector', 'camera', 'ccd' : int
             - 'column', 'row' : float. These are one-indexed, where the lower left pixel of the FFI is (1,1).
             - 'vmag' : float. Visual magnitude.
@@ -3281,9 +3281,10 @@ class MovingTPF:
                     )
                 )
 
-        # Add column for time in units (JD - 2457000)
-        # >>>>> Note: tess-ephem returns time in UTC at spacecraft. <<<<<
+        # Add column for time in format (JD - 2457000) and scale TDB.
+        # Note: tess-ephem returns time in UTC at spacecraft, so we convert to TDB scale.
         df_ephem["time"] = [t.value - 2457000 for t in df_ephem.index.values]
+        df_ephem["time"] += df_ephem["tdb-ut"]/24/3600
         df_ephem = df_ephem[
             [
                 "time",
