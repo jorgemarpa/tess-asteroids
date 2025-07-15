@@ -3,6 +3,7 @@
 [![ruff](https://github.com/altuson/tess-asteroids/actions/workflows/ruff.yml/badge.svg)](https://github.com/altuson/tess-asteroids/actions/workflows/ruff.yml)
 [![PyPI](https://img.shields.io/pypi/v/tess-asteroids.svg)](https://pypi.python.org/pypi/tess-asteroids)
 [![Generic badge](https://img.shields.io/badge/documentation-live-blue.svg)](https://altuson.github.io/tess-asteroids/)
+[![DOI](https://zenodo.org/badge/848357424.svg)](https://doi.org/10.5281/zenodo.15882329)
 
 # tess-asteroids
 
@@ -202,3 +203,7 @@ The LCF has two HDUs:
 
 - "PRIMARY" - a primary HDU containing only a header.
 - "LIGHTCURVE" - a table HDU with columns including "TIME" (timestamps in BTJD), "FLUX"/"FLUX_ERR" (flux and error from aperture photometry) and "TESSMAG"/"TESSMAG_ERR" (measured TESS magnitude and error).
+
+## Citation
+
+If you make use of `tess-asteroids` in your work, please cite our software using the version-specific DOI from [Zenodo](https://zenodo.org/records/15882329). You can generate a BibTex citation using Zenodo.
