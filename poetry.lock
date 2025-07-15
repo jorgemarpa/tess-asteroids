@@ -3886,13 +3886,13 @@ tests = ["cython", "littleutils", "pygments", "pytest", "typeguard"]
 
 [[package]]
 name = "tess-ephem"
-version = "0.6.1"
+version = "0.6.2"
 description = "Where are Solar System objects located in TESS FFI data?"
 optional = false
 python-versions = "<4.0,>=3.9"
 files = [
-    {file = "tess_ephem-0.6.1-py3-none-any.whl", hash = "sha256:d1751427167a13157f92834bade04b8eb92b29ad80f068e1866b1a20a93e5a30"},
-    {file = "tess_ephem-0.6.1.tar.gz", hash = "sha256:a6e51fbd9e4d6fa9514c29784870339e1f182bb87ceac0353d918a2a99b10ae9"},
+    {file = "tess_ephem-0.6.2-py3-none-any.whl", hash = "sha256:9cdbfc8d3bd8c07048e45c16f2c538dd7bc961e9ed6c791b1475453c4a7e15f0"},
+    {file = "tess_ephem-0.6.2.tar.gz", hash = "sha256:e434796a579ab52a06763d2cb83458de01e90344302c35c715b81ed82215d432"},
 ]
 
 [package.dependencies]
@@ -4425,4 +4425,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.9, <3.13"
-content-hash = "a54f26652498844903c1f11f17fa877e38f5cb104c0e08d7bfa704c8ec564fb9"
+content-hash = "14e1f19e440d686ec81cacb8accc79cfa820d8a2e9a69bb50ae70a42058510e3"
