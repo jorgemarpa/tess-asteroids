@@ -3927,13 +3927,13 @@ rich = ">=13.7.0,<14.0.0"
 
 [[package]]
 name = "tesswcs"
-version = "1.6.2"
+version = "1.7.0"
 description = ""
 optional = false
 python-versions = "<4.0,>=3.9"
 files = [
-    {file = "tesswcs-1.6.2-py3-none-any.whl", hash = "sha256:831004045d73f267231338ecc7495ba1973c805f2a2af79da7f2581f934c48ca"},
-    {file = "tesswcs-1.6.2.tar.gz", hash = "sha256:a713ee1b32d9f535f50eb711a4253e5befcb7b3181526c77587c50b24dff3710"},
+    {file = "tesswcs-1.7.0-py3-none-any.whl", hash = "sha256:7bddf16818f1342378b85f559e700ec037500f5ea3ddf923b50d2987d85a17e5"},
+    {file = "tesswcs-1.7.0.tar.gz", hash = "sha256:b330ada611e1c2c9d8b3af6ae89da0cc2e2922bad9a38fdf1beb9c96ea1d29ea"},
 ]
 
 [package.dependencies]
@@ -4425,4 +4425,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.9, <3.13"
-content-hash = "14e1f19e440d686ec81cacb8accc79cfa820d8a2e9a69bb50ae70a42058510e3"
+content-hash = "8810c76968e93ff17e5f93e26280c15ee287fbc894e2af91cc28b9eb54a33d69"
