@@ -425,10 +425,10 @@ class MovingTPF:
             ]
         )
 
-        # Calculate UTC to TDB correction using position of object.
+        # Calculate barycentric correction using position of object.
         # If SPICE kernels are missing, no correction will be computed.
         try:
-            time_utc = self.time_original - self.timecorr_original
+            time_sc = self.time_original - self.timecorr_original
             # Catch warnings.
             with warnings.catch_warnings(record=True) as recorded_warnings:
                 tess = TESSSpacecraft()
@@ -442,10 +442,10 @@ class MovingTPF:
                     logger.warning("Warning from TESSSpacecraft(): {0}".format(w))
 
             timecorr = []
-            for t in range(len(time_utc)):
+            for t in range(len(time_sc)):
                 timecorr.append(
                     tess.get_barycentric_time_correction(
-                        time=Time(time_utc[t] + 2457000, scale="utc", format="jd"),
+                        time=Time(time_sc[t] + 2457000, scale="tdb", format="jd"),
                         ra=self.coords[t].ra.value,
                         dec=self.coords[t].dec.value,
                     )[0]
@@ -454,10 +454,10 @@ class MovingTPF:
                     / 24
                 )
             self.timecorr = np.asarray(timecorr)
-            self.time = time_utc + self.timecorr
+            self.time = time_sc + self.timecorr
         except BadEphemeris:
             logger.warning(
-                "UTC to TDB correction was not calculated due to missing SPICE kernels."
+                "Barycentric correction was not calculated due to missing SPICE kernels."
             )
             self.timecorr = self.timecorr_original
             self.time = self.time_original
@@ -2590,7 +2590,7 @@ class MovingTPF:
                 disp="D14.7",
                 array=self.time,
             ),
-            # Correction used to convert UTC at spacecraft to TDB at barycenter.
+            # Barycentric time correction.
             fits.Column(
                 name="TIMECORR",
                 format="E",
@@ -2707,7 +2707,7 @@ class MovingTPF:
                 disp="D14.7",
                 array=self.time_original,
             ),
-            # Original correction used to convert UTC at spacecraft to TDB at barycenter.
+            # Original barycentric time correction.
             # This was calculated for the center of the FFI, not the target position.
             fits.Column(
                 name="ORIGINAL_TIMECORR",
@@ -2805,7 +2805,7 @@ class MovingTPF:
                 disp="D14.7",
                 array=self.time,
             ),
-            # Correction used to convert UTC at spacecraft to TDB at barycenter.
+            # Barycentric time correction.
             fits.Column(
                 name="TIMECORR",
                 format="E",
@@ -2822,7 +2822,7 @@ class MovingTPF:
                 disp="D14.7",
                 array=self.time_original,
             ),
-            # Original correction used to convert UTC at spacecraft to TDB at barycenter.
+            # Original barycentric time correction.
             # This was calculated for the center of the FFI, not the target position.
             fits.Column(
                 name="ORIGINAL_TIMECORR",
