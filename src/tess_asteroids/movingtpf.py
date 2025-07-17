@@ -49,18 +49,16 @@ class MovingTPF:
     ephem : DataFrame
         Target ephemeris with columns ['time', 'sector', 'camera', 'ccd', 'column', 'row']. Optional columns: ['vmag', 'hmag'].
 
-        - 'time' : float in format (JD - 2457000). See also `time_scale` below.
+        - 'time' : float in format (JD - 2457000) in TDB. See also `barycentric` below.
         - 'sector', 'camera', 'ccd' : int
         - 'column', 'row' : float. These must be one-indexed, where the lower left pixel of the FFI is (1,1).
         - 'vmag' : float, optional. Visual magnitude.
         - 'hmag' : float, optional. Absolute magnitude.
-    time_scale : str
-        Time scale of input `ephem['time']`. One of ['tdb', 'utc']. Default is 'tdb'.
+    barycentric : bool, default=True
 
-        - If 'tdb', the input `ephem['time']` must be in TDB measured at the solar system barycenter from the TESS FFI header.
-            This is the scale used for the 'TSTART'/'TSTOP' keywords in SPOC FFI headers and the 'TIME' column in SPOC
-            TPFs and LCFs.
-        - If 'utc', the input `ephem['time']` must be in UTC measured at the spacecraft. This can be recovered from the SPOC data
+        - If True, the input `ephem['time']` must be in TDB measured at the solar system barycenter. This is the case for the 
+            'TSTART'/'TSTOP' keywords in SPOC FFI headers and the 'TIME' column in SPOC TPFs and LCFs.
+        - If False, the input `ephem['time']` must be in TDB measured at the spacecraft. This can be recovered from the SPOC data
             products: for FFIs subtract header keyword 'BARYCORR' from 'TSTART'/'TSTOP' and for TPFs/LCFs subtract the
             'TIMECORR' column from the 'TIME' column.
     metadata : dict
@@ -75,12 +73,12 @@ class MovingTPF:
         self,
         target: str,
         ephem: pd.DataFrame,
-        time_scale: str = "tdb",
+        barycentric: bool = True,
         metadata: dict = {},
     ):
         self.target = target
         self.ephem = ephem
-        self.time_scale = time_scale
+        self.barycentric = barycentric
 
         # Check self.ephem has more than one row
         if len(self.ephem) < 2:
@@ -89,14 +87,6 @@ class MovingTPF:
         # Check self.ephem['time'] has correct units
         if min(self.ephem["time"]) >= 2457000:
             raise ValueError("ephem['time'] must have units (JD - 2457000).")
-
-        # Check self.time_scale has expected value
-        if self.time_scale not in ["tdb", "utc"]:
-            raise ValueError(
-                "`time_scale` must be either `utc` or `tdb`. Not `{0}`".format(
-                    self.time_scale
-                )
-            )
 
         # Check self.ephem['sector'] has one unique value
         if self.ephem["sector"].nunique() == 1:
@@ -263,14 +253,14 @@ class MovingTPF:
         self.shape = shape
 
         # Use interpolation to get target (row,column) at cube time.
-        # If input ephem uses UTC time scale, convert cube time to UTC for interpolation.
+        # If input ephem["time"] is in TDB at spacecraft, convert cube time for interpolation.
         column_interp = CubicSpline(
             self.ephem["time"].astype(float),
             self.ephem["column"].astype(float),
             extrapolate=False,
         )(
             self.cube.time
-            if self.time_scale == "tdb"
+            if self.barycentric
             else self.cube.time - self.cube.last_hdu.data["BARYCORR"]
         )
         row_interp = CubicSpline(
@@ -279,7 +269,7 @@ class MovingTPF:
             extrapolate=False,
         )(
             self.cube.time
-            if self.time_scale == "tdb"
+            if self.barycentric
             else self.cube.time - self.cube.last_hdu.data["BARYCORR"]
         )
 
@@ -1485,8 +1475,8 @@ class MovingTPF:
         if not hasattr(self, "all_flux"):
             raise AttributeError("Must run `get_data()` before creating PRF model.")
 
-        # If input ephemeris is in UTC, convert tstart and tstop to UTC.
-        if self.time_scale == "tdb":
+        # If input ephem["time"] is in TDB at spacecraft, convert tstart and tstop to match.
+        if self.barycentric:
             tstart = self.tstart
             tstop = self.tstop
         else:
@@ -2437,13 +2427,13 @@ class MovingTPF:
                             self.ephem["time"]
                             >= (
                                 self.time_original[0]
-                                if self.time_scale == "tdb"
+                                if self.barycentric
                                 else self.time_original[0] - self.timecorr_original[0]
                             ),
                             self.ephem["time"]
                             <= (
                                 self.time_original[-1]
-                                if self.time_scale == "tdb"
+                                if self.barycentric
                                 else self.time_original[-1] - self.timecorr_original[-1]
                             ),
                         ),
@@ -2466,13 +2456,13 @@ class MovingTPF:
                             self.ephem["time"]
                             >= (
                                 self.time_original[0]
-                                if self.time_scale == "tdb"
+                                if self.barycentric
                                 else self.time_original[0] - self.timecorr_original[0]
                             ),
                             self.ephem["time"]
                             <= (
                                 self.time_original[-1]
-                                if self.time_scale == "tdb"
+                                if self.barycentric
                                 else self.time_original[-1] - self.timecorr_original[-1]
                             ),
                         ),
@@ -3305,5 +3295,5 @@ class MovingTPF:
         orbital_elements["perihelion"] = orbital_elements.pop("perihelion_distance")
 
         return MovingTPF(
-            target=target, ephem=df_ephem, time_scale="utc", metadata=orbital_elements
+            target=target, ephem=df_ephem, barycentric=False, metadata=orbital_elements
         )
