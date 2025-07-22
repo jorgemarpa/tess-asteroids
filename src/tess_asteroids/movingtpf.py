@@ -56,7 +56,7 @@ class MovingTPF:
         - 'hmag' : float, optional. Absolute magnitude.
     barycentric : bool, default=True
 
-        - If True, the input `ephem['time']` must be in TDB measured at the solar system barycenter. This is the case for the 
+        - If True, the input `ephem['time']` must be in TDB measured at the solar system barycenter. This is the case for the
             'TSTART'/'TSTOP' keywords in SPOC FFI headers and the 'TIME' column in SPOC TPFs and LCFs.
         - If False, the input `ephem['time']` must be in TDB measured at the spacecraft. This can be recovered from the SPOC data
             products: for FFIs subtract header keyword 'BARYCORR' from 'TSTART'/'TSTOP' and for TPFs/LCFs subtract the
@@ -1517,6 +1517,7 @@ class MovingTPF:
             tstop[-1],
             int(np.ceil((tstop[-1] - tstart[0]) * 24 * 60 / time_step)),
         )
+        print(high_res_time)
         column_interp = CubicSpline(
             self.ephem["time"].astype(float),
             self.ephem["column"].astype(float),
@@ -3274,7 +3275,7 @@ class MovingTPF:
         # Add column for time in format (JD - 2457000) and scale TDB.
         # Note: tess-ephem returns time in UTC at spacecraft, so we convert to TDB scale.
         df_ephem["time"] = [t.value - 2457000 for t in df_ephem.index.values]
-        df_ephem["time"] += df_ephem["tdb-ut"]/24/3600
+        df_ephem["time"] += df_ephem["tdb-ut"] / 24 / 3600
         df_ephem = df_ephem[
             [
                 "time",

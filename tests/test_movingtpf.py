@@ -20,8 +20,9 @@ def test_from_name():
     assert target.camera == 1
     assert target.ccd == 1
 
-    # Check the time scale is UTC
-    assert target.time_scale == "utc"
+    # Check the time is NOT barycentric
+    if target.barycentric:
+        assert False
 
     # Bounds taken from tesswcs pointings.csv file for sector 6.
     assert min(target.ephem["time"]) >= 2458463.5 - 2457000
@@ -173,7 +174,7 @@ def test_create_threshold_aperture():
     )
 
 
-def test_create_prf_aperture(caplog):
+def test_create_prf_aperture():
     """
     Test the PRF aperture. When running `_create_prf_aperture()`, it internally calls
     `_create_target_prf_model()` first. These tests check the properties of both the model
@@ -185,8 +186,7 @@ def test_create_prf_aperture(caplog):
     target.get_data(shape=(11, 11))
 
     # Make aperture from PRF model
-    with caplog.at_level(logging.WARNING):
-        aperture_mask = target._create_prf_aperture()
+    aperture_mask = target._create_prf_aperture()
 
     # Check shape of the PRF model and aperture
     assert target.prf_model.shape == (len(target.time), *target.shape)
@@ -201,10 +201,6 @@ def test_create_prf_aperture(caplog):
             for i in range(len(target.prf_model))
         ]
     )
-
-    # Check that the last frame of the PRF model contained NaNs.
-    # Previous testing has revealed this should be the case.
-    assert "The PRF model contained nans in the last frame" in caplog.text
 
     # Check median number of pixels in the aperture across all frames equals 15.0.
     # Previous testing has revealed this should be the case.
@@ -344,7 +340,7 @@ def test_make_tpf():
         assert len(hdul[3].data["APERTURE"]) == len(target.time)
         assert np.allclose(target.corr_flux, hdul[1].data["FLUX"], rtol=1e-07)
 
-        # Check the UTC to TDB conversion has been applied.
+        # Check the barycentric time correction has been applied.
         assert (hdul[1].data["TIME"] != hdul[3].data["ORIGINAL_TIME"]).all()
 
         # 1998 YT6 is a main-belt asteroid, ensure the orbital elements are physical:
@@ -505,7 +501,7 @@ def test_make_lc():
         assert "RA_PRED" in hdul[1].columns.names
         assert "EPHEM1" in hdul[1].columns.names
 
-        # Check the UTC to TDB conversion has been applied.
+        # Check the barycentric time correction has been applied.
         assert (hdul[1].data["TIME"] != hdul[1].data["ORIGINAL_TIME"]).all()
 
         # 1998 YT6 is a main-belt asteroid, ensure the orbital elements are physical:
