@@ -1517,7 +1517,6 @@ class MovingTPF:
             tstop[-1],
             int(np.ceil((tstop[-1] - tstart[0]) * 24 * 60 / time_step)),
         )
-        print(high_res_time)
         column_interp = CubicSpline(
             self.ephem["time"].astype(float),
             self.ephem["column"].astype(float),
