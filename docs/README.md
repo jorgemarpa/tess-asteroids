@@ -104,7 +104,7 @@ ephem = pd.DataFrame({
         })
 
 # Initialise MovingTPF
-target = MovingTPF("example", ephem, time_scale = "tdb")
+target = MovingTPF("example", ephem, barycentric=False)
 
 # Make TPF, but do not save to file
 target.make_tpf()
@@ -112,7 +112,7 @@ target.make_tpf()
 
 A few things to note about the format of the ephemeris:
 
-- `time` must have units JD - 2457000. See explanation of `time_scale` [below](https://github.com/altuson/tess-asteroids?tab=readme-ov-file#time-scales).
+- `time` must have format (JD - 2457000) in the TDB scale. See explanation of the `barycentric` parameter [below](https://github.com/altuson/tess-asteroids?tab=readme-ov-file#time).
 - `sector`, `camera`, `ccd` must each have one unique value.
 - `column`, `row` must be one-indexed, where the lower left pixel of the FFI has value (1,1).
 
@@ -175,20 +175,20 @@ tpf.plot(aperture_mask=tpf.hdu[3].data["APERTURE"][200], frame=200)
 lc.plot()
 ```
 
-## Time scales
+## Time
 
-When you initialise `MovingTPF()`, the `time_scale` parameter defines the scale of the `time` column in the input ephemeris. It can have one of two values:
+When you initialise `MovingTPF()`, the parameter `barycentric` is defined as follows:
 
-- `tdb` (default): this means the input ephemeris `time` is in TDB measured at the solar system barycenter. This is the scale used for the TSTART/TSTOP keywords in SPOC FFI headers and the TIME column in SPOC TPFs and LCFs. It is the standard time scale for TESS data products.
-- `utc`: this means the input ephemeris `time` is in UTC measured at the spacecraft. This can be recovered from the SPOC data products: for FFIs subtract header keyword BARYCORR from TSTART/TSTOP and for TPFs/LCFs subtract the TIMECORR column from the TIME column.
+- `True` (default): this means the input `time` must be in TDB measured **at the solar system barycenter**. This is the case for the TSTART/TSTOP keywords in SPOC FFI headers and the TIME column in SPOC TPFs and LCFs.
+- `False`: this means the input `time` must be in TDB measured **at the spacecraft**. This can be recovered from the SPOC data products: for FFIs subtract the header keyword BARYCORR from TSTART/TSTOP and for TPFs/LCFs subtract the TIMECORR column from the TIME column.
 
-When `MovingTPF()` is initialised `from_name()`, the `time_scale` is handled internally. As a user, you will only need to consider the `time_scale` if you are inputting a custom ephemeris. 
+When `MovingTPF()` is initialised `from_name()`, the `barycentric` parameter is handled internally. As a user, you will only need to consider the `barycentric` parameter if you are inputting a custom ephemeris. 
 
 For more information about time scales, see the `astropy` [documentation](https://docs.astropy.org/en/stable/time/index.html#time-scale).
 
 ### Barycentric time correction
 
-The barycentric time correction derived by SPOC (BARYCORR) is used to transform the time in UTC at the spacecraft into the time in TDB at the solar system barycenter. This correction is calculated at the center of each FFI (i.e. one correction for each CCD) but, in reality, the correction depends upon RA and Dec. Therefore, within `tess-asteroids` we use `lkspacecraft` to re-derive the barycentric time correction based upon the position of the moving target. In the output TPFs and LCFs, you will see columns called ORIGINAL_TIME (FFI timestamp in TDB at barycenter, as derived by SPOC), ORIGINAL_TIMECORR (correction to transform UTC at spacecraft into TDB at barycenter, as derived by SPOC), TIME (re-derived time in TDB at barycenter) and TIMECORR (re-derived time correction).
+The barycentric time correction derived by SPOC (BARYCORR) is used to transform the time at the spacecraft into the time at the solar system barycenter. This correction is calculated at the center of each FFI (i.e. one correction for each CCD) but, in reality, the correction depends upon RA and Dec. Therefore, within `tess-asteroids` we use `lkspacecraft` to re-derive the barycentric time correction based upon the position of the moving target. In the output TPFs and LCFs, you will see columns called ORIGINAL_TIME (FFI timestamp in TDB at barycenter, as derived by SPOC), ORIGINAL_TIMECORR (correction to transform time at spacecraft into time at barycenter, as derived by SPOC), TIME (re-derived time in TDB at barycenter) and TIMECORR (re-derived time correction).
 
 ## Understanding the TPF and LCF
 

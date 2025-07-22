@@ -3886,13 +3886,13 @@ tests = ["cython", "littleutils", "pygments", "pytest", "typeguard"]
 
 [[package]]
 name = "tess-ephem"
-version = "0.6.1"
+version = "0.6.3"
 description = "Where are Solar System objects located in TESS FFI data?"
 optional = false
 python-versions = "<4.0,>=3.9"
 files = [
-    {file = "tess_ephem-0.6.1-py3-none-any.whl", hash = "sha256:d1751427167a13157f92834bade04b8eb92b29ad80f068e1866b1a20a93e5a30"},
-    {file = "tess_ephem-0.6.1.tar.gz", hash = "sha256:a6e51fbd9e4d6fa9514c29784870339e1f182bb87ceac0353d918a2a99b10ae9"},
+    {file = "tess_ephem-0.6.3-py3-none-any.whl", hash = "sha256:c5934b8fab68e1e5bbdd49ff67bdd820a22dbb63faa83b82b463adf2f118e0a0"},
+    {file = "tess_ephem-0.6.3.tar.gz", hash = "sha256:d5acd007609b04d3542c883f2ee0afc1b40271bf95dbebe0f136be829292adaf"},
 ]
 
 [package.dependencies]
@@ -3901,7 +3901,7 @@ astroquery = ">=0.4.9,<0.5.0"
 numpy = ">=1.23.0,<2.0.0"
 pandas = ">=2.0,<3.0"
 scipy = ">=1.9.0,<2.0.0"
-tesswcs = ">=1.6.1,<2.0.0"
+tesswcs = ">=1.7.0,<2.0.0"
 
 [[package]]
 name = "tesscube"
@@ -3927,13 +3927,13 @@ rich = ">=13.7.0,<14.0.0"
 
 [[package]]
 name = "tesswcs"
-version = "1.6.2"
+version = "1.7.0"
 description = ""
 optional = false
 python-versions = "<4.0,>=3.9"
 files = [
-    {file = "tesswcs-1.6.2-py3-none-any.whl", hash = "sha256:831004045d73f267231338ecc7495ba1973c805f2a2af79da7f2581f934c48ca"},
-    {file = "tesswcs-1.6.2.tar.gz", hash = "sha256:a713ee1b32d9f535f50eb711a4253e5befcb7b3181526c77587c50b24dff3710"},
+    {file = "tesswcs-1.7.0-py3-none-any.whl", hash = "sha256:7bddf16818f1342378b85f559e700ec037500f5ea3ddf923b50d2987d85a17e5"},
+    {file = "tesswcs-1.7.0.tar.gz", hash = "sha256:b330ada611e1c2c9d8b3af6ae89da0cc2e2922bad9a38fdf1beb9c96ea1d29ea"},
 ]
 
 [package.dependencies]
@@ -4425,4 +4425,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.9, <3.13"
-content-hash = "a54f26652498844903c1f11f17fa877e38f5cb104c0e08d7bfa704c8ec564fb9"
+content-hash = "f326a12364a366c0a048a8e7006b18d7135feaa063b2b4f08c7c46a31736633b"
