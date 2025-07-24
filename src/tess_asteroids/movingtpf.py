@@ -982,6 +982,7 @@ class MovingTPF:
         poly_deg: int = 3,
         sigma: float = 5,
         progress_bar: bool = True,
+        return_allpix_shape: bool = False,
         **kwargs,
     ):
         """
@@ -1225,6 +1226,15 @@ class MovingTPF:
                 time.time() - start_time
             )
         )
+        if return_allpix_shape:
+            return (
+                sl_model + linear_model,
+                np.sqrt(sl_model ** 2 + linear_model ** 2),
+                sl_model,
+                sl_model_err,
+                linear_model,
+                linear_model_err,
+            )
 
         # Reshape arrays to match `self.flux`
         sl_model_reshaped = []
