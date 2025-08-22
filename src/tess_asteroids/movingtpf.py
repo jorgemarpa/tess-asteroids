@@ -584,8 +584,8 @@ class MovingTPF:
         self,
         target_threshold: float = 0.01,
         include_stars: bool = True,
-        star_flux_threshold: float = 1.1,
-        star_gradient_threshold: float = 5,
+        star_flux_threshold: float = 1.05,
+        star_gradient_threshold: float = 4,
         **kwargs,
     ):
         """
