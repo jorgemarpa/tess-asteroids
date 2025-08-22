@@ -2,6 +2,7 @@ import time
 import warnings
 from datetime import datetime
 from typing import Optional, Tuple, Union
+from urllib.error import HTTPError
 
 import lkprf
 import matplotlib.pyplot as plt
@@ -15,6 +16,7 @@ from fbpca import pca
 from lkspacecraft import TESSSpacecraft
 from lkspacecraft.spacecraft import BadEphemeris
 from numpy.polynomial import Polynomial
+from patsy import dmatrix
 from scipy import ndimage, stats
 from scipy.interpolate import CubicSpline
 from tess_ephem import ephem
@@ -695,13 +697,13 @@ class MovingTPF:
 
     def _create_scattered_light_model(
         self,
-        method: str = "all_time",
-        ncomponents: int = 5,
+        knot_width: float = 20,
+        data_chunks: Optional[Union[list, np.ndarray]] = None,
+        ncomponents: int = 8,
         niter: int = 5,
-        poly_deg: int = 3,
-        window_length: float = 1,
+        sigma: float = 5,
+        niter_clip: int = 3,
         diagnostic_plot: bool = False,
-        progress_bar: bool = True,
         **kwargs,
     ):
         """
@@ -748,162 +750,288 @@ class MovingTPF:
             Error on scattered light model, with same shape as `self.all_flux`.
         """
 
-        # Parameter logic checks
-        if window_length <= 0:
-            raise ValueError(
-                f"`window_length` must be greater than zero. Not '{window_length}'"
+        if not hasattr(self, "all_flux"):
+            raise AttributeError(
+                "Must run `get_data()` before computing scattered light model."
             )
-        if poly_deg <= 0:
-            raise ValueError(f"`poly_deg` must be greater than zero. Not '{poly_deg}'")
+
+        # Parameter logic checks
+        if sigma <= 0:
+            raise ValueError(f"`sigma` must be greater than zero. Not '{sigma}'")
+        if niter_clip < 0:
+            raise ValueError(
+                f"`niter_clip` must be greater than or equal to zero. Not '{niter_clip}'"
+            )
 
         # Create mask for moving target and stars.
         source_mask = self._create_source_mask(include_stars=True, **kwargs)
 
-        # Add nan flux values to the mask (PCA cannot have nan in flux array)
-        source_mask |= np.isnan(self.all_flux)
+        # Add nan flux values to the mask (PCA cannot have nan in flux array).
+        source_mask = np.logical_or(source_mask, np.isnan(self.all_flux))
 
-        # Create design matrix - a `poly_deg` degree polynomial in row and column.
+        # Mask all moving target pixels at all times, even when it is not present.
+        source_mask = source_mask.any(axis=0)
+
+        # Define equally spaced knots between bounds, with spacing approximately equal to `knot_width`.
+        # It is important to include an extra knot at the lower bound - this gives proper behaviour of spline.
         row, col = self.pixels.T
-        R = row - np.nanmean(row)
-        C = col - np.nanmean(col)
-        X = np.vstack(
-            [
-                R.ravel() ** idx * C.ravel() ** jdx
-                for idx in range(poly_deg)
-                for jdx in range(poly_deg)
-            ]
-        ).T
+        knots_col = np.linspace(
+            col.min(),
+            col.max(),
+            int(np.round((col.max() - col.min()) / knot_width)) + 1,
+        )[:-1]
+        knots_row = np.linspace(
+            row.min(),
+            row.max(),
+            int(np.round((row.max() - row.min()) / knot_width)) + 1,
+        )[:-1]
 
-        logger.info(
-            "Started computation of scattered light model using {0} method.".format(
-                method
+        # If `knot_width` is too large for the dataset, `knots_col` or `knots_row` can be returned as empty arrays.
+        # The function will run, but we need to ensure that there is always one knot at the lower bound.
+        if len(knots_col) == 0:
+            knots_col = np.asarray([col.min()])
+        if len(knots_row) == 0:
+            knots_row = np.asarray([row.min()])
+
+        # Warn the user if there are no interior knots. This can lead to a poorly constrained spline.
+        if len(knots_row) == 1 or len(knots_col) == 1:
+            logger.warning(
+                "There are no interior knots in column and/or row with a `knot_width` of {0}. Try re-defining `knot_width` to a smaller value.".format(
+                    knot_width
+                )
+            )
+
+        # Create design matrix - pairwise combination of a third degree b-spline in row and column, with a global intercept.
+        X = np.asarray(
+            dmatrix(
+                "bs(row, knots=knots_row, degree=3, include_intercept=False) : bs(col, knots=knots_col, degree=3, include_intercept=False)",
+                {
+                    "row": row,
+                    "knots_row": knots_row,
+                    "col": col,
+                    "knots_col": knots_col,
+                },
             )
         )
-        start_time = time.time()
-        if method == "all_time":
-            # Note: This masks all moving target pixels at all times, even when it is not present.
-            # This is a limitation of computing the PCA at all times.
-            source_mask = source_mask.any(axis=0)
+        # Exclude all zeroes from design matrix.
+        X = X[:, X.sum(axis=0) != 0]
+        # Account for strap columns in the design matrix.
+        X = np.hstack([np.isin(col, straps["Column"] + 44)[:, None], X])
 
-            # Get the PCA components for all pixels at all times, excluding pixels with sources.
-            # This will error if `ncomponents` is greater than the smallest dimension of the input matrix.
-            U, s, V = pca(
-                self.all_flux[:, ~source_mask], k=ncomponents, raw=True, n_iter=niter
+        # If user has not provided data chunks, split data based upon data downlink times.
+        if data_chunks is None:
+            # Retrieve file containing data downlink times
+            try:
+                file_path = "https://tess.mit.edu/public/files/TESS_orbit_times.csv"
+                downlinks = pd.read_csv(file_path, comment="#")
+            # If file is not found, data is not split into chunks.
+            except HTTPError:
+                data_chunks = np.asarray([np.full(len(self.time), True)])
+                logger.warning(
+                    "The file {0} was not found. Data was not split into chunks and all cadences will be modelled simultaneously.".format(
+                        file_path
+                    )
+                )
+            else:
+                sector_downlinks = downlinks[downlinks["Sector"] == self.sector]
+
+                # Check for expected number of chunks.
+                if self.sector <= 55 and len(sector_downlinks) != 2:
+                    raise RuntimeError(
+                        "For sector {0} there should be 2 data chunks, but there are actually {1} data chunks. Investigate or define your own `data_chunks`.".format(
+                            self.sector, len(sector_downlinks)
+                        )
+                    )
+                elif self.sector > 55 and len(sector_downlinks) != 4:
+                    raise RuntimeError(
+                        "For sector {0} there should be 4 data chunks, but there are actually {1} data chunks. Investigate or define your own `data_chunks`.".format(
+                            self.sector, len(sector_downlinks)
+                        )
+                    )
+
+                # Sector 3 was used for testing ACS and downlink times are not accurate.
+                # Manual override using values from https://tess.mit.edu/public/files/TESS_FFI_observation_times.csv
+                downlinks.loc[
+                    np.logical_and(downlinks["Sector"] == 3, downlinks["Orbit"] == 13),
+                    ["Start of Orbit", "End of Orbit"],
+                ] = ["2018-09-20 12:56:15", "2018-10-05 01:29:40"]
+                downlinks.loc[
+                    np.logical_and(downlinks["Sector"] == 3, downlinks["Orbit"] == 14),
+                    ["Start of Orbit", "End of Orbit"],
+                ] = ["2018-10-05 03:29:40", "2018-10-17 21:17:58"]
+
+                # Define data chunk mask
+                data_chunks = []
+                for _, downlink in sector_downlinks.iterrows():
+                    start = (
+                        Time(downlink["Start of Orbit"], format="iso", scale="utc").jd
+                        - 2457000
+                    )
+                    end = (
+                        Time(downlink["End of Orbit"], format="iso", scale="utc").jd
+                        - 2457000
+                    )
+                    # The buffer of 0.05 days accounts for inaccuracies in the downlink times.
+                    chunk = np.logical_and(
+                        self.time - self.timecorr >= start - 0.05,
+                        self.time - self.timecorr < end + 0.05,
+                    )
+                    # Only append chunks which have at least one True value i.e. target was observed during that chunk.
+                    if chunk.any():
+                        data_chunks.append(chunk)
+
+            logger.info(
+                "`_create_scattered_light_model()` defined {0} data chunks, saved in `self.data_chunks`.".format(
+                    len(data_chunks)
+                )
             )
 
-            # Compute best-fitting weights
-            try:
-                w = np.linalg.solve(
-                    X[~source_mask].T.dot(X[~source_mask]), X[~source_mask].T.dot(V.T)
-                )
-            # If no solution is found, return nan at all times.
-            except np.linalg.LinAlgError:
-                sl_model = np.full(self.all_flux.shape, np.nan)
-                sl_model_err = np.full(self.all_flux.shape, np.nan)
+        # Enforce that `data_chunks` is an array of arrays.
+        self.data_chunks = np.asarray(data_chunks)
+        if self.data_chunks.ndim == 1:
+            self.data_chunks = np.asarray([self.data_chunks])
+        # Check data_chunks has correct length and number of dimensions.
+        if self.data_chunks.ndim != 2 or self.data_chunks.shape[1] != len(self.time):
+            raise ValueError(
+                "`data_chunks` must be a two-dimensional boolean array, where each sub-array has length equal to `self.time`."
+            )
 
+        # Check that all data is included in exactly one chunk.
+        if not np.all(np.sum(self.data_chunks, axis=0) == 1):
+            raise ValueError(
+                "All data must be included in exactly one data chunk, but this is not the case. Try re-defining `data_chunks`."
+            )
+
+        # Initialise priors on LM components
+        prior_mu = np.zeros(X.shape[1])
+        prior_sigma = np.ones(X.shape[1]) * 0.5
+
+        # Initialise scattered light model and error.
+        sl_model = np.full(self.all_flux.shape, np.nan)
+        sl_model_err = np.full(self.all_flux.shape, np.nan)
+
+        logger.info("Started computation of scattered light model.")
+        start_time = time.time()
+
+        for i, chunk in enumerate(self.data_chunks):
+            # >>> THIS WILL BE DEFINED IN GET_DATA <<<
+            self.spoc_quality_mask = self.quality & (1 | 4 | 16 | 32 | 16384) == 0
+
+            # Define good quality cadences in the data chunk.
+            cadence_mask = np.logical_and(self.spoc_quality_mask, chunk)
+            # Initialise outlier mask
+            outlier_mask = np.zeros_like(source_mask, dtype=bool)
+
+            # If there is no data to fit, SL model and error will be nan for entire chunk.
+            if (~cadence_mask).all():
                 # Update SL NaN mask
                 if hasattr(self, "sl_nan_mask"):
-                    self.sl_nan_mask = np.ones_like(self.time, dtype=bool)
+                    self.sl_nan_mask[chunk] = True
 
                 logger.warning(
-                    "When computing the scattered light model, no solution was found. The scattered light model was set to nan at all times."
-                )
-            # If solution is found, continue:
-            else:
-                # Create model that can predict V for pixels not included in the PCA.
-                V_model = X.dot(w).T
-
-                # Compute scattered light model and error.
-                # >>>>> Add error on SL model <<<<<
-                sl_model = U.dot(np.diag(s)).dot(V_model)
-                sl_model_err = np.full(sl_model.shape, np.nan)
-
-        elif method == "per_time":
-            # Define good quality data using SPOC quality flags.
-            spoc_quality_mask = self.quality & (1 | 4 | 16 | 32 | 16384) == 0
-
-            # Initialise scattered light model and error.
-            sl_model = np.zeros(self.all_flux.shape)
-            sl_model_err = np.zeros(self.all_flux.shape)
-
-            # Run through each time
-            for t in tqdm(range(len(self.time)), disable=not progress_bar):
-                # Indices that define a time window around the current frame.
-                tmin, tmax = (
-                    self.time[t] - 0.5 * window_length,
-                    self.time[t] + 0.5 * window_length,
-                )
-                t_window = np.where(
-                    np.logical_and(self.time >= tmin, self.time <= tmax)
-                )[0]
-
-                # Remove bad quality SPOC cadences, but ensure current time is always included.
-                t_window = np.unique(
-                    np.append(t_window[spoc_quality_mask[t_window]], t)
-                )
-
-                # Mask sources i.e. moving target and stars. This masks pixels associated with the moving target only
-                # at the current time.
-                sources = source_mask[t_window].any(axis=0)
-
-                # Get the PCA components for pixels in time window, excluding pixels with sources.
-                # This will return an AssertionError if `ncomponents` is greater than the smallest dimension of the
-                # input matrix (i.e. too few times or pixels). In this case, set scattered light model to nan.
-                try:
-                    U, s, V = pca(
-                        self.all_flux[t_window][:, ~sources],
-                        k=ncomponents,
-                        raw=True,
-                        n_iter=niter,
+                    "When computing the scattered light model for data chunk {0}, there was no good quality data. The scattered light model for the entire data chunk was set to nan.".format(
+                        i
                     )
-                except AssertionError:
-                    sl_model[t] = np.nan
-                    sl_model_err[t] = np.nan
+                )
 
+                continue
+
+            # Get the PCA components for data chunk, excluding pixels with sources.
+            # This will return an AssertionError if `ncomponents` is greater than the smallest dimension of the
+            # input matrix (i.e. too few times or pixels). In this case, SL model and error will be nan for entire chunk.
+            try:
+                U, s, V = pca(
+                    self.all_flux[cadence_mask][:, ~source_mask],
+                    k=ncomponents,
+                    raw=True,
+                    n_iter=niter,
+                )
+            except AssertionError:
+                # Update SL NaN mask
+                if hasattr(self, "sl_nan_mask"):
+                    self.sl_nan_mask[chunk] = True
+
+                logger.warning(
+                    "When computing the scattered light model for data chunk {0}, the PCA failed with an AssertionError. This means either niter < 0, ncomponents <= 0 or ncomponents is greater than the smallest dimension of the input matrix (i.e. masking of `self.all_flux` has removed too much data). The scattered light model for the entire data chunk was set to nan.".format(
+                        i
+                    )
+                )
+
+                continue
+
+            # Prime while loop used for outlier clipping.
+            n_clip = np.inf
+            i_clip = 0
+            exit_loop = False
+            while n_clip != 0 and i_clip <= niter_clip:
+                # Define pixels to fit.
+                pixel_mask = np.logical_and(~source_mask, ~outlier_mask)
+
+                # If there are no pixels to fit, SL model and error will be nan for entire chunk.
+                if (~pixel_mask).all():
                     # Update SL NaN mask
                     if hasattr(self, "sl_nan_mask"):
-                        self.sl_nan_mask[t] = True
+                        self.sl_nan_mask[chunk] = True
 
                     logger.warning(
-                        "At cadence number {0}, the PCA failed with an AssertionError. This means either niter < 0, ncomponents <= 0 or ncomponents is greater than the smallest dimension of the input matrix (i.e. masking of `self.all_flux` has removed too much data). The corresponding scattered light model was set to nan.".format(
-                            self.cadence_number[t]
+                        "When computing the scattered light model for data chunk {0}, there were no pixels to fit. The scattered light model for the entire data chunk was set to nan.".format(
+                            i
                         )
                     )
-                    continue
 
-                # Compute best-fitting weights
+                    exit_loop = True
+
+                    break
+
+                # Compute best-fitting weights with Bayesian least squares
                 try:
                     w = np.linalg.solve(
-                        X[~sources].T.dot(X[~sources]), X[~sources].T.dot(V.T)
+                        X[pixel_mask].T.dot(X[pixel_mask])
+                        + np.diag(1 / prior_sigma**2),
+                        X[pixel_mask].T.dot(V[:, ~outlier_mask[~source_mask]].T)
+                        + prior_mu[:, None] / prior_sigma[:, None] ** 2,
                     )
+                # If no solution is found, SL model and error will be nan for entire chunk.
                 except np.linalg.LinAlgError:
-                    sl_model[t] = np.nan
-                    sl_model_err[t] = np.nan
-
                     # Update SL NaN mask
                     if hasattr(self, "sl_nan_mask"):
-                        self.sl_nan_mask[t] = True
+                        self.sl_nan_mask[chunk] = True
 
                     logger.warning(
-                        "When computing the scattered light model for cadence number {0}, no solution was found. The corresponding scattered light model was set to nan.".format(
-                            self.cadence_number[t]
+                        "When computing the scattered light model for data chunk {0}, no solution was found. The scattered light model for the entire data chunk was set to nan.".format(
+                            i
                         )
                     )
-                    continue
-                # Create model that can predict V for pixels not included in PCA.
+
+                    exit_loop = True
+                    break
+
+                # Clip outliers if there are remaining iterations.
+                if i_clip < niter_clip:
+                    n_clip_prev = np.sum(outlier_mask)
+                    outlier_mask[~source_mask] = np.logical_or(
+                        outlier_mask[~source_mask],
+                        sigma_clip(
+                            ((V.T - X.dot(w)[~source_mask]) ** 2).sum(axis=1) ** 0.5,
+                            sigma=sigma,
+                        ).mask,
+                    )
+                    n_clip = np.sum(outlier_mask) - n_clip_prev
+                    logger.info(
+                        "When computing the scattered light model, clipped {1} pixels in iteration {2} for data chunk {0}.".format(
+                            i, n_clip, i_clip
+                        )
+                    )
+                i_clip += 1
+
+            if not exit_loop:
+                # Create model that can predict V for excluded pixels (sources and outliers).
                 V_model = X.dot(w).T
 
                 # Compute scattered light model and error.
+                sl_model[cadence_mask] = U.dot(np.diag(s)).dot(V_model)
                 # >>>>> Add error on SL model <<<<<
-                sl_model[t] = U[t_window == t].dot(np.diag(s)).dot(V_model)
-                sl_model_err[t] = np.nan
 
-        else:
-            raise ValueError(
-                "`method` must be one of: [`per_time`, `all_time`]. Not `{0}`".format(
-                    method
-                )
-            )
         logger.info(
             "Finished computation of scattered light model in {0:.2f} sec.".format(
                 time.time() - start_time
