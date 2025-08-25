@@ -2,7 +2,6 @@ import time
 import warnings
 from datetime import datetime
 from typing import Optional, Tuple, Union
-from urllib.error import HTTPError
 
 import lkprf
 import matplotlib.pyplot as plt
@@ -26,7 +25,7 @@ from tesscube.query import async_get_primary_hdu
 from tesscube.utils import _sync_call, convert_coordinates_to_runs
 from tqdm import tqdm
 
-from . import TESSmag_zero_point, __version__, logger, straps
+from . import TESSmag_zero_point, __version__, downlinks, logger, straps
 from .utils import (
     animate_cube,
     calculate_TESSmag,
@@ -817,18 +816,13 @@ class MovingTPF:
 
         # If user has not provided data chunks, split data based upon data downlink times.
         if data_chunks is None:
-            # Retrieve file containing data downlink times
-            try:
-                file_path = "https://tess.mit.edu/public/files/TESS_orbit_times.csv"
-                downlinks = pd.read_csv(file_path, comment="#")
-            # If file is not found, data is not split into chunks.
-            except HTTPError:
+            # If downlinks file was not found, data is not split into chunks.
+            if downlinks is None:
                 data_chunks = np.asarray([np.full(len(self.time), True)])
                 logger.warning(
-                    "The file {0} was not found. Data was not split into chunks and all cadences will be modelled simultaneously.".format(
-                        file_path
-                    )
+                    "The downlink file was not found. Data was not split into chunks and all cadences will be modelled simultaneously."
                 )
+
             else:
                 sector_downlinks = downlinks[downlinks["Sector"] == self.sector]
 
@@ -845,17 +839,6 @@ class MovingTPF:
                             self.sector, len(sector_downlinks)
                         )
                     )
-
-                # Sector 3 was used for testing ACS and downlink times are not accurate.
-                # Manual override using values from https://tess.mit.edu/public/files/TESS_FFI_observation_times.csv
-                downlinks.loc[
-                    np.logical_and(downlinks["Sector"] == 3, downlinks["Orbit"] == 13),
-                    ["Start of Orbit", "End of Orbit"],
-                ] = ["2018-09-20 12:56:15", "2018-10-05 01:29:40"]
-                downlinks.loc[
-                    np.logical_and(downlinks["Sector"] == 3, downlinks["Orbit"] == 14),
-                    ["Start of Orbit", "End of Orbit"],
-                ] = ["2018-10-05 03:29:40", "2018-10-17 21:17:58"]
 
                 # Define data chunk mask
                 data_chunks = []

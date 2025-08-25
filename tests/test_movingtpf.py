@@ -124,7 +124,9 @@ def test_bg_linear_model():
     target.reshape_data()
 
     # Background correction using `pca` SL correction
-    bg, bg_err, sl, sl_err, linear, linear_err = target._bg_linear_model(sl_method="pca")
+    bg, bg_err, sl, sl_err, linear, linear_err = target._bg_linear_model(
+        sl_method="pca"
+    )
 
     # Check the components have the expected shape
     assert np.shape(bg) == np.shape(target.flux)
