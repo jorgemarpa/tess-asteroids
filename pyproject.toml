@@ -22,6 +22,7 @@ lkspacecraft = "^1.0.5"
 fbpca = "^1.0"
 tqdm = "^4.67.1"
 tesswcs = "^1.7.0"
+patsy = "^0.5.6"
 
 [tool.poetry.group.dev]
 optional = true

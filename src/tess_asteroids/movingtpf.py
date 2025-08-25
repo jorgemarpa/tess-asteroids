@@ -707,38 +707,35 @@ class MovingTPF:
         **kwargs,
     ):
         """
-        Use PCA to model scattered light. Either compute the PCA components for all times at once (`all_time`) or
-        use a for loop to go through each frame and compute PCA components in a time window (`per_time`).
-        The latter is preferred, but runtime is longer (see below). The resulting scattered light model has the same shape
-        as `self.all_flux`.
+        Uses PCA and linear modelling to create a scattered light model with the same shape as `self.all_flux`.
 
-        e.g. asteroid 1980 VR1 in sector 1, camera 1, ccd 1 (ntimes = 905, npixels = 7917) run on MacBook Pro 2023.
-        `all_time` method takes about 0.1 seconds to run (~80% is computation of PCA), `per_time` method takes about
-        31 seconds to run (~86% is computation of PCA).
-
-        e.g. asteroid 1998 YT6 in sector 6, camera 1, ccd 1 (ntimes = 967, npixels = 14056) run on MacBook Pro 2023.
-        `all_time` method takes about 0.1 seconds to run (~75% is computation of PCA), `per_time` method takes about
-        20 minutes to run (~95% is computation of PCA).
+        - The design matrix is defined with a 3rd degree B-spline in both row and column. The knots of each spline can be
+        controlled with the parameter `knot_width`.
+        - The PCA components are computed per data chunk (defined by `data_chunks`) and fit to the data with optional
+        outlier clipping.
 
         Parameters
         ----------
-        method : str
-            Method used to compute scattered light model. One of [`all_time`, `per_time`].
-            If `all_time`, the PCA components are computed for all times at once.
-            If `per_time`, the PCA components are computed in a time window around each frame.
+        knot_width : float
+            Approximate pixel spacing between spline knots. A default of 20 pixels is used because this represents
+            the typical scale over which scattered light varies.
+        data_chunks : ndarray
+            A boolean mask that defines chunks of data to be independently fit. The array must have shape
+            (nchunks, ntimes). If you want to fit all data simultaneously, define as
+            `np.asarray([np.full(len(self.time), True)])`. If None, chunks will be defined using TESS data downlink times.
         ncomponents : int
             Number of PCA components.
         niter : int
             Number of iterations that will be run to compute the PCA components.
-        poly_deg : int
-            Polynomial degree for the cartesian design matrix.
-        window_length : float
-            If method is `per_time`, this is used to define the time window around each frame for the PCA computation.
-            It is defined in days.
+        sigma : float
+            Sigma threshold for outlier detection. A larger value of `sigma` will mask less data.
+        niter_clip : int
+            Number of iterations of outlier clipping.
+
+            - To turn off outlier clipping, set `niter_clip` to zero.
+            - To clip until no outliers remain, set `niter_clip` to `np.inf`.
         diagnostic_plot : bool
             If True, shows two diagnostic plots to check the scattered light model.
-        progress_bar : bool
-            If True and method is `per_time`, this displays a progress bar for model computation.
         kwargs : dict
             Keywords arguments passed to `self._create_pca_source_mask`, e.g `target_threshold`, `star_flux_threshold`.
 
@@ -1103,9 +1100,10 @@ class MovingTPF:
 
     def _bg_linear_model(
         self,
-        sl_method: str = "all_time",
-        sl_poly_deg: int = 3,
-        sl_window_length: float = 1,
+        sl_method: str = "pca",
+        sl_knot_width: float = 20,
+        sl_sigma: float = 5,
+        sl_niter_clip: int = 3,
         window_length: float = 1,
         poly_deg: int = 3,
         sigma: float = 5,
@@ -1115,7 +1113,7 @@ class MovingTPF:
         """
         Calculate the background flux using linear modelling. There are two components:
             1. Scattered light model: use PCA and linear modelling to compute a scattered light model at each cadence.
-            2. Linear model: use linear modelling to compute a model for the rest of the background (e.g. stars) at
+            2. Static model: use linear modelling to compute a model for the rest of the background (e.g. stars) at
                each cadence.
         These two components get summed to create a global background model.
 
@@ -1125,14 +1123,13 @@ class MovingTPF:
         Parameters
         ----------
         sl_method : str
-            Method used to compute scattered light model. One of [`all_time`, `per_time`].
-            If `all_time`, the PCA components are computed for all times at once (faster).
-            If `per_time`, the PCA components are computed in a time window around each frame (slower, but preferred).
-        sl_poly_deg : int
-            Polynomial degree for the cartesian design matrix used for the scattered light model.
-        sl_window_length : float
-            If `sl_method` is `per_time`, this is used to define the time window around each frame for
-            the PCA computation when creating the scattered light model. It is defined in days.
+            Method used to compute scattered light model. One of [`pca`].
+        sl_knot_width : float
+            Approximate pixel spacing between spline knots used for scattered light model.
+        sl_sigma : float
+            Sigma threshold used for outlier detection in scattered light model.
+        sl_niter_clip : int
+            Number of iterations of outlier clipping in scattered light model.
         window_length : float
             This is used to define the time window around each frame when computing the linear model. It is
             defined in days.
@@ -1178,14 +1175,20 @@ class MovingTPF:
         if sigma <= 0:
             raise ValueError(f"`sigma` must be greater than zero. Not '{sigma}'")
 
+        # Compute scattered light model
+        if sl_method == "pca":
+            sl_model, sl_model_err = self._create_scattered_light_model(
+                knot_width=sl_knot_width,
+                sigma=sl_sigma,
+                niter_clip=sl_niter_clip,
+                **kwargs,
+            )
+        else:
+            raise ValueError(
+                "`sl_method` must be one of: [`pca`]. Not `{0}`".format(sl_method)
+            )
+
         # Remove scattered light from flux
-        sl_model, sl_model_err = self._create_scattered_light_model(
-            method=sl_method,
-            poly_deg=sl_poly_deg,
-            window_length=sl_window_length,
-            progress_bar=progress_bar,
-            **kwargs,
-        )
         sl_corr_flux = self.all_flux - sl_model
         sl_corr_flux_err = np.sqrt(
             np.nansum([self.all_flux_err**2, sl_model_err**2], axis=0)

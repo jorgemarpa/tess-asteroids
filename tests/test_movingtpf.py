@@ -123,28 +123,25 @@ def test_bg_linear_model():
     target.get_data()
     target.reshape_data()
 
-    for method in ["all_time", "per_time"]:
-        # Background correction using `all_time` SL correction
-        bg, bg_err, sl, sl_err, linear, linear_err = target._bg_linear_model(
-            sl_method=method
-        )
+    # Background correction using `pca` SL correction
+    bg, bg_err, sl, sl_err, linear, linear_err = target._bg_linear_model(sl_method="pca")
 
-        # Check the components have the expected shape
-        assert np.shape(bg) == np.shape(target.flux)
-        assert np.shape(bg_err) == np.shape(target.flux)
-        assert np.shape(sl) == np.shape(target.flux)
-        assert np.shape(sl_err) == np.shape(target.flux)
-        assert np.shape(linear) == np.shape(target.flux)
-        assert np.shape(linear_err) == np.shape(target.flux)
+    # Check the components have the expected shape
+    assert np.shape(bg) == np.shape(target.flux)
+    assert np.shape(bg_err) == np.shape(target.flux)
+    assert np.shape(sl) == np.shape(target.flux)
+    assert np.shape(sl_err) == np.shape(target.flux)
+    assert np.shape(linear) == np.shape(target.flux)
+    assert np.shape(linear_err) == np.shape(target.flux)
 
-        # Check method is recorded correctly.
-        assert target.sl_method == method
+    # Check method is recorded correctly.
+    assert target.sl_method == "pca"
 
-        # Check models are summer for global model.
-        assert np.array_equal(bg, sl + linear)
+    # Check models are correctly summed for global model.
+    assert np.array_equal(bg, sl + linear, equal_nan=True)
 
     # Check SL and LM quality masks:
-    target.background_correction(sl_method="per_time", ncomponents=8000)
+    target.background_correction(sl_method="pca", ncomponents=8000)
     assert np.shape(target.sl_nan_mask) == np.shape(target.time)
     assert np.array_equal(target.sl_nan_mask, np.ones_like(target.time, dtype=bool))
     assert np.shape(target.lm_nan_mask) == np.shape(target.all_flux)
@@ -321,7 +318,7 @@ def test_make_tpf():
         assert hdul[0].header["PROCVER"].strip() == __version__
         assert hdul[0].header["AP_TYPE"].strip() == "prf"
         assert hdul[0].header["BG_CORR"].strip() == "linear_model"
-        assert hdul[0].header["SL_CORR"].strip() == "all_time"
+        assert hdul[0].header["SL_CORR"].strip() == "pca"
         assert hdul[0].header["VMAG"] > 0
         assert hdul[0].header["HMAG"] > 0
         assert hdul[0].header["TESSMAG"] == 0
