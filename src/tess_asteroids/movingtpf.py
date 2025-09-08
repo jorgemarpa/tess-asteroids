@@ -501,10 +501,13 @@ class MovingTPF:
                 "Must run `get_data()` and `reshape_data()` before computing background."
             )
 
-        # Initialise masks that will flag NaNs in SL or BG linear model, only if `linear_model` is
+        # Initialise masks that will flag NaNs in SL or BG linear model, only used if `linear_model` is
         # the most recent method run.
         self.sl_nan_mask = np.zeros_like(self.time, dtype=bool)
         self.lm_nan_mask = np.zeros_like(self.all_flux, dtype=bool)
+
+        # Initialise bad SPOC bits, only used if `linear_model` is the most recent method run.
+        self.bad_spoc_bits = "n/a"
 
         # Define SL correction method
         self.sl_method = "n/a"
@@ -698,6 +701,7 @@ class MovingTPF:
         self,
         knot_width: float = 20,
         data_chunks: Optional[Union[list, np.ndarray]] = None,
+        spoc_quality_mask: Optional[np.ndarray] = None,
         ncomponents: int = 8,
         niter: int = 5,
         sigma: float = 5,
@@ -712,6 +716,8 @@ class MovingTPF:
         controlled with the parameter `knot_width`.
         - The PCA components are computed per data chunk (defined by `data_chunks`) and fit to the data with optional
         outlier clipping.
+        - The frames flagged as bad quality by `spoc_quality_mask` are not used to compute the scattered light model
+        and those cadences do not have a SL model (it will be NaNs).
 
         Parameters
         ----------
@@ -722,6 +728,9 @@ class MovingTPF:
             A boolean mask that defines chunks of data to be independently fit. The array must have shape
             (nchunks, ntimes). If you want to fit all data simultaneously, define as
             `np.asarray([np.full(len(self.time), True)])`. If None, chunks will be defined using TESS data downlink times.
+        spoc_quality_mask : ndarray
+            A boolean mask that defines data with good SPOC quality. The array must have the same length as `self.time`.
+            It can be defined using the function `_create_spoc_quality_mask()`. If None, the default quality mask will be used.
         ncomponents : int
             Number of PCA components.
         niter : int
@@ -758,6 +767,10 @@ class MovingTPF:
             raise ValueError(
                 f"`niter_clip` must be greater than or equal to zero. Not '{niter_clip}'"
             )
+
+        # If no SPOC quality mask is provided, the default mask is used.
+        if spoc_quality_mask is None:
+            spoc_quality_mask = self._create_spoc_quality_mask(bad_spoc_bits="default")
 
         # Create mask for moving target and stars.
         source_mask = self._create_source_mask(include_stars=True, **kwargs)
@@ -894,11 +907,8 @@ class MovingTPF:
         start_time = time.time()
 
         for i, chunk in enumerate(self.data_chunks):
-            # >>> THIS WILL BE DEFINED IN GET_DATA <<<
-            self.spoc_quality_mask = self.quality & (1 | 4 | 16 | 32 | 16384) == 0
-
             # Define good quality cadences in the data chunk.
-            cadence_mask = np.logical_and(self.spoc_quality_mask, chunk)
+            cadence_mask = np.logical_and(spoc_quality_mask, chunk)
             # Initialise outlier mask
             outlier_mask = np.zeros_like(source_mask, dtype=bool)
 
@@ -1018,6 +1028,10 @@ class MovingTPF:
             )
         )
 
+        # Add bad SPOC quality data to SL nan mask - these cadences do not have a SL model.
+        if hasattr(self, "sl_nan_mask"):
+            self.sl_nan_mask[~spoc_quality_mask] = True
+
         if diagnostic_plot:
             logger.info("Making diagnostic plots for scattered light model...")
             # Plot one: SL model on 2D pixel grid in all_flux region for selection of frames.
@@ -1081,9 +1095,78 @@ class MovingTPF:
 
         return np.asarray(sl_model), np.asarray(sl_model_err)
 
+    def _create_spoc_quality_mask(
+        self, bad_spoc_bits: Union[list[int], str] = "default"
+    ):
+        """
+        Creates a quality mask using SPOC quality flags.
+
+        In all cases except `bad_spoc_bits="none"`, non-science data in sector 3 is also masked.
+
+        Parameters
+        ----------
+        bad_spoc_bits : list or str
+            Defines SPOC bits corresponding to bad quality data. Can be one of:
+
+            - "default" - mask bits [1,2,3,4,5,6,8,10,13,15], as suggested in the TESS Archive Manual.
+            - "all" - mask all data with a SPOC quality flag.
+            - "none" - mask no data.
+            - list - mask custom bits provided in list.
+            More information about the SPOC quality flags can be found in Section 9 of the TESS Science
+            Data Products Description Document.
+
+        Returns
+        -------
+        spoc_quality_mask : ndarray
+            A boolean mask, with the same length as `self.time`. Good quality data is `True` and bad quality data is `False`.
+        """
+
+        if not hasattr(self, "quality"):
+            raise AttributeError(
+                "Must run `get_data()` before computing SPOC quality mask."
+            )
+
+        # Define bad quality SPOC bits.
+        if bad_spoc_bits == "default":
+            # Mask bits suggested in TESS archive manual (https://outerspace.stsci.edu/display/TESS/2.0+-+Data+Product+Overview)
+            self.bad_spoc_bits = [1, 2, 3, 4, 5, 6, 8, 10, 13, 15]  # type: ignore
+        elif bad_spoc_bits == "all":
+            # Mask all bits
+            self.bad_spoc_bits = "all"
+        elif bad_spoc_bits == "none":
+            # No masking
+            self.bad_spoc_bits = "none"
+            return np.ones(len(self.time), dtype=bool)
+        elif isinstance(bad_spoc_bits, list):
+            # User defined list of bad bits
+            self.bad_spoc_bits = bad_spoc_bits  # type: ignore
+        else:
+            raise ValueError(
+                "`bad_spoc_bits` must be either one of ['default', 'all', 'none'] or a custom list of bad quality SPOC bits."
+            )
+
+        # Define SPOC quality mask.
+        if self.bad_spoc_bits == "all":
+            spoc_quality_mask = self.quality == 0
+        else:
+            bad_spoc_bit_value = 0
+            for bit in self.bad_spoc_bits:
+                bad_spoc_bit_value += 2 ** (bit - 1)  # type: ignore
+            spoc_quality_mask = self.quality & bad_spoc_bit_value == 0
+
+        # Add non-science data in sector 3 to quality mask, as defined in data release notes.
+        if self.sector == 3:
+            t = self.time_original - self.timecorr_original
+            spoc_quality_mask = np.logical_and(
+                spoc_quality_mask, np.logical_and(t >= 1385.89663, t <= 1406.29247)
+            )
+
+        return spoc_quality_mask
+
     def _bg_linear_model(
         self,
         sl_method: str = "pca",
+        bad_spoc_bits: Union[list, str] = "default",
         sl_knot_width: float = 20,
         sl_sigma: float = 5,
         sl_niter_clip: int = 3,
@@ -1107,6 +1190,15 @@ class MovingTPF:
         ----------
         sl_method : str
             Method used to compute scattered light model. One of [`pca`].
+        bad_spoc_bits : list or str
+            Defines SPOC bits corresponding to bad quality data. Can be one of:
+
+            - "default" - mask bits [1,3,5,6,15], as suggested in the TESS Archive Manual.
+            - "all" - mask all data with a SPOC quality flag.
+            - "none" - mask no data.
+            - list - mask custom bits provided in list.
+            Data that is masked will not be used when creating the background model. More information about the SPOC
+            quality flags can be found in Section 9 of the TESS Science Data Products Description Document.
         sl_knot_width : float
             Approximate pixel spacing between spline knots used for scattered light model.
         sl_sigma : float
@@ -1158,12 +1250,16 @@ class MovingTPF:
         if sigma <= 0:
             raise ValueError(f"`sigma` must be greater than zero. Not '{sigma}'")
 
+        # Define good quality data using user-defined SPOC quality flags.
+        spoc_quality_mask = self._create_spoc_quality_mask(bad_spoc_bits)
+
         # Compute scattered light model
         if sl_method == "pca":
             sl_model, sl_model_err = self._create_scattered_light_model(
                 knot_width=sl_knot_width,
                 sigma=sl_sigma,
                 niter_clip=sl_niter_clip,
+                spoc_quality_mask=spoc_quality_mask,
                 **kwargs,
             )
         else:
@@ -1172,7 +1268,7 @@ class MovingTPF:
             )
 
         # Remove scattered light from flux
-        sl_corr_flux = self.all_flux - sl_model
+        sl_corr_flux = self.all_flux - np.nan_to_num(sl_model)
         sl_corr_flux_err = np.sqrt(
             np.nansum([self.all_flux_err**2, sl_model_err**2], axis=0)
         )
@@ -1187,9 +1283,6 @@ class MovingTPF:
         # Initialise arrays
         linear_model = np.zeros(self.all_flux.shape)
         linear_model_err = np.zeros(self.all_flux.shape)
-
-        # Define good quality data using SPOC quality flags.
-        spoc_quality_mask = self.quality & (1 | 4 | 16 | 32 | 16384) == 0
 
         # Create mask for moving target.
         source_mask = self._create_source_mask(include_stars=False, **kwargs)
@@ -1360,7 +1453,9 @@ class MovingTPF:
             )
 
         # Combine LM and SL model to create global BG model
-        bg = np.asarray(sl_model_reshaped) + np.asarray(linear_model_reshaped)
+        bg = np.nansum(
+            [np.asarray(sl_model_reshaped), np.asarray(linear_model_reshaped)], axis=0
+        )
         bg_err = np.sqrt(
             np.nansum(
                 [
@@ -2500,10 +2595,18 @@ class MovingTPF:
             after="CCD",
         )
         hdu.header.set(
+            "BAD_SPOC",
+            f"{','.join([str(bit) for bit in self.bad_spoc_bits])}"
+            if isinstance(self.bad_spoc_bits, list)
+            else self.bad_spoc_bits,
+            comment="bad quality SPOC bits for BG correction",
+            after="SHAPE",
+        )
+        hdu.header.set(
             "BG_CORR",
             self.bg_method,
-            comment="method used for background correction",
-            after="SHAPE",
+            comment="method used for BG correction",
+            after="BAD_SPOC",
         )
         hdu.header.set(
             "SL_CORR",
@@ -2526,7 +2629,7 @@ class MovingTPF:
         if file_type == "lc" and hasattr(self, "bad_bits"):
             hdu.header.set(
                 "BAD_BITS",
-                f"[{self.bad_bits}]",
+                f"{self.bad_bits}",
                 comment="bits excluded during aperture photometry",
                 after="AP_NPIX",
             )

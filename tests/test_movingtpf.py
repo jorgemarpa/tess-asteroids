@@ -140,7 +140,7 @@ def test_bg_linear_model():
     assert target.sl_method == "pca"
 
     # Check models are correctly summed for global model.
-    assert np.array_equal(bg, sl + linear, equal_nan=True)
+    assert np.array_equal(bg, np.nansum([sl, linear], axis=0))
 
     # Check SL and LM quality masks:
     target.background_correction(sl_method="pca", ncomponents=8000)
