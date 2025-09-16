@@ -140,7 +140,7 @@ def test_bg_linear_model():
     assert target.sl_method == "pca"
 
     # Check models are correctly summed for global model.
-    assert np.array_equal(bg, np.nansum([sl, linear], axis=0))
+    assert np.array_equal(bg, sl + linear, equal_nan=True)
 
     # Check SL and LM quality masks:
     target.background_correction(sl_method="pca", ncomponents=8000)
@@ -337,7 +337,9 @@ def test_make_tpf():
         assert "ORIGINAL_TIME" in hdul[3].columns.names
         assert "ORIGINAL_TIMECORR" in hdul[3].columns.names
         assert len(hdul[3].data["APERTURE"]) == len(target.time)
-        assert np.allclose(target.corr_flux, hdul[1].data["FLUX"], rtol=1e-07)
+        assert np.allclose(
+            target.corr_flux, hdul[1].data["FLUX"], rtol=1e-07, equal_nan=True
+        )
 
         # Check the barycentric time correction has been applied.
         assert (hdul[1].data["TIME"] != hdul[3].data["ORIGINAL_TIME"]).all()
@@ -359,7 +361,7 @@ def test_make_tpf():
     assert isinstance(tpf, lk.targetpixelfile.TessTargetPixelFile)
     assert hasattr(tpf, "pipeline_mask")
     assert len(tpf.time) == len(target.time)
-    assert np.allclose(target.corr_flux, tpf.flux.value, rtol=1e-07)
+    assert np.allclose(target.corr_flux, tpf.flux.value, rtol=1e-07, equal_nan=True)
 
     # Delete the file
     os.remove("tests/tess-1998YT6-s0006-1-1-shape11x11-moving_tp.fits")

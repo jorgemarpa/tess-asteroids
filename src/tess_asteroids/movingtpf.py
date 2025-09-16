@@ -1197,8 +1197,9 @@ class MovingTPF:
             - "all" - mask all data with a SPOC quality flag.
             - "none" - mask no data.
             - list - mask custom bits provided in list.
-            Data that is masked will not be used when creating the background model. More information about the SPOC
-            quality flags can be found in Section 9 of the TESS Science Data Products Description Document.
+            Data that is masked will not be used when creating the background model and its resulting background model will be NaN. 
+            More information about the SPOC quality flags can be found in Section 9 of the TESS Science Data Products 
+            Description Document.
         sl_knot_width : float
             Approximate pixel spacing between spline knots used for scattered light model.
         sl_sigma : float
