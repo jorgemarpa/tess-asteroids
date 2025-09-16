@@ -1453,9 +1453,7 @@ class MovingTPF:
             )
 
         # Combine LM and SL model to create global BG model
-        bg = np.nansum(
-            [np.asarray(sl_model_reshaped), np.asarray(linear_model_reshaped)], axis=0
-        )
+        bg = np.asarray(sl_model_reshaped) + np.asarray(linear_model_reshaped)
         bg_err = np.sqrt(
             np.nansum(
                 [
