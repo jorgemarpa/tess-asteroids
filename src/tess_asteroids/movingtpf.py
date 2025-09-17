@@ -880,7 +880,7 @@ class MovingTPF:
             )
 
         # Enforce that `data_chunks` is an array of arrays.
-        self.data_chunks = np.atleast_2d(self.data_chunks)
+        self.data_chunks = np.atleast_2d(data_chunks)
         # Check data_chunks has correct length and number of dimensions.
         if self.data_chunks.ndim != 2 or self.data_chunks.shape[1] != len(self.time):
             raise ValueError(
