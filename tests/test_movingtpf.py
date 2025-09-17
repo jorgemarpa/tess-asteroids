@@ -142,7 +142,7 @@ def test_bg_linear_model():
     # Check models are correctly summed for global model.
     assert np.array_equal(bg, sl + linear, equal_nan=True)
 
-    # Check SL and LM quality masks:
+    # Check SL and LM quality masks catch issues by using too many components:
     target.background_correction(sl_method="pca", ncomponents=8000)
     assert np.shape(target.sl_nan_mask) == np.shape(target.time)
     assert np.array_equal(target.sl_nan_mask, np.ones_like(target.time, dtype=bool))
