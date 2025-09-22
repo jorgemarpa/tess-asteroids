@@ -2564,7 +2564,7 @@ class MovingTPF:
                 )
                 mag_header = round(np.nanmedian(self.lc["aperture"]["TESSmag"]), 3)
         else:
-            mag_header = 0.0
+            mag_header = np.nan
         hdu.header.set(
             "TESSMAG",
             mag_header if ~np.isnan(mag_header) else "n/a",
@@ -2574,7 +2574,7 @@ class MovingTPF:
             "TESSMAG0",
             round(TESSmag_zero_point, 3)
             if file_type == "lc" and hasattr(self, "lc") and "aperture" in self.lc
-            else 0.0,
+            else "n/a",
             comment="[mag] TESS zero-point magnitude",
             after="TESSMAG",
         )
