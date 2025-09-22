@@ -2554,11 +2554,20 @@ class MovingTPF:
         hdu.header.set("OBJECT", self.target, comment="object name")
 
         # Add average measured TESS magnitude of target and zero-point
+        if file_type == "lc" and hasattr(self, "lc") and "aperture" in self.lc:
+            # Catch warnings that arise if LC is nan at all times.
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message="All-NaN slice encountered",
+                    category=RuntimeWarning,
+                )
+                mag_header = round(np.nanmedian(self.lc["aperture"]["TESSmag"]), 3)
+        else:
+            mag_header = 0.0
         hdu.header.set(
             "TESSMAG",
-            round(np.nanmedian(self.lc["aperture"]["TESSmag"]), 3)
-            if file_type == "lc" and hasattr(self, "lc") and "aperture" in self.lc
-            else 0.0,
+            mag_header if ~np.isnan(mag_header) else "n/a",
             comment="[mag] measured TESS magnitude",
         )
         hdu.header.set(
