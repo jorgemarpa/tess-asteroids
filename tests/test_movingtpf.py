@@ -323,8 +323,8 @@ def test_make_tpf():
         assert hdul[0].header["SL_CORR"].strip() == "pca"
         assert hdul[0].header["VMAG"] > 0
         assert hdul[0].header["HMAG"] > 0
-        assert hdul[0].header["TESSMAG"] == 0
-        assert hdul[0].header["TESSMAG0"] == 0
+        assert hdul[0].header["TESSMAG"] == "n/a"
+        assert hdul[0].header["TESSMAG0"] == "n/a"
         assert "SPOCDATE" in hdul[0].header.keys()
         assert "TIME" in hdul[1].columns.names
         assert "TIMECORR" in hdul[1].columns.names
