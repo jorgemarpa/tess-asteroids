@@ -546,7 +546,12 @@ def animate_cube(
     if cnorm:
         norm = simple_norm(cube.ravel(), "asinh", percent=98)
     elif vmin is None and vmax is None:
-        vmin, vmax = np.nanpercentile(cube, [3, 97])
+        # Ignore warning that arises from all NaN values.
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", message="All-NaN slice encountered", category=RuntimeWarning
+            )
+            vmin, vmax = np.nanpercentile(cube, [3, 97])
 
     # If corner is list of two ints, repeat for all times.
     if len(corner) == 2:
