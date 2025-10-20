@@ -2192,7 +2192,11 @@ class MovingTPF:
         )
 
     def _psf_photometry(
-        self, time_binning: int = 1, cadence_quality: bool = False, **kwargs
+        self,
+        time_binning: int = 1,
+        cadence_quality: bool = False,
+        clip_data: bool = False,
+        **kwargs,
     ):
         """
         Computes PSF phtometry by fitting the PRF model to the data. The model is fitted using a linear model as
@@ -2204,6 +2208,14 @@ class MovingTPF:
         time_binning : int
             Number of cadences used to fit the PRF model simultaneusly, effectively doing data binning.
             Default is 1, which is no binning.
+        cadence_quality : bool
+            Rejects bad quality cadances from the PSF fitting by obly keeping cadences with `quality == 0`.
+            Default is False, which uses all available cadences.
+        clip_data : bool
+            Removes pixels that falls out of distribution, outliers, using 3-sigma clipping. This is useful to remove
+            poorly corrected pixels, but it can remove pixels with real strong target signal. It is only recommended for
+            very faint targets near the background level.
+            Default is False, which does not do any data clipping.
 
         Returns:
         --------
@@ -2237,6 +2249,14 @@ class MovingTPF:
             cube = self.corr_flux
             cube_err = self.corr_flux_err
 
+        # clip out badly corrected pixels
+        if clip_data:
+            mask = sigma_clip(cube, sigma=3).mask
+            logger.info(
+                f"Removing {mask.sum()/np.prod(cube.shape)*100:0.1f}% of the data as outliers"
+            )
+            cube[mask] = np.nan
+
         # define the number of points in the resulting light curve given the cadence binning
         n_points = time.shape[0] // time_binning
         prf_phot = []
@@ -2252,8 +2272,8 @@ class MovingTPF:
             ),
             total=len(range(n_points)),
         ):
-            # find finite values
-            j = np.isfinite(a.ravel()) & np.isfinite(ae.ravel())
+            # find finite values and pixels with >0.01% prf value
+            j = np.isfinite(a.ravel()) & np.isfinite(ae.ravel()) & (p.ravel() > 0.00001)
             # create DM from PRF model
             X = p.ravel()[:, None]
             sigma_w_inv = X[j].T.dot(X[j] / ae.ravel()[j, None] ** 2)
@@ -2265,10 +2285,10 @@ class MovingTPF:
                 )[0]
                 # get flux error
                 amp_err = np.linalg.inv(sigma_w_inv).diagonal() ** 0.5
-                # compute model reduced chi2
                 chi2 = np.sum(
-                    (a.ravel() - X.dot(amp).ravel()) ** 2 / (ae.ravel() ** 2), axis=0
-                ) / (a.ravel().shape[0] - 1)
+                    ((a.ravel() - X.dot(amp).ravel()) ** 2 / (ae.ravel() ** 2))[j],
+                    axis=0,
+                ) / (j.sum() - 1)
                 prf_phot.append([t.mean(), amp, amp_err[0], chi2])
             # catch lin alg when problem has no solution, fill with nan values for this time
             except np.linalg.LinAlgError:
