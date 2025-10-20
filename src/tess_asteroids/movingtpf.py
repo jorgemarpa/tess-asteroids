@@ -2162,15 +2162,24 @@ class MovingTPF:
             }
 
         elif method == "psf":
-            flux, flux_err, time, chi2, fit_quality, time_binning = (
-                self._psf_photometry(**kwargs)
-            )
+            (
+                flux,
+                flux_err,
+                time,
+                cadenceno,
+                chi2,
+                fit_quality,
+                cad_quality,
+                time_binning,
+            ) = self._psf_photometry(**kwargs)
             self.lc["psf"] = {
                 "time": time,
+                "cadenceno": cadenceno,
                 "flux": flux,
                 "flux_err": flux_err,
                 "fit_quality": fit_quality,
                 "chi2": chi2,
+                "cadence_quality": cad_quality,
                 "time_binning": time_binning,
                 "flux_fraction": np.ones_like(flux),
             }
@@ -2242,12 +2251,16 @@ class MovingTPF:
             prf_model = self._create_target_prf_model(all_flux=False)[quality_mask]
             cube = self.corr_flux[quality_mask]
             cube_err = self.corr_flux_err[quality_mask]
+            spoc_quality = self.quality[quality_mask]
+            cadno = self.cadence_number[quality_mask]
         # use all cadences, this might lead to inaccurare results
         else:
             time = self.time
             prf_model = self._create_target_prf_model(all_flux=False)
             cube = self.corr_flux
             cube_err = self.corr_flux_err
+            spoc_quality = self.quality
+            cadno = self.cadence_number
 
         # clip out badly corrected pixels
         if clip_data:
@@ -2262,13 +2275,15 @@ class MovingTPF:
         prf_phot = []
         nfails = 0
         # iterate over binning windows to compute psf photometry
-        for idx, t, a, ae, p in tqdm(
+        for idx, t, a, ae, p, qu, cn in tqdm(
             zip(
                 range(n_points),
                 np.array_split(time, n_points),
                 np.array_split(cube, n_points),
                 np.array_split(cube_err, n_points),
                 np.array_split(prf_model, n_points),
+                np.array_split(spoc_quality, n_points),
+                np.array_split(cadno, n_points),
             ),
             total=len(range(n_points)),
         ):
@@ -2289,10 +2304,14 @@ class MovingTPF:
                     ((a.ravel() - X.dot(amp).ravel()) ** 2 / (ae.ravel() ** 2))[j],
                     axis=0,
                 ) / (j.sum() - 1)
-                prf_phot.append([t.mean(), amp, amp_err[0], chi2])
+                prf_phot.append(
+                    [t.mean(), np.median(cn), amp, amp_err[0], chi2, np.max(qu)]
+                )
             # catch lin alg when problem has no solution, fill with nan values for this time
             except np.linalg.LinAlgError:
-                prf_phot.append([t.mean(), np.nan, np.nan, np.nan])
+                prf_phot.append(
+                    [t.mean(), np.median(cn), np.nan, np.nan, np.nan, np.max(qu)]
+                )
                 nfails += 1
                 continue
         if nfails > 0:
@@ -2300,13 +2319,22 @@ class MovingTPF:
                 f"During PRF fitting, {nfails} cadences did not solve. This cadences will be replaced by `NaN`."
             )
 
-        time, flux, flux_err, chi2 = np.array(prf_phot).T
+        time, cadenceno, flux, flux_err, chi2, cad_quality = np.array(prf_phot).T
         # flag cadences that linear model failed
         fit_quality = np.isnan(flux).astype(int)
         # flag cadences with negative fluxes
         fit_quality[flux < 0] += 2**1
 
-        return (flux, flux_err, time, chi2, fit_quality, time_binning)
+        return (
+            flux,
+            flux_err,
+            time,
+            cadenceno,
+            chi2,
+            fit_quality,
+            cad_quality,
+            time_binning,
+        )
 
     def _aperture_photometry(self, bad_bits: list = [1, 3, 7], **kwargs):
         """
@@ -3149,7 +3177,7 @@ class MovingTPF:
             raise AttributeError("Must run `to_lightcurve()` before saving LC.")
 
         # Define columns for lightcurve
-        cols = [
+        cols_ap = [
             # Times in TDB at SS barycenter.
             fits.Column(
                 name="TIME",
@@ -3377,11 +3405,90 @@ class MovingTPF:
         ]
 
         # Create table HDU
-        table_hdu = fits.BinTableHDU.from_columns(cols)
-        table_hdu.header["EXTNAME"] = "LIGHTCURVE"
+        table_hdu_ap = fits.BinTableHDU.from_columns(cols_ap)
+        table_hdu_ap.header["EXTNAME"] = "LIGHTCURVE_APE"
+
+        if "psf" in self.lc.keys():
+            cols_psf = [
+                # Times in TDB at SS barycenter.
+                fits.Column(
+                    name="TIME",
+                    format="D",
+                    unit="BJD - 2457000, days",
+                    disp="D14.7",
+                    array=self.lc["psf"]["time"],
+                ),
+                # Cadence number, as defined by tesscube, but with cadence binning
+                fits.Column(
+                    name="CADENCENO",
+                    format="I",
+                    array=self.lc["psf"]["cadenceno"],
+                ),
+                # SPOC quality flag, as the max value in the cadence binning window
+                fits.Column(
+                    name="QUALITY",
+                    format="J",
+                    disp="B16.16",
+                    array=self.lc["psf"]["cadence_quality"],
+                ),
+                # PSF flux
+                fits.Column(
+                    name="FLUX",
+                    format="E",
+                    unit="e-/s",
+                    disp="E14.7",
+                    array=self.lc["psf"]["flux"],
+                ),
+                fits.Column(
+                    name="FLUX_ERR",
+                    format="E",
+                    unit="e-/s",
+                    disp="E14.7",
+                    array=self.lc["psf"]["flux_err"],
+                ),
+                # TESS magnitude and error
+                fits.Column(
+                    name="TESSMAG",
+                    format="E",
+                    unit="mag",
+                    disp="E14.7",
+                    array=self.lc["psf"]["TESSmag"],
+                ),
+                fits.Column(
+                    name="TESSMAG_ERR",
+                    format="E",
+                    unit="mag",
+                    disp="E14.7",
+                    array=self.lc["psf"]["TESSmag_err"],
+                ),
+                # Model fit reduce chi2
+                fits.Column(
+                    name="RED_CHI2",
+                    format="E",
+                    disp="E14.7",
+                    array=self.lc["psf"]["chi2"],
+                ),
+                # model fit quality flag
+                fits.Column(
+                    name="FIT_QUALITY",
+                    format="J",
+                    disp="B16.16",
+                    array=self.lc["psf"]["fit_quality"],
+                ),
+            ]
+            # Create table HDU
+            table_hdu_psf = fits.BinTableHDU.from_columns(cols_psf)
+            table_hdu_psf.header["TIME_BIN"] = (
+                self.lc["psf"]["time_binning"],
+                "Number of cadences used for time binning",
+            )
+            table_hdu_psf.header["EXTNAME"] = "LIGHTCURVE_PSF"
+            return fits.HDUList(
+                [self._make_primary_hdu(file_type="lc"), table_hdu_ap, table_hdu_psf]
+            )
 
         # Return hdulist
-        return fits.HDUList([self._make_primary_hdu(file_type="lc"), table_hdu])
+        return fits.HDUList([self._make_primary_hdu(file_type="lc"), table_hdu_ap])
 
     def _save_hdulist(
         self,
