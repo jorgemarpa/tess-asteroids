@@ -770,7 +770,7 @@ class MovingTPF:
 
         # If no SPOC quality mask is provided, the default mask is used.
         if spoc_quality_mask is None:
-            spoc_quality_mask = self._create_spoc_quality_mask(bad_spoc_bits="default")
+            spoc_quality_mask, self.bad_spoc_bits = self._create_spoc_quality_mask(bad_spoc_bits="default")
 
         # Create mask for moving target and stars.
         source_mask = self._create_source_mask(include_stars=True, **kwargs)
@@ -1117,6 +1117,8 @@ class MovingTPF:
         -------
         spoc_quality_mask : ndarray
             A boolean mask, with the same length as `self.time`. Good quality data is `True` and bad quality data is `False`.
+        bad_spoc_bits : list or str
+            The SPOC bits used to define bad quality data.
         """
 
         if not hasattr(self, "quality"):
@@ -1127,28 +1129,21 @@ class MovingTPF:
         # Define bad quality SPOC bits.
         if bad_spoc_bits == "default":
             # Mask bits suggested in TESS archive manual (https://outerspace.stsci.edu/display/TESS/2.0+-+Data+Product+Overview)
-            self.bad_spoc_bits = [1, 2, 3, 4, 5, 6, 8, 10, 13, 15]  # type: ignore
-        elif bad_spoc_bits == "all":
-            # Mask all bits
-            self.bad_spoc_bits = "all"
+            bad_spoc_bits = [1, 2, 3, 4, 5, 6, 8, 10, 13, 15]
         elif bad_spoc_bits == "none":
             # No masking
-            self.bad_spoc_bits = "none"
-            return np.ones(len(self.time), dtype=bool)
-        elif isinstance(bad_spoc_bits, list):
-            # User defined list of bad bits
-            self.bad_spoc_bits = bad_spoc_bits  # type: ignore
-        else:
+            return np.ones(len(self.time), dtype=bool), bad_spoc_bits
+        elif not isinstance(bad_spoc_bits, list) or bad_spoc_bits != "all":
             raise ValueError(
                 "`bad_spoc_bits` must be either one of ['default', 'all', 'none'] or a custom list of bad quality SPOC bits."
             )
 
         # Define SPOC quality mask.
-        if self.bad_spoc_bits == "all":
+        if bad_spoc_bits == "all":
             spoc_quality_mask = self.quality == 0
         else:
             bad_spoc_bit_value = 0
-            for bit in self.bad_spoc_bits:
+            for bit in bad_spoc_bits:
                 bad_spoc_bit_value += 2 ** (bit - 1)  # type: ignore
             spoc_quality_mask = self.quality & bad_spoc_bit_value == 0
 
@@ -1159,7 +1154,7 @@ class MovingTPF:
                 spoc_quality_mask, np.logical_and(t >= 1385.89663, t <= 1406.29247)
             )
 
-        return spoc_quality_mask
+        return spoc_quality_mask, bad_spoc_bits
 
     def _bg_linear_model(
         self,
@@ -1191,7 +1186,7 @@ class MovingTPF:
         bad_spoc_bits : list or str
             Defines SPOC bits corresponding to bad quality data. Can be one of:
 
-            - "default" - mask bits [1,3,5,6,15], as suggested in the TESS Archive Manual.
+            - "default" - mask bits [1,2,3,4,5,6,8,10,13,15], as suggested in the TESS Archive Manual.
             - "all" - mask all data with a SPOC quality flag.
             - "none" - mask no data.
             - list - mask custom bits provided in list.
@@ -1250,7 +1245,7 @@ class MovingTPF:
             raise ValueError(f"`sigma` must be greater than zero. Not '{sigma}'")
 
         # Define good quality data using user-defined SPOC quality flags.
-        spoc_quality_mask = self._create_spoc_quality_mask(bad_spoc_bits)
+        spoc_quality_mask, self.bad_spoc_bits = self._create_spoc_quality_mask(bad_spoc_bits)
 
         # Compute scattered light model
         if sl_method == "pca":
@@ -2167,10 +2162,11 @@ class MovingTPF:
                 flux_err,
                 time,
                 cadenceno,
-                chi2,
+                red_chi2,
                 fit_quality,
-                cad_quality,
+                spoc_quality,
                 time_binning,
+                bad_spoc_bits,
             ) = self._psf_photometry(**kwargs)
             self.lc["psf"] = {
                 "time": time,
@@ -2178,9 +2174,10 @@ class MovingTPF:
                 "flux": flux,
                 "flux_err": flux_err,
                 "fit_quality": fit_quality,
-                "chi2": chi2,
-                "cadence_quality": cad_quality,
+                "red_chi2": red_chi2,
+                "spoc_quality": spoc_quality,
                 "time_binning": time_binning,
+                "bad_spoc_bits": bad_spoc_bits,
                 "flux_fraction": np.ones_like(flux),
             }
             # raise NotImplementedError("PSF photometry is not yet implemented.")
@@ -2203,7 +2200,7 @@ class MovingTPF:
     def _psf_photometry(
         self,
         time_binning: int = 1,
-        cadence_quality: bool = False,
+        bad_spoc_bits: Union[list, str] = "default",
         clip_data: bool = False,
         **kwargs,
     ):
@@ -2214,12 +2211,20 @@ class MovingTPF:
 
         Parameters
         ----------
-        cadence_binning : int
+        time_binning : int
             Number of cadences used to fit the PRF model simultaneously, effectively doing data binning.
             Default is 1, which is no binning.
-        cadence_quality : bool
-             Rejects bad quality cadences from the PSF fitting by only keeping cadences with `quality == 0`.
-            Default is False, which uses all available cadences.
+        bad_spoc_bits : list or str
+            Defines SPOC bits corresponding to bad quality data. Can be one of:
+
+            - "default" - mask bits [1,2,3,4,5,6,8,10,13,15], as suggested in the TESS Archive Manual.
+            - "all" - mask all data with a SPOC quality flag.
+            - "none" - mask no data.
+            - list - mask custom bits provided in list.
+            Data that is masked will not be used when fitting the PRF model. If all cadences in a window are defined as bad quality, 
+            there will be no lightcurve data for that window.
+            More information about the SPOC quality flags can be found in Section 9 of the TESS Science Data Products
+            Description Document.
         clip_data : bool
             Removes pixels that are outliers using 3-sigma clipping. This is useful to remove
             poorly corrected pixels, but it can remove pixels with strong target signal. It is only recommended for
@@ -2228,39 +2233,40 @@ class MovingTPF:
 
         Returns:
         --------
-        flux, flux_err, time, red_chi2, fit_quality: ndarrays
-            Flux and flux error from the PRF fitting (flux, flux_err). Time array (time), which is different to 
-            `self.time` if `cadence_binning > 1`. `red_chi2` is the reduced chi-squared of the fitted model. 
-            `fit_quality` defines flags which identify when the fit routine did not converge.
+        time, cadenceno, flux, flux_err, red_chi2, fit_quality, spoc_quality: ndarrays
 
+            - `time` is the average time in the binning window.
+            - `cadenceno` is the average cadence number, as defined by `tesscube` in the binning window.
+            - `flux` and `flux_err` from the PRF fitting. 
+            - `red_chi2` is the reduced chi-squared of the fitted PRF model. 
+            - `fit_quality` identifies cadences where the PRF fit did not converge.
+            - `spoc_quality` is the combined SPOC quality flag in the binning window.
+            Note: if `time_binning = 1` then `time`, `cadenceno` and `spoc_quality` are equal to `self.time`, `self.cadence_number` 
+            and `self.quality`, respectively.
+        time_binning: int
+            Number of cadences that were used to simultaneosuly fit the PRF model.
+        bad_spoc_bits : list or str
+            The SPOC bits used to define bad quality data.
         """
         if (
             not hasattr(self, "all_flux")
             or not hasattr(self, "flux")
             or not hasattr(self, "corr_flux")
-            #or not hasattr(self, "pixel_quality")
-            #or not hasattr(self, "aperture_mask")
         ):
             raise AttributeError(
-                "Must run `get_data()`, `reshape_data()`, `background_correction()`, `create_pixel_quality()` and `create_aperture()` before doing PSF photometry."
+                "Must run `get_data()`, `reshape_data()` and `background_correction()` before doing PSF photometry."
             )
 
-        time = self.time
-        prf_model = self._create_target_prf_model()
-        cube = self.corr_flux
-        cube_err = self.corr_flux_err
-        spoc_quality = self.quality
-        cadno = self.cadence_number
+        # Define good quality cadences using user-defined SPOC quality flags.
+        spoc_quality_mask, bad_spoc_bits = self._create_spoc_quality_mask(bad_spoc_bits)
 
-        # Only use good quality data to fit the PRF model.
-        if cadence_quality:
-            quality_mask = self.quality == 0
-            time = time[quality_mask]
-            prf_model = prf_model[quality_mask]
-            cube = cube[quality_mask]
-            cube_err = cube_err[quality_mask]
-            spoc_quality = spoc_quality[quality_mask]
-            cadno = cadno[quality_mask]
+        # Apply quality mask to data
+        time = self.time[spoc_quality_mask]
+        prf_model = self._create_target_prf_model()[spoc_quality_mask]
+        cube = self.corr_flux[spoc_quality_mask]
+        cube_err = self.corr_flux_err[spoc_quality_mask]
+        spoc_quality = self.quality[spoc_quality_mask]
+        cadno = self.cadence_number[spoc_quality_mask]
 
         # clip out badly corrected pixels
         if clip_data:
@@ -2288,7 +2294,7 @@ class MovingTPF:
             total=n_points,
         ):
             # find finite values and pixels with >0.01% prf value
-            j = np.isfinite(f.ravel()) & np.isfinite(fe.ravel()) & (p.ravel() > 0.00001)
+            j = np.logical_and(np.isfinite(f.ravel()), np.logical_and(np.isfinite(fe.ravel()),(p.ravel() > 0.00001)))
             # Derive SPOC quality value in window
             qual = 0
             for q in qu:
@@ -2298,18 +2304,19 @@ class MovingTPF:
             sigma_w_inv = X[j].T.dot(X[j] / fe.ravel()[j, None] ** 2)
             # solve linear model
             try:
-                # get flux
+                # Compute flux
                 amp = np.linalg.solve(
                     sigma_w_inv, X[j].T.dot((f.ravel()[j] / fe.ravel()[j] ** 2))
                 )[0]
-                # get flux error
+                # Compute flux error
                 amp_err = (np.linalg.inv(sigma_w_inv).diagonal() ** 0.5)[0]
-                chi2 = np.sum(
+                # Compute reduced chi-squared (X has 1 component)
+                red_chi2 = np.sum(
                     ((f.ravel() - X.dot(amp).ravel()) ** 2 / (fe.ravel() ** 2))[j],
                     axis=0,
                 ) / (j.sum() - 1)
                 psf_phot.append(
-                    [t.mean(), np.median(cn), amp, amp_err, chi2, qual]
+                    [t.mean(), np.median(cn), amp, amp_err, red_chi2, qual]
                 )
             # catch lin alg when problem has no solution, fill with nan values for this time
             except np.linalg.LinAlgError:
@@ -2323,21 +2330,22 @@ class MovingTPF:
                 f"During PRF fitting, {nfails} cadences did not solve. These cadences will be replaced by `NaN`."
             )
 
-        time, cadenceno, flux, flux_err, chi2, cad_quality = np.asarray(psf_phot).T
+        time, cadenceno, flux, flux_err, red_chi2, spoc_quality = np.asarray(psf_phot).T
         # flag cadences that linear model failed
         fit_quality = np.isnan(flux).astype(int)
         # flag cadences with negative fluxes
         fit_quality[flux < 0] += 2**1
 
         return (
-            flux,
-            flux_err,
             time,
             cadenceno,
-            chi2,
+            flux,
+            flux_err,
+            red_chi2,
             fit_quality,
-            cad_quality,
+            spoc_quality,
             time_binning,
+            bad_spoc_bits,
         )
 
     def _aperture_photometry(self, bad_bits: list = [1, 3, 7], **kwargs):
@@ -3410,11 +3418,11 @@ class MovingTPF:
 
         # Create table HDU
         table_hdu_ap = fits.BinTableHDU.from_columns(cols_ap)
-        table_hdu_ap.header["EXTNAME"] = "LIGHTCURVE_APE"
+        table_hdu_ap.header["EXTNAME"] = "LIGHTCURVE_AP"
 
         if "psf" in self.lc.keys():
             cols_psf = [
-                # Times in TDB at SS barycenter.
+                # Average time in binning window, in TDB at SS barycenter
                 fits.Column(
                     name="TIME",
                     format="D",
@@ -3422,20 +3430,20 @@ class MovingTPF:
                     disp="D14.7",
                     array=self.lc["psf"]["time"],
                 ),
-                # Cadence number, as defined by tesscube, but with cadence binning
+                # Average cadence number, as defined by tesscube, in binning window
                 fits.Column(
                     name="CADENCENO",
                     format="I",
                     array=self.lc["psf"]["cadenceno"],
                 ),
-                # SPOC quality flag, as the max value in the cadence binning window
+                # Combined SPOC quality flag in the cadence binning window
                 fits.Column(
                     name="QUALITY",
                     format="J",
                     disp="B16.16",
-                    array=self.lc["psf"]["cadence_quality"],
+                    array=self.lc["psf"]["spoc_quality"],
                 ),
-                # PSF flux
+                # PSF flux and error
                 fits.Column(
                     name="FLUX",
                     format="E",
@@ -3465,14 +3473,14 @@ class MovingTPF:
                     disp="E14.7",
                     array=self.lc["psf"]["TESSmag_err"],
                 ),
-                # Model fit reduce chi2
+                # Model fit reduced chi-squared
                 fits.Column(
                     name="RED_CHI2",
                     format="E",
                     disp="E14.7",
-                    array=self.lc["psf"]["chi2"],
+                    array=self.lc["psf"]["red_chi2"],
                 ),
-                # model fit quality flag
+                # Model fit quality flag
                 fits.Column(
                     name="FIT_QUALITY",
                     format="J",
@@ -3484,8 +3492,14 @@ class MovingTPF:
             table_hdu_psf = fits.BinTableHDU.from_columns(cols_psf)
             table_hdu_psf.header["TIME_BIN"] = (
                 self.lc["psf"]["time_binning"],
-                "Number of cadences used for time binning",
+                "number of cadences used for time binning",
             )
+            table_hdu_psf.header["BAD_SPOC"] = (
+                f"{','.join([str(bit) for bit in self.lc["psf"]["bad_spoc_bits"]])}"
+                if isinstance(self.lc["psf"]["bad_spoc_bits"], list)
+                else self.lc["psf"]["bad_spoc_bits"],
+                "bad quality SPOC bits for PRF fitting",
+            )  
             table_hdu_psf.header["EXTNAME"] = "LIGHTCURVE_PSF"
             return fits.HDUList(
                 [self._make_primary_hdu(file_type="lc"), table_hdu_ap, table_hdu_psf]
