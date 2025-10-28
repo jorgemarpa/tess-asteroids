@@ -1135,7 +1135,7 @@ class MovingTPF:
         elif bad_spoc_bits == "none":
             # No masking
             return np.ones(len(self.time), dtype=bool), bad_spoc_bits
-        elif not isinstance(bad_spoc_bits, list) or bad_spoc_bits != "all":
+        elif not isinstance(bad_spoc_bits, list) and bad_spoc_bits != "all":
             raise ValueError(
                 "`bad_spoc_bits` must be either one of ['default', 'all', 'none'] or a custom list of bad quality SPOC bits."
             )
@@ -2182,9 +2182,7 @@ class MovingTPF:
                 "spoc_quality": spoc_quality,
                 "time_binning": time_binning,
                 "bad_spoc_bits": bad_spoc_bits,
-                "flux_fraction": np.ones_like(flux),
             }
-            # raise NotImplementedError("PSF photometry is not yet implemented.")
         else:
             raise ValueError(
                 f"Method must be one of: ['aperture', 'psf']. Not '{method}'"
@@ -2198,7 +2196,7 @@ class MovingTPF:
             self.lc[method]["flux_err"],
             self.lc[method]["flux_fraction"]
             if method == "aperture" and self.ap_method == "prf"
-            else np.ones_like(self.lc[method]["flux_fraction"]),
+            else np.ones_like(self.lc[method]["flux"]),
         )
 
     def _psf_photometry(
