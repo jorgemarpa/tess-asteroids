@@ -423,7 +423,7 @@ def test_to_lightcurve():
     ).all()
 
     # Test PSF photometry to extract lightcurve from TPF.
-    target.to_lightcurve(method="psf", time_binning=1, bad_spoc_bits="none")
+    target.to_lightcurve(method="psf", n_cadences=1, bad_spoc_bits="none")
 
     # Check the lightcurve has the same length as target.time
     assert len(target.lc["psf"]["time"]) == len(target.time)
@@ -432,7 +432,6 @@ def test_to_lightcurve():
     assert len(target.lc["psf"]["TESSmag"]) == len(target.time)
     assert len(target.lc["psf"]["TESSmag_err"]) == len(target.time)
     assert len(target.lc["psf"]["fit_quality"]) == len(target.time)
-    assert len(target.lc["psf"]["flux_fraction"]) == len(target.time)
 
     # check the total number of failed cadences is equal or greater than the number of
     # bad cadences

@@ -2119,7 +2119,7 @@ class MovingTPF:
             Method to extract lightcurve. One of `aperture` or `psf`.
         kwargs : dict
             Keyword arguments, e.g `self._aperture_photometry` takes `bad_bits`,
-            `self._psf_photometry` takes `time_binning`
+            `self._psf_photometry` takes `n_cadences`
 
         Returns
         -------
@@ -2169,7 +2169,7 @@ class MovingTPF:
                 red_chi2,
                 fit_quality,
                 spoc_quality,
-                time_binning,
+                n_cadences,
                 bad_spoc_bits,
             ) = self._psf_photometry(**kwargs)
             self.lc["psf"] = {
@@ -2180,7 +2180,7 @@ class MovingTPF:
                 "fit_quality": fit_quality,
                 "red_chi2": red_chi2,
                 "spoc_quality": spoc_quality,
-                "time_binning": time_binning,
+                "n_cadences": n_cadences,
                 "bad_spoc_bits": bad_spoc_bits,
             }
         else:
@@ -2201,7 +2201,7 @@ class MovingTPF:
 
     def _psf_photometry(
         self,
-        time_binning: int = 1,
+        n_cadences: int = 1,
         bad_spoc_bits: Union[list, str] = "default",
         clip_data: bool = False,
         **kwargs,
@@ -2213,7 +2213,7 @@ class MovingTPF:
 
         Parameters
         ----------
-        time_binning : int
+        n_cadences : int
             Number of cadences used to fit the PRF model simultaneously, effectively doing data binning.
             Default is 1, which is no binning.
         bad_spoc_bits : list or str
@@ -2243,9 +2243,9 @@ class MovingTPF:
             - `red_chi2` is the reduced chi-squared of the fitted PRF model.
             - `fit_quality` identifies cadences where the PRF fit did not converge.
             - `spoc_quality` is the combined SPOC quality flag in the binning window.
-            Note: if `time_binning = 1` then `time`, `cadenceno` and `spoc_quality` are equal to `self.time`, `self.cadence_number`
+            Note: if `n_cadences = 1` then `time`, `cadenceno` and `spoc_quality` are equal to `self.time`, `self.cadence_number`
             and `self.quality`, respectively.
-        time_binning: int
+        n_cadences: int
             Number of cadences that were used to simultaneosuly fit the PRF model.
         bad_spoc_bits : list or str
             The SPOC bits used to define bad quality data.
@@ -2279,7 +2279,7 @@ class MovingTPF:
             cube[mask] = np.nan
 
         # define the number of points in the resulting light curve given the cadence binning
-        n_points = len(time) // time_binning
+        n_points = len(time) // n_cadences
         psf_phot = []
         nfails = 0
         # iterate over binning windows to compute psf photometry
@@ -2345,7 +2345,7 @@ class MovingTPF:
             red_chi2,
             fit_quality,
             spoc_quality,
-            time_binning,
+            n_cadences,
             bad_spoc_bits,
         )
 
@@ -3491,8 +3491,8 @@ class MovingTPF:
             ]
             # Create table HDU
             table_hdu_psf = fits.BinTableHDU.from_columns(cols_psf)
-            table_hdu_psf.header["TIME_BIN"] = (
-                self.lc["psf"]["time_binning"],
+            table_hdu_psf.header["N_CAD"] = (
+                self.lc["psf"]["n_cadences"],
                 "number of cadences used for time binning",
             )
             table_hdu_psf.header["BAD_SPOC"] = (
