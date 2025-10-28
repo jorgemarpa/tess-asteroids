@@ -2238,29 +2238,29 @@ class MovingTPF:
             not hasattr(self, "all_flux")
             or not hasattr(self, "flux")
             or not hasattr(self, "corr_flux")
-            or not hasattr(self, "pixel_quality")
-            or not hasattr(self, "aperture_mask")
+            #or not hasattr(self, "pixel_quality")
+            #or not hasattr(self, "aperture_mask")
         ):
             raise AttributeError(
                 "Must run `get_data()`, `reshape_data()`, `background_correction()`, `create_pixel_quality()` and `create_aperture()` before doing PSF photometry."
             )
-        # Only use good quality data to fit the PRF model
+
+        time = self.time
+        prf_model = self._create_target_prf_model()
+        cube = self.corr_flux
+        cube_err = self.corr_flux_err
+        spoc_quality = self.quality
+        cadno = self.cadence_number
+
+        # Only use good quality data to fit the PRF model.
         if cadence_quality:
             quality_mask = self.quality == 0
-            time = self.time[quality_mask]
-            prf_model = self._create_target_prf_model(all_flux=False)[quality_mask]
-            cube = self.corr_flux[quality_mask]
-            cube_err = self.corr_flux_err[quality_mask]
-            spoc_quality = self.quality[quality_mask]
-            cadno = self.cadence_number[quality_mask]
-        # Use all cadences (this might lead to inaccurate results)
-        else:
-            time = self.time
-            prf_model = self._create_target_prf_model(all_flux=False)
-            cube = self.corr_flux
-            cube_err = self.corr_flux_err
-            spoc_quality = self.quality
-            cadno = self.cadence_number
+            time = time[quality_mask]
+            prf_model = prf_model[quality_mask]
+            cube = cube[quality_mask]
+            cube_err = cube_err[quality_mask]
+            spoc_quality = spoc_quality[quality_mask]
+            cadno = cadno[quality_mask]
 
         # clip out badly corrected pixels
         if clip_data:
@@ -2271,11 +2271,11 @@ class MovingTPF:
             cube[mask] = np.nan
 
         # define the number of points in the resulting light curve given the cadence binning
-        n_points = time.shape[0] // time_binning
+        n_points = len(time) // time_binning
         psf_phot = []
         nfails = 0
         # iterate over binning windows to compute psf photometry
-        for idx, t, a, ae, p, qu, cn in tqdm(
+        for idx, t, f, fe, p, qu, cn in tqdm(
             zip(
                 range(n_points),
                 np.array_split(time, n_points),
@@ -2285,32 +2285,36 @@ class MovingTPF:
                 np.array_split(spoc_quality, n_points),
                 np.array_split(cadno, n_points),
             ),
-            total=len(range(n_points)),
+            total=n_points,
         ):
             # find finite values and pixels with >0.01% prf value
-            j = np.isfinite(a.ravel()) & np.isfinite(ae.ravel()) & (p.ravel() > 0.00001)
+            j = np.isfinite(f.ravel()) & np.isfinite(fe.ravel()) & (p.ravel() > 0.00001)
+            # Derive SPOC quality value in window
+            qual = 0
+            for q in qu:
+                qual |= q
             # create DM from PRF model
             X = p.ravel()[:, None]
-            sigma_w_inv = X[j].T.dot(X[j] / ae.ravel()[j, None] ** 2)
+            sigma_w_inv = X[j].T.dot(X[j] / fe.ravel()[j, None] ** 2)
             # solve linear model
             try:
                 # get flux
                 amp = np.linalg.solve(
-                    sigma_w_inv, X[j].T.dot((a.ravel()[j] / ae.ravel()[j] ** 2))
+                    sigma_w_inv, X[j].T.dot((f.ravel()[j] / fe.ravel()[j] ** 2))
                 )[0]
                 # get flux error
-                amp_err = np.linalg.inv(sigma_w_inv).diagonal() ** 0.5
+                amp_err = (np.linalg.inv(sigma_w_inv).diagonal() ** 0.5)[0]
                 chi2 = np.sum(
-                    ((a.ravel() - X.dot(amp).ravel()) ** 2 / (ae.ravel() ** 2))[j],
+                    ((f.ravel() - X.dot(amp).ravel()) ** 2 / (fe.ravel() ** 2))[j],
                     axis=0,
                 ) / (j.sum() - 1)
                 psf_phot.append(
-                    [t.mean(), np.median(cn), amp, amp_err[0], chi2, np.max(qu)]
+                    [t.mean(), np.median(cn), amp, amp_err, chi2, qual]
                 )
             # catch lin alg when problem has no solution, fill with nan values for this time
             except np.linalg.LinAlgError:
                 psf_phot.append(
-                    [t.mean(), np.median(cn), np.nan, np.nan, np.nan, np.max(qu)]
+                    [t.mean(), np.median(cn), np.nan, np.nan, np.nan, qual]
                 )
                 nfails += 1
                 continue
@@ -2319,7 +2323,7 @@ class MovingTPF:
                 f"During PRF fitting, {nfails} cadences did not solve. These cadences will be replaced by `NaN`."
             )
 
-        time, cadenceno, flux, flux_err, chi2, cad_quality = np.array(psf_phot).T
+        time, cadenceno, flux, flux_err, chi2, cad_quality = np.asarray(psf_phot).T
         # flag cadences that linear model failed
         fit_quality = np.isnan(flux).astype(int)
         # flag cadences with negative fluxes
