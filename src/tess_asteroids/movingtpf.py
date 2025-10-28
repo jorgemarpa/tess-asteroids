@@ -2272,7 +2272,7 @@ class MovingTPF:
 
         # define the number of points in the resulting light curve given the cadence binning
         n_points = time.shape[0] // time_binning
-        prf_phot = []
+        psf_phot = []
         nfails = 0
         # iterate over binning windows to compute psf photometry
         for idx, t, a, ae, p, qu, cn in tqdm(
@@ -2294,7 +2294,7 @@ class MovingTPF:
             sigma_w_inv = X[j].T.dot(X[j] / ae.ravel()[j, None] ** 2)
             # solve linear model
             try:
-                # get PRF flux
+                # get flux
                 amp = np.linalg.solve(
                     sigma_w_inv, X[j].T.dot((a.ravel()[j] / ae.ravel()[j] ** 2))
                 )[0]
@@ -2304,12 +2304,12 @@ class MovingTPF:
                     ((a.ravel() - X.dot(amp).ravel()) ** 2 / (ae.ravel() ** 2))[j],
                     axis=0,
                 ) / (j.sum() - 1)
-                prf_phot.append(
+                psf_phot.append(
                     [t.mean(), np.median(cn), amp, amp_err[0], chi2, np.max(qu)]
                 )
             # catch lin alg when problem has no solution, fill with nan values for this time
             except np.linalg.LinAlgError:
-                prf_phot.append(
+                psf_phot.append(
                     [t.mean(), np.median(cn), np.nan, np.nan, np.nan, np.max(qu)]
                 )
                 nfails += 1
@@ -2319,7 +2319,7 @@ class MovingTPF:
                 f"During PRF fitting, {nfails} cadences did not solve. These cadences will be replaced by `NaN`."
             )
 
-        time, cadenceno, flux, flux_err, chi2, cad_quality = np.array(prf_phot).T
+        time, cadenceno, flux, flux_err, chi2, cad_quality = np.array(psf_phot).T
         # flag cadences that linear model failed
         fit_quality = np.isnan(flux).astype(int)
         # flag cadences with negative fluxes
