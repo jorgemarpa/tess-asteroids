@@ -2274,7 +2274,7 @@ class MovingTPF:
         if clip_data:
             mask = sigma_clip(cube, sigma=3).mask
             logger.info(
-                f"Removing {mask.sum()/np.prod(cube.shape)*100:0.1f}% of the data as outliers"
+                f"During PSF photometry, {mask.sum()/np.prod(cube.shape)*100:0.1f}% of the cadences were removed as outliers."
             )
             cube[mask] = np.nan
 
