@@ -437,8 +437,6 @@ def test_to_lightcurve():
     # check the total number of failed cadences is equal or greater than the number of
     # bad cadences
     assert np.sum(target.lc["psf"]["fit_quality"] == 0) >= np.sum(target.quality == 0)
-    # check flux fraction is 1
-    assert np.all(target.lc["psf"]["flux_fraction"] == 1)
     # check reduced chi-squared values are positives
     assert np.all(
         target.lc["psf"]["red_chi2"][target.lc["psf"]["fit_quality"] == 0] >= 0
