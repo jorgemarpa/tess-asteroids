@@ -2210,28 +2210,28 @@ class MovingTPF:
         """
         Computes PSF phtometry by fitting the PRF model to the data. The model is fitted using a linear model as
         in the LFD paper (Hedges et al. 2021).
-        Optionally it can fit the data in a cadence window simultaneusly, effectively binning the data to improve SNR.
+        Optionally it can fit the data in a cadence window simultaneously, effectively binning the data to improve SNR.
 
         Parameters
         ----------
-        time_binning : int
-            Number of cadences used to fit the PRF model simultaneusly, effectively doing data binning.
+        cadence_binning : int
+            Number of cadences used to fit the PRF model simultaneously, effectively doing data binning.
             Default is 1, which is no binning.
         cadence_quality : bool
-            Rejects bad quality cadances from the PSF fitting by obly keeping cadences with `quality == 0`.
+             Rejects bad quality cadences from the PSF fitting by only keeping cadences with `quality == 0`.
             Default is False, which uses all available cadences.
         clip_data : bool
-            Removes pixels that falls out of distribution, outliers, using 3-sigma clipping. This is useful to remove
-            poorly corrected pixels, but it can remove pixels with real strong target signal. It is only recommended for
+            Removes pixels that are outliers using 3-sigma clipping. This is useful to remove
+            poorly corrected pixels, but it can remove pixels with strong target signal. It is only recommended for
             very faint targets near the background level.
-            Default is False, which does not do any data clipping.
+            Default is False, which does not do any outlier clipping.
 
         Returns:
         --------
-        flux, flux_err, time, chi2, fit_quality: ndarrays
-            Flux, flux_err from the PRF fitting. Resulting time array which changes if `time_binnin > 1`.
-            `chi2` is the Chi-square metric for the fitted model. `fit_quality` has flags when the fit
-            routine did not converge.
+        flux, flux_err, time, red_chi2, fit_quality: ndarrays
+            Flux and flux error from the PRF fitting (flux, flux_err). Time array (time), which is different to 
+            `self.time` if `cadence_binning > 1`. `red_chi2` is the reduced chi-squared of the fitted model. 
+            `fit_quality` defines flags which identify when the fit routine did not converge.
 
         """
         if (
@@ -2242,9 +2242,9 @@ class MovingTPF:
             or not hasattr(self, "aperture_mask")
         ):
             raise AttributeError(
-                "Must run `get_data()`, `reshape_data()`, `background_correction()`, `create_pixel_quality()` and `create_aperture()` before doing aperture photometry."
+                "Must run `get_data()`, `reshape_data()`, `background_correction()`, `create_pixel_quality()` and `create_aperture()` before doing PSF photometry."
             )
-        # use only good quality data to fit the PSF
+        # Only use good quality data to fit the PRF model
         if cadence_quality:
             quality_mask = self.quality == 0
             time = self.time[quality_mask]
@@ -2253,7 +2253,7 @@ class MovingTPF:
             cube_err = self.corr_flux_err[quality_mask]
             spoc_quality = self.quality[quality_mask]
             cadno = self.cadence_number[quality_mask]
-        # use all cadences, this might lead to inaccurare results
+        # Use all cadences (this might lead to inaccurate results)
         else:
             time = self.time
             prf_model = self._create_target_prf_model(all_flux=False)
@@ -2316,7 +2316,7 @@ class MovingTPF:
                 continue
         if nfails > 0:
             logger.warning(
-                f"During PRF fitting, {nfails} cadences did not solve. This cadences will be replaced by `NaN`."
+                f"During PRF fitting, {nfails} cadences did not solve. These cadences will be replaced by `NaN`."
             )
 
         time, cadenceno, flux, flux_err, chi2, cad_quality = np.array(prf_phot).T
