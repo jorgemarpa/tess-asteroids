@@ -423,7 +423,7 @@ def test_to_lightcurve():
     ).all()
 
     # Test PSF photometry to extract lightcurve from TPF.
-    target.to_lightcurve(method="psf", time_binning=1, cadence_quality=False)
+    target.to_lightcurve(method="psf", time_binning=1, bad_spoc_bits="none")
 
     # Check the lightcurve has the same length as target.time
     assert len(target.lc["psf"]["time"]) == len(target.time)
@@ -439,8 +439,10 @@ def test_to_lightcurve():
     assert np.sum(target.lc["psf"]["fit_quality"] == 0) >= np.sum(target.quality == 0)
     # check flux fraction is 1
     assert np.all(target.lc["psf"]["flux_fraction"] == 1)
-    # check chi2 values are positives
-    assert np.all(target.lc["psf"]["chi2"][target.lc["psf"]["fit_quality"] == 0] >= 0)
+    # check reduced chi-squared values are positives
+    assert np.all(
+        target.lc["psf"]["red_chi2"][target.lc["psf"]["fit_quality"] == 0] >= 0
+    )
 
 
 def test_calculate_TESSmag():

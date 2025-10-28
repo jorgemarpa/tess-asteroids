@@ -770,7 +770,9 @@ class MovingTPF:
 
         # If no SPOC quality mask is provided, the default mask is used.
         if spoc_quality_mask is None:
-            spoc_quality_mask, self.bad_spoc_bits = self._create_spoc_quality_mask(bad_spoc_bits="default")
+            spoc_quality_mask, self.bad_spoc_bits = self._create_spoc_quality_mask(
+                bad_spoc_bits="default"
+            )
 
         # Create mask for moving target and stars.
         source_mask = self._create_source_mask(include_stars=True, **kwargs)
@@ -1245,7 +1247,9 @@ class MovingTPF:
             raise ValueError(f"`sigma` must be greater than zero. Not '{sigma}'")
 
         # Define good quality data using user-defined SPOC quality flags.
-        spoc_quality_mask, self.bad_spoc_bits = self._create_spoc_quality_mask(bad_spoc_bits)
+        spoc_quality_mask, self.bad_spoc_bits = self._create_spoc_quality_mask(
+            bad_spoc_bits
+        )
 
         # Compute scattered light model
         if sl_method == "pca":
@@ -2158,10 +2162,10 @@ class MovingTPF:
 
         elif method == "psf":
             (
-                flux,
-                flux_err,
                 time,
                 cadenceno,
+                flux,
+                flux_err,
                 red_chi2,
                 fit_quality,
                 spoc_quality,
@@ -2221,7 +2225,7 @@ class MovingTPF:
             - "all" - mask all data with a SPOC quality flag.
             - "none" - mask no data.
             - list - mask custom bits provided in list.
-            Data that is masked will not be used when fitting the PRF model. If all cadences in a window are defined as bad quality, 
+            Data that is masked will not be used when fitting the PRF model. If all cadences in a window are defined as bad quality,
             there will be no lightcurve data for that window.
             More information about the SPOC quality flags can be found in Section 9 of the TESS Science Data Products
             Description Document.
@@ -2237,11 +2241,11 @@ class MovingTPF:
 
             - `time` is the average time in the binning window.
             - `cadenceno` is the average cadence number, as defined by `tesscube` in the binning window.
-            - `flux` and `flux_err` from the PRF fitting. 
-            - `red_chi2` is the reduced chi-squared of the fitted PRF model. 
+            - `flux` and `flux_err` from the PRF fitting.
+            - `red_chi2` is the reduced chi-squared of the fitted PRF model.
             - `fit_quality` identifies cadences where the PRF fit did not converge.
             - `spoc_quality` is the combined SPOC quality flag in the binning window.
-            Note: if `time_binning = 1` then `time`, `cadenceno` and `spoc_quality` are equal to `self.time`, `self.cadence_number` 
+            Note: if `time_binning = 1` then `time`, `cadenceno` and `spoc_quality` are equal to `self.time`, `self.cadence_number`
             and `self.quality`, respectively.
         time_binning: int
             Number of cadences that were used to simultaneosuly fit the PRF model.
@@ -2294,7 +2298,10 @@ class MovingTPF:
             total=n_points,
         ):
             # find finite values and pixels with >0.01% prf value
-            j = np.logical_and(np.isfinite(f.ravel()), np.logical_and(np.isfinite(fe.ravel()),(p.ravel() > 0.00001)))
+            j = np.logical_and(
+                np.isfinite(f.ravel()),
+                np.logical_and(np.isfinite(fe.ravel()), (p.ravel() > 0.00001)),
+            )
             # Derive SPOC quality value in window
             qual = 0
             for q in qu:
@@ -2315,14 +2322,10 @@ class MovingTPF:
                     ((f.ravel() - X.dot(amp).ravel()) ** 2 / (fe.ravel() ** 2))[j],
                     axis=0,
                 ) / (j.sum() - 1)
-                psf_phot.append(
-                    [t.mean(), np.median(cn), amp, amp_err, red_chi2, qual]
-                )
+                psf_phot.append([t.mean(), np.median(cn), amp, amp_err, red_chi2, qual])
             # catch lin alg when problem has no solution, fill with nan values for this time
             except np.linalg.LinAlgError:
-                psf_phot.append(
-                    [t.mean(), np.median(cn), np.nan, np.nan, np.nan, qual]
-                )
+                psf_phot.append([t.mean(), np.median(cn), np.nan, np.nan, np.nan, qual])
                 nfails += 1
                 continue
         if nfails > 0:
@@ -3495,11 +3498,11 @@ class MovingTPF:
                 "number of cadences used for time binning",
             )
             table_hdu_psf.header["BAD_SPOC"] = (
-                f"{','.join([str(bit) for bit in self.lc["psf"]["bad_spoc_bits"]])}"
+                ",".join([str(bit) for bit in self.lc["psf"]["bad_spoc_bits"]])
                 if isinstance(self.lc["psf"]["bad_spoc_bits"], list)
                 else self.lc["psf"]["bad_spoc_bits"],
                 "bad quality SPOC bits for PRF fitting",
-            )  
+            )
             table_hdu_psf.header["EXTNAME"] = "LIGHTCURVE_PSF"
             return fits.HDUList(
                 [self._make_primary_hdu(file_type="lc"), table_hdu_ap, table_hdu_psf]
