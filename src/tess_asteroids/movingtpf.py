@@ -2147,7 +2147,6 @@ class MovingTPF:
                 measured_coords,
                 flux_fraction,
             ) = self._aperture_photometry(**kwargs)
-            quality = self._create_lc_quality()
             self.lc["aperture"] = {
                 "time": self.time,
                 "flux": flux,
@@ -2158,7 +2157,7 @@ class MovingTPF:
                 "col_cen_err": col_cen_err,
                 "row_cen": row_cen,
                 "row_cen_err": row_cen_err,
-                "quality": quality,
+                "quality": self._create_lc_quality(),
                 "flux_fraction": flux_fraction,
                 "ra": [coord.ra.value for coord in measured_coords],
                 "dec": [coord.dec.value for coord in measured_coords],
@@ -2167,21 +2166,27 @@ class MovingTPF:
         elif method == "psf":
             (
                 time,
+                time_uerr,
+                time_lerr,
+                time_corr,
                 cadenceno,
                 flux,
                 flux_err,
                 red_chi2,
-                fit_quality,
+                quality,
                 spoc_quality,
                 n_cadences,
                 bad_spoc_bits,
             ) = self._psf_photometry(**kwargs)
             self.lc["psf"] = {
                 "time": time,
+                "time_uerr": time_uerr,
+                "time_lerr": time_lerr,
+                "time_corr": time_corr,
                 "cadenceno": cadenceno,
                 "flux": flux,
                 "flux_err": flux_err,
-                "fit_quality": fit_quality,
+                "quality": quality,
                 "red_chi2": red_chi2,
                 "spoc_quality": spoc_quality,
                 "n_cadences": n_cadences,
@@ -2239,19 +2244,23 @@ class MovingTPF:
 
         Returns:
         --------
-        time, cadenceno, flux, flux_err, red_chi2, fit_quality, spoc_quality: ndarrays
+        time, time_uerr, time_lerr, time_corr, cadenceno, flux, flux_err, red_chi2, quality, spoc_quality: ndarrays
 
             - `time` is the average time in the binning window.
+            - `time_uerr`/`time_lerr` are the upper/lower error on time (corresponds to limits of binning window).
+                These will be nan if `n_cadences = 1`.
+            - `time_lerr` is the lower error on time (corresponds to lower limit of binning window).
+            - `time_corr` is the average barycentric time correction in the binning window.
             - `cadenceno` is the average cadence number, as defined by `tesscube` in the binning window.
             - `flux` and `flux_err` from the PRF fitting.
             - `red_chi2` is the reduced chi-squared of the fitted PRF model.
-            - `fit_quality` identifies cadences where the PRF fit did not converge to a physical result:
+            - `quality` identifies cadences where the PRF fit did not converge to a physical result:
 
                 - Bit 1 = model fitting failed.
                 - Bit 2 = model fitting returned negative flux value.
             - `spoc_quality` is the combined SPOC quality flag in the binning window.
-            Note: if `n_cadences = 1` then `time`, `cadenceno` and `spoc_quality` are equal to `self.time`, `self.cadence_number`
-            and `self.quality`, respectively.
+            Note: if `n_cadences = 1` then `time`, `time_corr`, `cadenceno` and `spoc_quality` are equal to `self.time`, `self.timecorr`,
+            `self.cadence_number` and `self.quality`, respectively.
         n_cadences: int
             Number of cadences that were used to simultaneosuly fit the PRF model.
         bad_spoc_bits : list or str
@@ -2271,6 +2280,7 @@ class MovingTPF:
 
         # Apply quality mask to data
         time = self.time[spoc_quality_mask]
+        timecorr = self.timecorr[spoc_quality_mask]
         prf_model = self._create_target_prf_model()[spoc_quality_mask]
         cube = self.corr_flux[spoc_quality_mask]
         cube_err = self.corr_flux_err[spoc_quality_mask]
@@ -2290,7 +2300,7 @@ class MovingTPF:
         psf_phot = []
         nfails = 0
         # iterate over binning windows to compute psf photometry
-        for idx, t, f, fe, p, qu, cn in tqdm(
+        for idx, t, f, fe, p, qu, cn, tc in tqdm(
             zip(
                 range(n_points),
                 np.array_split(time, n_points),
@@ -2299,6 +2309,7 @@ class MovingTPF:
                 np.array_split(prf_model, n_points),
                 np.array_split(spoc_quality, n_points),
                 np.array_split(cadno, n_points),
+                np.array_split(timecorr, n_points),
             ),
             total=n_points,
         ):
@@ -2311,6 +2322,12 @@ class MovingTPF:
             qual = 0
             for q in qu:
                 qual |= q
+            # Compute errors on window
+            t_mean = t.mean()
+            if n_cadences == 1:
+                te_u, te_l = np.nan, np.nan
+            else:
+                te_u, te_l = np.nanmax(t) - t_mean, t_mean - np.nanmin(t)
             # create DM from PRF model
             X = p.ravel()[:, None]
             sigma_w_inv = X[j].T.dot(X[j] / fe.ravel()[j, None] ** 2)
@@ -2327,10 +2344,34 @@ class MovingTPF:
                     ((f.ravel() - X.dot(amp).ravel()) ** 2 / (fe.ravel() ** 2))[j],
                     axis=0,
                 ) / (j.sum() - 1)
-                psf_phot.append([t.mean(), np.median(cn), amp, amp_err, red_chi2, qual])
+                psf_phot.append(
+                    [
+                        t_mean,
+                        te_u,
+                        te_l,
+                        tc.mean(),
+                        np.median(cn),
+                        amp,
+                        amp_err,
+                        red_chi2,
+                        qual,
+                    ]
+                )
             # catch lin alg when problem has no solution, fill with nan values for this time
             except np.linalg.LinAlgError:
-                psf_phot.append([t.mean(), np.median(cn), np.nan, np.nan, np.nan, qual])
+                psf_phot.append(
+                    [
+                        t_mean,
+                        te_u,
+                        te_l,
+                        tc.mean(),
+                        np.median(cn),
+                        np.nan,
+                        np.nan,
+                        np.nan,
+                        qual,
+                    ]
+                )
                 nfails += 1
                 continue
         if nfails > 0:
@@ -2338,19 +2379,32 @@ class MovingTPF:
                 f"During PRF fitting, {nfails} cadences did not solve. These cadences will be replaced by `NaN`."
             )
 
-        time, cadenceno, flux, flux_err, red_chi2, spoc_quality = np.asarray(psf_phot).T
-        # Flag cadences where model fiting failed - bit 1
-        fit_quality = np.isnan(flux).astype(int)
-        # Flag cadences with negative LC flux - bit 2
-        fit_quality[flux < 0] += 2**1
-
-        return (
+        (
             time,
+            time_uerr,
+            time_lerr,
+            time_corr,
             cadenceno,
             flux,
             flux_err,
             red_chi2,
-            fit_quality,
+            spoc_quality,
+        ) = np.asarray(psf_phot).T
+        # Flag cadences where model fiting failed - bit 1
+        quality = np.isnan(flux).astype(int)
+        # Flag cadences with negative LC flux - bit 2
+        quality[flux < 0] += 2**1
+
+        return (
+            time,
+            time_uerr,
+            time_lerr,
+            time_corr,
+            cadenceno,
+            flux,
+            flux_err,
+            red_chi2,
+            quality,
             spoc_quality,
             n_cadences,
             bad_spoc_bits,
@@ -3460,6 +3514,29 @@ class MovingTPF:
                     disp="D14.7",
                     array=self.lc["psf"]["time"],
                 ),
+                # Upper and lower error on time (corresponds to limits of binning window)
+                fits.Column(
+                    name="TIME_UERR",
+                    format="E",
+                    unit="d",
+                    disp="E14.7",
+                    array=self.lc["psf"]["time_uerr"],
+                ),
+                fits.Column(
+                    name="TIME_LERR",
+                    format="E",
+                    unit="d",
+                    disp="E14.7",
+                    array=self.lc["psf"]["time_lerr"],
+                ),
+                # Average barycentric time correction in binning window
+                fits.Column(
+                    name="TIMECORR",
+                    format="E",
+                    unit="d",
+                    disp="E14.7",
+                    array=self.lc["psf"]["time_corr"],
+                ),
                 # Average cadence number, as defined by tesscube, in binning window
                 fits.Column(
                     name="CADENCENO",
@@ -3510,12 +3587,12 @@ class MovingTPF:
                     disp="E14.7",
                     array=self.lc["psf"]["red_chi2"],
                 ),
-                # Model fit quality flag
+                # PSF quality flag
                 fits.Column(
-                    name="FIT_QUALITY",
+                    name="PSF_QUALITY",
                     format="B",
                     disp="B16.16",
-                    array=self.lc["psf"]["fit_quality"],
+                    array=self.lc["psf"]["quality"],
                 ),
             ]
             # Create table HDU

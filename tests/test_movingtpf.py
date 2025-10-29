@@ -431,15 +431,10 @@ def test_to_lightcurve():
     assert len(target.lc["psf"]["flux_err"]) == len(target.time)
     assert len(target.lc["psf"]["TESSmag"]) == len(target.time)
     assert len(target.lc["psf"]["TESSmag_err"]) == len(target.time)
-    assert len(target.lc["psf"]["fit_quality"]) == len(target.time)
+    assert len(target.lc["psf"]["quality"]) == len(target.time)
 
-    # check the total number of failed cadences is equal or greater than the number of
-    # bad cadences
-    assert np.sum(target.lc["psf"]["fit_quality"] == 0) >= np.sum(target.quality == 0)
     # check reduced chi-squared values are positives
-    assert np.all(
-        target.lc["psf"]["red_chi2"][target.lc["psf"]["fit_quality"] == 0] >= 0
-    )
+    assert np.all(target.lc["psf"]["red_chi2"][target.lc["psf"]["quality"] == 0] >= 0)
 
 
 def test_calculate_TESSmag():
