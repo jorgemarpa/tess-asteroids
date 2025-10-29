@@ -3493,7 +3493,7 @@ class MovingTPF:
             table_hdu_psf = fits.BinTableHDU.from_columns(cols_psf)
             table_hdu_psf.header["N_CAD"] = (
                 self.lc["psf"]["n_cadences"],
-                "number of cadences used for time binning",
+                "number of cadences for simultaneous PRF fitting",
             )
             table_hdu_psf.header["BAD_SPOC"] = (
                 ",".join([str(bit) for bit in self.lc["psf"]["bad_spoc_bits"]])
