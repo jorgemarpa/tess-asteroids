@@ -2133,7 +2133,7 @@ class MovingTPF:
         if not hasattr(self, "lc"):
             self.lc = {}
 
-        # Get lightcurve and quality mask via aperture photometry
+        # Get lightcurve via aperture photometry
         if method == "aperture":
             (
                 flux,
@@ -2163,6 +2163,7 @@ class MovingTPF:
                 "dec": [coord.dec.value for coord in measured_coords],
             }
 
+        # Get lightcurve via PSF photometry
         elif method == "psf":
             (
                 time,
@@ -2198,8 +2199,9 @@ class MovingTPF:
             )
 
         # Convert measured flux to TESS magnitude.
-        # If "prf" method was used to compute the aperture, there are meaningful flux fractions.
-        # Otherwise, assume 100% of the flux is inside the aperture.
+        # If PSF photometry was used, 100% of the flux is inside the aperture.
+        # If aperture photometry was used with a `prf` aperture, there are meaningful flux fractions. Otherwise,
+        # assume 100% of the flux is inside the aperture.
         self.lc[method]["TESSmag"], self.lc[method]["TESSmag_err"] = calculate_TESSmag(
             self.lc[method]["flux"],
             self.lc[method]["flux_err"],
@@ -2216,9 +2218,10 @@ class MovingTPF:
         **kwargs,
     ):
         """
-        Computes PSF phtometry by fitting the PRF model to the data. The model is fitted using a linear model as
+        Computes PSF photometry by fitting the amplitude of the target's PRF model to the data. The model is fitted using a linear model as
         in the LFD paper (Hedges et al. 2021).
-        Optionally it can fit the data in a cadence window simultaneously, effectively binning the data to improve SNR.
+
+        This function can optionally fit all of the data in a cadence window simultaneously, effectively binning the data to improve SNR.
 
         Parameters
         ----------
@@ -2249,9 +2252,8 @@ class MovingTPF:
             - `time` is the average time in the binning window.
             - `time_uerr`/`time_lerr` are the upper/lower error on time (corresponds to limits of binning window).
                 These will be nan if `n_cadences = 1`.
-            - `time_lerr` is the lower error on time (corresponds to lower limit of binning window).
             - `time_corr` is the average barycentric time correction in the binning window.
-            - `cadenceno` is the average cadence number, as defined by `tesscube` in the binning window.
+            - `cadenceno` is the average cadence number, as defined by `tesscube`, in the binning window.
             - `flux` and `flux_err` from the PRF fitting.
             - `red_chi2` is the reduced chi-squared of the fitted PRF model.
             - `quality` identifies cadences where the PRF fit did not converge to a physical result:
@@ -2287,7 +2289,7 @@ class MovingTPF:
         spoc_quality = self.quality[spoc_quality_mask]
         cadno = self.cadence_number[spoc_quality_mask]
 
-        # clip out badly corrected pixels
+        # Reject poorly corrected pixels with 3-sigma clipping
         if clip_data:
             mask = sigma_clip(cube, sigma=3).mask
             logger.info(
@@ -2295,11 +2297,12 @@ class MovingTPF:
             )
             cube[mask] = np.nan
 
-        # define the number of points in the resulting light curve given the cadence binning
+        # Number of points in the resulting light curve given the cadence binning
         n_points = len(time) // n_cadences
         psf_phot = []
         nfails = 0
-        # iterate over binning windows to compute psf photometry
+
+        # Iterate over each binning window to compute PSF photometry
         for idx, t, f, fe, p, qu, cn, tc in tqdm(
             zip(
                 range(n_points),
@@ -2313,25 +2316,29 @@ class MovingTPF:
             ),
             total=n_points,
         ):
-            # find finite values and pixels with >0.01% prf value
+            # Find finite values and pixels with > 0.01% PRF value
             j = np.logical_and(
                 np.isfinite(f.ravel()),
                 np.logical_and(np.isfinite(fe.ravel()), (p.ravel() > 0.00001)),
             )
+
             # Derive SPOC quality value in window
             qual = 0
             for q in qu:
                 qual |= q
-            # Compute errors on window
+
+            # Compute errors on time window
             t_mean = t.mean()
             if n_cadences == 1:
                 te_u, te_l = np.nan, np.nan
             else:
                 te_u, te_l = np.nanmax(t) - t_mean, t_mean - np.nanmin(t)
-            # create DM from PRF model
+
+            # Create DM from PRF model
             X = p.ravel()[:, None]
             sigma_w_inv = X[j].T.dot(X[j] / fe.ravel()[j, None] ** 2)
-            # solve linear model
+
+            # Solve linear model
             try:
                 # Compute flux
                 amp = np.linalg.solve(
@@ -2344,6 +2351,8 @@ class MovingTPF:
                     ((f.ravel() - X.dot(amp).ravel()) ** 2 / (fe.ravel() ** 2))[j],
                     axis=0,
                 ) / (j.sum() - 1)
+
+                # Save results
                 psf_phot.append(
                     [
                         t_mean,
@@ -2357,7 +2366,8 @@ class MovingTPF:
                         qual,
                     ]
                 )
-            # catch lin alg when problem has no solution, fill with nan values for this time
+
+            # Catch linalg errors and fill with nan values for this time
             except np.linalg.LinAlgError:
                 psf_phot.append(
                     [
@@ -2374,6 +2384,7 @@ class MovingTPF:
                 )
                 nfails += 1
                 continue
+
         if nfails > 0:
             logger.warning(
                 f"During PRF fitting, {nfails} cadences did not solve. These cadences will be replaced by `NaN`."
@@ -2390,6 +2401,7 @@ class MovingTPF:
             red_chi2,
             spoc_quality,
         ) = np.asarray(psf_phot).T
+
         # Flag cadences where model fiting failed - bit 1
         quality = np.isnan(flux).astype(int)
         # Flag cadences with negative LC flux - bit 2
@@ -2735,7 +2747,7 @@ class MovingTPF:
 
     def _make_primary_hdu(self, file_type: str):
         """
-        Make primary header for moving TPF and lightcurve file. Initialises using tesscube
+        Make primary header for moving TPF and LCF. Initialises using tesscube
         and updates/adds keywords, e.g. properties of target, settings used to create files.
 
         Parameters
@@ -2757,12 +2769,12 @@ class MovingTPF:
                 or not hasattr(self, "ap_method")
             ):
                 raise AttributeError(
-                    "Must run `get_data()`, `background_correction()` and `create_aperture()` before creating primary header."
+                    "Must run `get_data()`, `background_correction()` and `create_aperture()` before creating primary header for TPF."
                 )
         elif file_type == "lc":
             if not hasattr(self, "time") or not hasattr(self, "bg_method"):
                 raise AttributeError(
-                    "Must run `get_data()` and `background_correction()` before creating primary header."
+                    "Must run `get_data()` and `background_correction()` before creating primary header for LCF."
                 )
         else:
             raise ValueError(
@@ -3224,7 +3236,7 @@ class MovingTPF:
 
     def _make_lc_hdulist(self):
         """
-        Make HDUList for lightcurve file.
+        Make HDUList for lightcurve file. This includes a separate HDU for aperture and PSF photometry.
 
         Parameters
         ----------
