@@ -2241,7 +2241,10 @@ class MovingTPF:
             - `cadenceno` is the average cadence number, as defined by `tesscube` in the binning window.
             - `flux` and `flux_err` from the PRF fitting.
             - `red_chi2` is the reduced chi-squared of the fitted PRF model.
-            - `fit_quality` identifies cadences where the PRF fit did not converge.
+            - `fit_quality` identifies cadences where the PRF fit did not converge to a physical result:
+
+                - Bit 1 = model fitting failed.
+                - Bit 2 = model fitting returned negative flux value.
             - `spoc_quality` is the combined SPOC quality flag in the binning window.
             Note: if `n_cadences = 1` then `time`, `cadenceno` and `spoc_quality` are equal to `self.time`, `self.cadence_number`
             and `self.quality`, respectively.
@@ -2332,9 +2335,9 @@ class MovingTPF:
             )
 
         time, cadenceno, flux, flux_err, red_chi2, spoc_quality = np.asarray(psf_phot).T
-        # flag cadences that linear model failed
+        # Flag cadences where model fiting failed - bit 1
         fit_quality = np.isnan(flux).astype(int)
-        # flag cadences with negative fluxes
+        # Flag cadences with negative LC flux - bit 2
         fit_quality[flux < 0] += 2**1
 
         return (
@@ -3484,7 +3487,7 @@ class MovingTPF:
                 # Model fit quality flag
                 fits.Column(
                     name="FIT_QUALITY",
-                    format="J",
+                    format="B",
                     disp="B16.16",
                     array=self.lc["psf"]["fit_quality"],
                 ),
