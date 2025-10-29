@@ -206,7 +206,7 @@ class MovingTPF:
         Parameters
         ----------
         method : str
-            Method to extract lightcurve. One of [`aperture`, `psf`].
+            Method to extract lightcurve. One of [`all`, `aperture`, `psf`].
         save : bool
             If True, save the lightcurve HDUList to a FITS file.
         outdir : str
@@ -220,7 +220,11 @@ class MovingTPF:
         Returns
         -------
         """
-        self.to_lightcurve(method=method, **kwargs)
+        if method == "all":
+            self.to_lightcurve(method="aperture", **kwargs)
+            self.to_lightcurve(method="psf", **kwargs)
+        else:
+            self.to_lightcurve(method=method, **kwargs)
         self.to_fits(
             file_type="lc", save=save, outdir=outdir, file_name=file_name, **kwargs
         )
@@ -2702,17 +2706,14 @@ class MovingTPF:
                     "Must run `get_data()`, `background_correction()` and `create_aperture()` before creating primary header."
                 )
         elif file_type == "lc":
-            if (
-                not hasattr(self, "time")
-                or not hasattr(self, "bg_method")
-            ):
+            if not hasattr(self, "time") or not hasattr(self, "bg_method"):
                 raise AttributeError(
                     "Must run `get_data()` and `background_correction()` before creating primary header."
                 )
         else:
             raise ValueError(
-                    f"`file_type` must be one of: ['tpf', 'lc']. Not '{file_type}'"
-                )
+                f"`file_type` must be one of: ['tpf', 'lc']. Not '{file_type}'"
+            )
 
         # Get primary hdu from tesscube
         hdu = self.cube.output_primary_ext
@@ -2743,7 +2744,7 @@ class MovingTPF:
         # Add TESS magnitude zero-point to LCF
         if file_type == "lc":
             hdu.header.set(
-            "TESSMAG0",
+                "TESSMAG0",
                 round(TESSmag_zero_point, 3),
                 comment="[mag] TESS zero-point magnitude",
                 after="TESSMAG",
@@ -3422,7 +3423,7 @@ class MovingTPF:
                 "AP_TYPE",
                 self.ap_method,
                 comment="method used to create aperture",
-            )            
+            )
             table_hdu_ap.header.set(
                 "AP_NPIX",
                 np.nanmedian([np.nansum(mask) for mask in self.aperture_mask]),
@@ -3526,7 +3527,7 @@ class MovingTPF:
                 "N_CAD",
                 self.lc["psf"]["n_cadences"],
                 comment="number of cadences for simultaneous PRF fitting",
-            )  
+            )
             table_hdu_psf.header.set(
                 "BAD_SPOC",
                 ",".join([str(bit) for bit in self.lc["psf"]["bad_spoc_bits"]])
