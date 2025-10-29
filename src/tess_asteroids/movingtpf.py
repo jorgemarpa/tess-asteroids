@@ -2692,14 +2692,27 @@ class MovingTPF:
         """
 
         # Attribute checks
-        if (
-            not hasattr(self, "time")
-            or not hasattr(self, "bg_method")
-            or not hasattr(self, "ap_method")
-        ):
-            raise AttributeError(
-                "Must run `get_data()`, `background_correction()` and `create_aperture()` before creating primary header."
-            )
+        if file_type == "tpf":
+            if (
+                not hasattr(self, "time")
+                or not hasattr(self, "bg_method")
+                or not hasattr(self, "ap_method")
+            ):
+                raise AttributeError(
+                    "Must run `get_data()`, `background_correction()` and `create_aperture()` before creating primary header."
+                )
+        elif file_type == "lc":
+            if (
+                not hasattr(self, "time")
+                or not hasattr(self, "bg_method")
+            ):
+                raise AttributeError(
+                    "Must run `get_data()` and `background_correction()` before creating primary header."
+                )
+        else:
+            raise ValueError(
+                    f"`file_type` must be one of: ['tpf', 'lc']. Not '{file_type}'"
+                )
 
         # Get primary hdu from tesscube
         hdu = self.cube.output_primary_ext
@@ -2727,31 +2740,14 @@ class MovingTPF:
         hdu.header.set("DATA_REL", comment="SPOC data release version number")
         hdu.header.set("OBJECT", self.target, comment="object name")
 
-        # Add average measured TESS magnitude of target and zero-point
-        if file_type == "lc" and hasattr(self, "lc") and "aperture" in self.lc:
-            # Catch warnings that arise if LC is nan at all times.
-            with warnings.catch_warnings():
-                warnings.filterwarnings(
-                    "ignore",
-                    message="All-NaN slice encountered",
-                    category=RuntimeWarning,
-                )
-                mag_header = round(np.nanmedian(self.lc["aperture"]["TESSmag"]), 3)
-        else:
-            mag_header = np.nan
-        hdu.header.set(
-            "TESSMAG",
-            mag_header if ~np.isnan(mag_header) else "n/a",
-            comment="[mag] measured TESS magnitude",
-        )
-        hdu.header.set(
+        # Add TESS magnitude zero-point to LCF
+        if file_type == "lc":
+            hdu.header.set(
             "TESSMAG0",
-            round(TESSmag_zero_point, 3)
-            if file_type == "lc" and hasattr(self, "lc") and "aperture" in self.lc
-            else "n/a",
-            comment="[mag] TESS zero-point magnitude",
-            after="TESSMAG",
-        )
+                round(TESSmag_zero_point, 3),
+                comment="[mag] TESS zero-point magnitude",
+                after="TESSMAG",
+            )
 
         # Add keywords from original FFI header
         hdu.header.set(
@@ -2794,24 +2790,20 @@ class MovingTPF:
             comment="method used for scattered light correction",
             after="BG_CORR",
         )
-        hdu.header.set(
-            "AP_TYPE",
-            self.ap_method,
-            comment="method used to create aperture",
-            after="SL_CORR",
-        )
-        hdu.header.set(
-            "AP_NPIX",
-            np.nanmedian([np.nansum(mask) for mask in self.aperture_mask]),
-            comment="average number of pixels in aperture",
-            after="AP_TYPE",
-        )
-        if file_type == "lc" and hasattr(self, "bad_bits"):
+
+        # Add aperture information to TPF
+        if file_type == "tpf":
             hdu.header.set(
-                "BAD_BITS",
-                f"{self.bad_bits}",
-                comment="bits excluded during aperture photometry",
-                after="AP_NPIX",
+                "AP_TYPE",
+                self.ap_method,
+                comment="method used to create aperture",
+                after="SL_CORR",
+            )
+            hdu.header.set(
+                "AP_NPIX",
+                np.nanmedian([np.nansum(mask) for mask in self.aperture_mask]),
+                comment="average number of pixels in aperture",
+                after="AP_TYPE",
             )
 
         # Add keywords for object properties
@@ -3192,7 +3184,7 @@ class MovingTPF:
         if not hasattr(self, "lc") or len(self.lc) == 0:
             raise AttributeError("Must run `to_lightcurve()` before saving LC.")
 
-        # Define columns for lightcurve
+        # Define columns for aperture lightcurve
         cols_ap = [
             # Times in TDB at SS barycenter.
             fits.Column(
@@ -3424,7 +3416,40 @@ class MovingTPF:
         table_hdu_ap = fits.BinTableHDU.from_columns(cols_ap)
         table_hdu_ap.header["EXTNAME"] = "LIGHTCURVE_AP"
 
-        if "psf" in self.lc.keys():
+        # Add extra keywords to header
+        if "aperture" in self.lc:
+            table_hdu_ap.header.set(
+                "AP_TYPE",
+                self.ap_method,
+                comment="method used to create aperture",
+            )            
+            table_hdu_ap.header.set(
+                "AP_NPIX",
+                np.nanmedian([np.nansum(mask) for mask in self.aperture_mask]),
+                comment="average number of pixels in aperture",
+            )
+            table_hdu_ap.header.set(
+                "BAD_BITS",
+                f"{self.bad_bits}",
+                comment="bits excluded during aperture photometry",
+            )
+            # Average measured TESS magnitude of target
+            # Catch warnings that arise if LC is nan at all times.
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message="All-NaN slice encountered",
+                    category=RuntimeWarning,
+                )
+                mag_header = round(np.nanmedian(self.lc["aperture"]["TESSmag"]), 3)
+            table_hdu_ap.header.set(
+                "TESSMAG",
+                mag_header if ~np.isnan(mag_header) else "n/a",
+                comment="[mag] avg measured TESS magnitude",
+            )
+
+        # Create HDU for PSF photometry, if it exists.
+        if "psf" in self.lc:
             cols_psf = [
                 # Average time in binning window, in TDB at SS barycenter
                 fits.Column(
@@ -3494,17 +3519,36 @@ class MovingTPF:
             ]
             # Create table HDU
             table_hdu_psf = fits.BinTableHDU.from_columns(cols_psf)
-            table_hdu_psf.header["N_CAD"] = (
+            table_hdu_psf.header["EXTNAME"] = "LIGHTCURVE_PSF"
+
+            # Add extra keywords to header
+            table_hdu_psf.header.set(
+                "N_CAD",
                 self.lc["psf"]["n_cadences"],
-                "number of cadences for simultaneous PRF fitting",
-            )
-            table_hdu_psf.header["BAD_SPOC"] = (
+                comment="number of cadences for simultaneous PRF fitting",
+            )  
+            table_hdu_psf.header.set(
+                "BAD_SPOC",
                 ",".join([str(bit) for bit in self.lc["psf"]["bad_spoc_bits"]])
                 if isinstance(self.lc["psf"]["bad_spoc_bits"], list)
                 else self.lc["psf"]["bad_spoc_bits"],
-                "bad quality SPOC bits for PRF fitting",
+                comment="bad quality SPOC bits excluded for PRF fitting",
             )
-            table_hdu_psf.header["EXTNAME"] = "LIGHTCURVE_PSF"
+            # Average measured TESS magnitude of target
+            # Catch warnings that arise if LC is nan at all times.
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message="All-NaN slice encountered",
+                    category=RuntimeWarning,
+                )
+                mag_header = round(np.nanmedian(self.lc["psf"]["TESSmag"]), 3)
+            table_hdu_psf.header.set(
+                "TESSMAG",
+                mag_header if ~np.isnan(mag_header) else "n/a",
+                comment="[mag] avg measured TESS magnitude",
+            )
+
             return fits.HDUList(
                 [self._make_primary_hdu(file_type="lc"), table_hdu_ap, table_hdu_psf]
             )
