@@ -505,10 +505,10 @@ class MovingTPF:
                 "Must run `get_data()` and `reshape_data()` before computing background."
             )
 
-        # Initialise masks that will flag NaNs in SL or BG linear model, only used if `linear_model` is
-        # the most recent method run.
+        # Initialise masks that will flag NaNs in scattered light or star model, only used 
+        # if `linear_model` is the most recent method run.
         self.sl_nan_mask = np.zeros_like(self.time, dtype=bool)
-        self.lm_nan_mask = np.zeros_like(self.all_flux, dtype=bool)
+        self.star_nan_mask = np.zeros_like(self.all_flux, dtype=bool)
 
         # Initialise bad SPOC bits, only used if `linear_model` is the most recent method run.
         self.bad_spoc_bits = "n/a"
@@ -1169,16 +1169,17 @@ class MovingTPF:
         sl_knot_width: float = 20,
         sl_sigma: float = 5,
         sl_niter_clip: int = 3,
-        window_length: float = 1,
-        poly_deg: int = 3,
-        sigma: float = 5,
+        knot_width: float = 0.5,
+        window_length: Optional[float] = 2,
+        sigma: float = 3,
+        niter_clip: int = 3,
         progress_bar: bool = True,
         **kwargs,
     ):
         """
         Calculate the background flux using linear modelling. There are two components:
             1. Scattered light model: use PCA and linear modelling to compute a scattered light model at each cadence.
-            2. Static model: use linear modelling to compute a model for the rest of the background (e.g. stars) at
+            2. Star model: use linear modelling to compute a model for the rest of the background (e.g. stars) at
                each cadence.
         These two components get summed to create a global background model.
 
@@ -1241,14 +1242,16 @@ class MovingTPF:
             raise AttributeError("Must run `get_data()` before computing background.")
 
         # Parameter logic checks
-        if window_length <= 0:
+        if window_length is not None and window_length <= 0:
             raise ValueError(
                 f"`window_length` must be greater than zero. Not '{window_length}'"
             )
-        if poly_deg <= 0:
-            raise ValueError(f"`poly_deg` must be greater than zero. Not '{poly_deg}'")
         if sigma <= 0:
             raise ValueError(f"`sigma` must be greater than zero. Not '{sigma}'")
+        if niter_clip < 0:
+            raise ValueError(
+                f"`niter_clip` must be greater than or equal to zero. Not '{niter_clip}'"
+            )
 
         # Define good quality data using user-defined SPOC quality flags.
         spoc_quality_mask, self.bad_spoc_bits = self._create_spoc_quality_mask(
@@ -1270,7 +1273,7 @@ class MovingTPF:
             )
 
         # Remove scattered light from flux
-        sl_corr_flux = self.all_flux - np.nan_to_num(sl_model)
+        sl_corr_flux = self.all_flux - sl_model
         sl_corr_flux_err = np.sqrt(
             np.nansum([self.all_flux_err**2, sl_model_err**2], axis=0)
         )
@@ -1282,164 +1285,212 @@ class MovingTPF:
         )
         self.sl_method = sl_method
 
-        # Initialise arrays
-        linear_model = np.zeros(self.all_flux.shape)
-        linear_model_err = np.zeros(self.all_flux.shape)
+        # Identify nans in SL corrected flux e.g. SL model failed.
+        nan_mask = np.isnan(sl_corr_flux)
 
         # Create mask for moving target.
         source_mask = self._create_source_mask(include_stars=False, **kwargs)
 
-        # Scale time between (-0.5, 0.5) for linear modelling.
-        scaled_time = (self.time - np.nanmedian(self.time)) / np.ptp(self.time)
+        # Define equally spaced knots between bounds, with spacing approximately equal to `knot_width`.
+        # It is important to include an extra knot at the lower bound - this gives proper behaviour of spline.
+        t = self.time
+        knots = np.linspace(t.min(), t.max(), int(np.round((t.max() - t.min()) / knot_width)) + 1,)[:-1]
 
-        logger.info("Started computation of background linear model.")
-        start_time = time.time()
-        for t in tqdm(range(len(self.time)), disable=not progress_bar):
-            # Calculate indices that define a time window around the current frame.
-            tmin, tmax = (
-                self.time[t] - 0.5 * window_length,
-                self.time[t] + 0.5 * window_length,
+        # If `knot_width` is too large for the dataset, `knots` can be returned as an empty array.
+        # The function will run, but we need to ensure that there is always one knot at the lower bound.
+        if len(knots) == 0:
+            knots = np.asarray([t.min()])
+
+        # Warn the user if there are no interior knots. This can lead to a poorly constrained spline.
+        if len(knots) == 1:
+            logger.warning(
+                "There are no interior knots in time with a `knot_width` of {0} days. Try re-defining `knot_width` to a smaller value.".format(
+                    knot_width
+                )
             )
-            t_window = np.where(np.logical_and(self.time >= tmin, self.time <= tmax))[0]
-            adx, bdx = min(t_window), max(t_window) + 1
 
-            # Create design matrix - a `poly_deg` degree polynomial in time.
-            X = np.vstack([(scaled_time[adx:bdx]) ** idx for idx in range(poly_deg)]).T
+        # Create design matrix - third degree b-spline in time, with a global intercept
+        X = np.asarray(dmatrix("bs(t, knots=knots, degree=3, include_intercept=False)", {"t": t,"knots": knots}))
+        # Break design matrix into data chunks.
+        # >>> UPDATE Need data chunks from orbits to be a callable function, rather than repeating code.
+        X = np.hstack([X * chunk[:, None] for chunk in self.data_chunks])
+        # Remove components that don't contribute
+        X = X[:, X.sum(axis=0) != 0]
 
-            # Initialise priors on LM components (broad normal distributions).
-            prior_mu = np.zeros(X.shape[1])
-            prior_sigma = np.ones(X.shape[1]) * 1e4
+        # Compute width of window, in cadences
+        if window_length is not None:
+            ncadences = np.round(window_length/2/np.nanmedian(np.diff(self.time))).astype(int)
 
-            # Initialise BG linear model distribution.
-            linear_model_dist = np.zeros((self.all_flux.shape[1], 100))
+        # Initialise priors on LM components (broad normal distributions). Prior on sigma is saturation level.
+        prior_mu = np.zeros(X.shape[1])
+        prior_sigma = np.ones(X.shape[1]) * 1e5
 
-            # Loop through each relevant pixel for fitting i.e. pixels inside movingTPF region.
-            for pdx in np.where(self.target_mask[t])[0]:
-                # Mask times with bad SPOC quality or where the moving target is present in the pixel.
-                k = np.logical_and(
-                    ~source_mask[adx:bdx][:, pdx], spoc_quality_mask[adx:bdx]
-                )
+        # Initialise star model distribution.
+        star_model_dist = np.full((*self.all_flux.shape, 100), np.nan)
 
-                # Prime while loop
-                n_clip = np.inf
+        # Initialise reduced chi-squared
+        red_chi2 = np.full(len(self.pixels), np.nan)
 
-                while n_clip != 0:
-                    # If there are no times with which to fit, return nan.
-                    if not k.any():
-                        linear_model_dist[pdx] = np.nan
-                        break
+        logger.info("Started computation of star model.")
+        start_time = time.time()
+        # Loop through each pixel and fit time-series in a window around when pixel is present in TPF
+        for pdx in tqdm(range(len(self.pixels)), disable=not progress_bar):
 
-                    # Update priors: first component should be close to the median of the pixel flux value.
-                    # Catch warnings that arise if pixel is nan throughout time window (e.g. non-science pixels).
-                    with warnings.catch_warnings():
-                        warnings.filterwarnings(
-                            "ignore",
-                            message="All-NaN slice encountered",
-                            category=RuntimeWarning,
+            # If all flux values are nan (e.g. non-science pixels), star model will also be nan.
+            if np.isnan(sl_corr_flux[:,pdx]).all():
+                continue
+
+            # Good quality cadences with no nans.
+            mask = np.logical_and(spoc_quality_mask, ~nan_mask[:, pdx])
+
+            # If using `window_length`, create a mask that defines a window around when the pixel is in TPF.
+            if window_length is not None:
+        
+                # Create a copy of target mask for pdx
+                window = self.target_mask[:,pdx].copy()
+            
+                # Define window around time when pixel is in TPF.
+                true_indices = np.nonzero(window)[0]
+                indices_to_set = true_indices[:, None] + np.arange(-ncadences, ncadences + 1)
+                
+                # Clip the indices to ensure they are within the array bounds
+                clipped_indices = np.clip(indices_to_set.flatten(), 0, window.size - 1)
+                
+                # Set the elements at the calculated indices to True
+                window[clipped_indices] = True
+
+                # Add to overall mask
+                mask = np.logical_and(mask, window)
+
+                # Create mask for model predicition - only during window when the pixel is in TPF.
+                mask_predict = np.logical_and(mask, self.target_mask[:,pdx])
+            else:
+                # Create mask for model predicition - all times.
+                mask_predict = mask.copy()
+
+
+            # Remove pixels containing target for fitting
+            mask = np.logical_and(mask,~source_mask[:, pdx])
+
+            # Prime while loop used for outlier clipping.
+            n_clip = np.inf
+            i_clip = 0
+            exit_loop = False
+            while n_clip != 0 and i_clip <= niter_clip:
+
+                # If there are no times to fit, star model and error will be nan for pixel at all times.
+                if (~mask).all():
+                    logger.warning(
+                        "When computing the star model for pixel {} (row {}, column {}) in iteration {}, there were no times to fit. The model was set to nan at all times.".format(
+                            pdx, *self.pixels[pdx], i_clip
                         )
-                        prior_mu[0] = np.nanmedian(sl_corr_flux[adx:bdx][k, pdx])
-                    prior_sigma[0] = np.abs(prior_mu[0]) ** 0.5
+                    )
 
-                    # Use weighted Bayesian LS.
-                    with warnings.catch_warnings():
-                        warnings.filterwarnings(
-                            "ignore", message="divide by zero encountered in divide"
-                        )
-                        warnings.filterwarnings(
-                            "ignore", message="invalid value encountered in divide"
-                        )
-                        sigma_w_inv = X[k].T.dot(
-                            X[k] / sl_corr_flux_err[adx:bdx][k, pdx, None] ** 2
-                        ) + np.diag(1 / prior_sigma**2)
-                        B = (
-                            X[k].T.dot(
-                                sl_corr_flux[adx:bdx][k, pdx]
-                                / sl_corr_flux_err[adx:bdx][k, pdx] ** 2
-                            )
-                            + prior_mu / prior_sigma**2
-                        )
+                    exit_loop = True
+                    break
+                
+                # Get flux time-series for pixel, excluding masked data
+                y, yerr = sl_corr_flux[mask, pdx], sl_corr_flux_err[mask, pdx]
 
-                    # Find the best-fitting weights and errors and turn it into a distribution
-                    w = np.linalg.solve(sigma_w_inv, B)
-                    wcov = np.linalg.inv(sigma_w_inv)
-                    try:
-                        with warnings.catch_warnings():
-                            warnings.filterwarnings(
-                                "ignore",
-                                message="covariance is not symmetric positive-semidefinite",
-                                category=RuntimeWarning,
-                            )
-                            wdist = np.random.multivariate_normal(
-                                w, wcov, size=linear_model_dist.shape[1]
-                            )
-                    except np.linalg.LinAlgError:
-                        linear_model_dist[pdx] = np.nan
-                        break
+                # Use weighted Bayesian LS.
+                with warnings.catch_warnings():
+                    warnings.filterwarnings("ignore", message="divide by zero encountered in divide")
+                    warnings.filterwarnings("ignore", message="invalid value encountered in divide")
+                    sigma_w_inv = X[mask].T.dot(X[mask] / yerr[:, None]** 2) + np.diag(1 / prior_sigma**2)
+                    B = X[mask].T.dot(y/yerr**2) + prior_mu/prior_sigma**2
 
-                    linear_model_dist[pdx] = X[np.arange(adx, bdx) == t].dot(wdist.T)[0]
+                # Find the best-fitting weights
+                w = np.linalg.solve(sigma_w_inv,B)
 
-                    # Mask significant outliers.
-                    n_clip_prev = np.sum(~k)
-                    # If sl_corr_flux_err is zero, catch warning. We have seen this happen for S1, Cam1, CCD4
-                    # where all_flux and all_flux_err are zero for several cadences.
-                    with warnings.catch_warnings():
-                        warnings.filterwarnings(
-                            "ignore",
-                            message="divide by zero encountered in divide",
-                            category=RuntimeWarning,
-                        )
-                        k = np.logical_and(
-                            k,
-                            np.abs(sl_corr_flux[adx:bdx][:, pdx] - X.dot(w))
-                            / (sl_corr_flux_err[adx:bdx][:, pdx])
-                            < sigma,
-                        )
-                    n_clip = np.sum(~k) - n_clip_prev
-
-            # Compute BG linear model and error from distribution.
-            # Catch warnings that arise because of nan pixels (e.g. non-science pixels).
-            with warnings.catch_warnings():
-                warnings.filterwarnings(
-                    "ignore", message="Mean of empty slice", category=RuntimeWarning
-                )
-                warnings.filterwarnings(
-                    "ignore",
-                    message="Degrees of freedom <= 0 for slice.",
-                    category=RuntimeWarning,
-                )
-                linear_model[t], linear_model_err[t] = (
-                    np.nanmean(linear_model_dist, axis=1),
-                    np.nanstd(linear_model_dist, ddof=1, axis=1)
-                    / np.sqrt(linear_model_dist.shape[1]),
-                )
-
-            # If there is no `linear_model`, replace with median and MAD and flag as bad quality.
-            for pix in np.where(np.isnan(linear_model[t]))[0]:
-                # Catch warnings that arise if pixel is nan throughout time window (e.g. non-science pixels).
+                # Compute residuals, scaled by error
+                # If sl_corr_flux_err is zero, catch warning. We have seen this happen for S1, Cam1, CCD4
+                # where all_flux and all_flux_err are zero for several cadences.
                 with warnings.catch_warnings():
                     warnings.filterwarnings(
                         "ignore",
-                        message="All-NaN slice encountered",
+                        message="divide by zero encountered in divide",
                         category=RuntimeWarning,
                     )
-                    linear_model[t, pix] = np.nanmedian(sl_corr_flux[adx:bdx][:, pix])
-                linear_model_err[t, pix] = stats.median_abs_deviation(
-                    sl_corr_flux[adx:bdx][:, pix], nan_policy="omit"
-                )
-                # Update LM NaN mask
-                if hasattr(self, "lm_nan_mask"):
-                    self.lm_nan_mask[t, pix] = True
+                    resid = (y-X[mask].dot(w))/yerr
+
+                # Clip outliers, if there are remaining iterations.
+                if i_clip < niter_clip:
+                    n_clip_prev = np.sum(~mask)
+                    clipped = np.zeros_like(mask, dtype = bool)
+                    with warnings.catch_warnings():
+                        warnings.filterwarnings(
+                            "ignore",
+                            category=AstropyUserWarning)
+                        clipped[mask] = ~sigma_clip(resid, sigma=sigma).mask
+                        mask = np.logical_and(mask, clipped)
+                        # Don't predict model for outliers, but ensure TPF pixels are always included.
+                        mask_predict = np.logical_and(mask_predict, np.logical_or(clipped, self.target_mask[:, pdx]))
+
+                    n_clip = np.sum(~mask) - n_clip_prev
+                i_clip += 1
+
+            if not exit_loop:
+                # Turn best-fitting weights and errors into a distribution
+                wcov = np.linalg.inv(sigma_w_inv)
+                try:
+                    with warnings.catch_warnings():
+                        warnings.filterwarnings(
+                            "ignore",
+                            message="covariance is not symmetric positive-semidefinite",
+                            category=RuntimeWarning,)
+                        wdist = np.random.multivariate_normal(w, wcov, size=star_model_dist.shape[2])
+                except np.linalg.LinAlgError:
+                    logger.warning(
+                        "When computing the star model for pixel {} (row {}, column {}), the computation of `wdist` failed with a `LinAlgError`. The model was set to nan at all times.".format(
+                            pdx, *self.pixels[pdx]
+                        )
+                    )
+                    break
+            
+                # Calculate model distribution
+                star_model_dist[mask_predict, pdx] = X[mask_predict].dot(wdist.T)
+
+                # Compute reduced chi-squared using fit data:
+                red_chi2[pdx] = np.sum(resid**2)/(np.sum(mask) - np.linalg.matrix_rank(X[mask]))
+                    
+
+        # Compute star model and error from distribution.
+        # Catch warnings that arise because of nan pixels.
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", message="Mean of empty slice", category=RuntimeWarning
+            )
+            warnings.filterwarnings(
+                "ignore",
+                message="Degrees of freedom <= 0 for slice.",
+                category=RuntimeWarning,
+            )
+            star_model, star_model_err = (
+                np.nanmean(star_model_dist, axis=2),
+                np.nanstd(star_model_dist, ddof=1, axis=2)
+                / np.sqrt(star_model_dist.shape[2]),
+            )
+        
         logger.info(
-            "Finished computation of background linear model in {0:.2f} sec.".format(
+            "Finished computation of star model in {0:.2f} sec.".format(
                 time.time() - start_time
             )
         )
 
+        # Flag cadences where star model is nan
+        if hasattr(self, "star_nan_mask"):
+            if window_length is not None:
+                self.star_nan_mask[np.where(np.logical_and(np.isnan(star_model),self.target_mask))] = True
+            else:
+                self.star_nan_mask[np.where(np.isnan(star_model))] = True
+
+        # >>> UPDATE Poor fit mask
+
         # Reshape arrays to match `self.flux`
         sl_model_reshaped = []
         sl_model_err_reshaped = []
-        linear_model_reshaped = []
-        linear_model_err_reshaped = []
+        star_model_reshaped = []
+        star_model_err_reshaped = []
         for t in range(len(self.time)):
             sl_model_reshaped.append(
                 sl_model[t][self.target_mask[t]].reshape(self.shape)
@@ -1447,19 +1498,19 @@ class MovingTPF:
             sl_model_err_reshaped.append(
                 sl_model_err[t][self.target_mask[t]].reshape(self.shape)
             )
-            linear_model_reshaped.append(
-                linear_model[t][self.target_mask[t]].reshape(self.shape)
+            star_model_reshaped.append(
+                star_model[t][self.target_mask[t]].reshape(self.shape)
             )
-            linear_model_err_reshaped.append(
-                linear_model_err[t][self.target_mask[t]].reshape(self.shape)
+            star_model_err_reshaped.append(
+                star_model_err[t][self.target_mask[t]].reshape(self.shape)
             )
 
-        # Combine LM and SL model to create global BG model
-        bg = np.asarray(sl_model_reshaped) + np.asarray(linear_model_reshaped)
+        # Combine star model and scattered light model to create global BG model
+        bg = np.asarray(sl_model_reshaped) + np.asarray(star_model_reshaped)
         bg_err = np.sqrt(
             np.nansum(
                 [
-                    np.asarray(linear_model_err_reshaped) ** 2,
+                    np.asarray(star_model_err_reshaped) ** 2,
                     np.asarray(sl_model_err_reshaped) ** 2,
                 ],
                 axis=0,
@@ -1468,7 +1519,7 @@ class MovingTPF:
         # If both errors have nan value, propagate nan:
         bg_err = np.where(
             np.logical_and(
-                np.isnan(np.asarray(linear_model_err_reshaped)),
+                np.isnan(np.asarray(star_model_err_reshaped)),
                 np.isnan(np.asarray(sl_model_err_reshaped)),
             ),
             np.nan,
@@ -1480,8 +1531,8 @@ class MovingTPF:
             bg_err,
             np.asarray(sl_model_reshaped),
             np.asarray(sl_model_err_reshaped),
-            np.asarray(linear_model_reshaped),
-            np.asarray(linear_model_err_reshaped),
+            np.asarray(star_model_reshaped),
+            np.asarray(star_model_err_reshaped),
         )
 
     def create_aperture(self, method: str = "prf", **kwargs):
@@ -2016,7 +2067,7 @@ class MovingTPF:
         - 3 - pixel is saturated
         - 4 - pixel is within `sat_buffer_rad` pixels of a saturated pixel
         - 5 - pixel has no scattered light correction. Only relevant if `linear_model` background correction was used.
-        - 6 - pixel had no background linear model, value was infilled. Only relevant if `linear_model` background correction was used.
+        - 6 - pixel had no background star model, value is nan. Only relevant if `linear_model` background correction was used.
         - 7 - pixel had negative flux value BEFORE background correction was applied.
             This can happen near bleed columns from saturated stars (e.g. see Sector 6, Camera 1, CCD 4).
 
@@ -2090,11 +2141,11 @@ class MovingTPF:
                     "bit": 5,
                     "value": np.full(self.shape, self.sl_nan_mask[t]),
                 },
-                # Pixel did not have a background linear model, so value was replaced with median flux in
-                # time window. It is only meaningful if the `linear_model` background correction was used.
-                "lm_nan_mask": {
+                # Pixel does not have a background star model (value is nan). 
+                # It is only meaningful if the `linear_model` background correction was used.
+                "star_nan_mask": {
                     "bit": 6,
-                    "value": self.lm_nan_mask[t][self.target_mask[t]].reshape(
+                    "value": self.star_nan_mask[t][self.target_mask[t]].reshape(
                         self.shape
                     ),
                 },
@@ -2557,7 +2608,7 @@ class MovingTPF:
              Only relevant if `prf` aperture was used.
         8  - at least one pixel inside aperture does not have scattered light correction.
              Only relevant if `linear_model` background correction was used.
-        9  - at least one pixel inside aperture had no background linear model, value was infilled.
+        9  - at least one pixel inside aperture had no star model (value is nan).
              Only relevant if `linear_model` background correction was used.
         10 - at least one pixel inside aperture had negative value BEFORE background correction was applied.
 
@@ -2654,9 +2705,9 @@ class MovingTPF:
                         for t in range(len(self.time))
                     ],
                 },
-                # Pixel in aperture with no background linear model, value was infilled.
+                # Pixel in aperture with no background star model (value is nan).
                 # Only relevant if `linear_model` background correction was used.
-                "lm_nan_mask": {
+                "star_nan_mask": {
                     "bit": 9,
                     "value": [
                         (self.pixel_quality[t][self.aperture_mask[t]] & 32 != 0).any()
