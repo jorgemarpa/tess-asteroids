@@ -135,7 +135,7 @@ target.animate_tpf(save=True)
 
 ### Making a LC
 
-You can extract a LC from the TPF, using aperture photometry, as follows:
+You can extract a LC from the TPF using aperture photometry and/or PSF photometry. For example:
 
 ```python
 from tess_asteroids import MovingTPF
@@ -199,10 +199,11 @@ The TPF has four HDUs:
 - "APERTURE" - an image HDU containing the average aperture across all times.
 - "EXTRAS" - a table HDU containing columns not found in a SPOC TPF. This includes "RA_PRED"/"DEC_PRED" (expected position of target in world coordinates), "CORNER1"/"CORNER2" (original FFI column/row of the lower-left pixel in the TPF), "PIXEL_QUALITY" (3D pixel quality mask identifying e.g. strap columns, non-science pixels and saturation), "APERTURE" (aperture as a function of time) and "ORIGINAL_TIME"/"ORIGINAL_TIMECORR" (time and barycentric correction derived by SPOC).
 
-The LCF has two HDUs: 
+The LCF has two or three HDUs (depending upon which lightcurves you created): 
 
 - "PRIMARY" - a primary HDU containing only a header.
-- "LIGHTCURVE" - a table HDU with columns including "TIME" (timestamps in BTJD), "FLUX"/"FLUX_ERR" (flux and error from aperture photometry) and "TESSMAG"/"TESSMAG_ERR" (measured TESS magnitude and error).
+- "LIGHTCURVE_AP" - a table HDU containing the aperture photomety light curve, with columns including "TIME" (timestamps in BTJD), "FLUX"/"FLUX_ERR" (flux and error from aperture photometry) and "TESSMAG"/"TESSMAG_ERR" (measured TESS magnitude and error).
+- "LIGHTCURVE_PSF" - a table HDU containing the PSF photomety light curve, with columns including "TIME" (timestamps in BTJD), "FLUX"/"FLUX_ERR" (flux and error from PSF photometry) and "TESSMAG"/"TESSMAG_ERR" (measured TESS magnitude and error).
 
 ## Citation
 
