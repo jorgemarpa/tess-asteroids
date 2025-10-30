@@ -1174,6 +1174,7 @@ class MovingTPF:
         sigma: float = 3,
         niter_clip: int = 3,
         progress_bar: bool = True,
+        diagnostic_plot: bool = False,
         **kwargs,
     ):
         """
@@ -1265,6 +1266,7 @@ class MovingTPF:
                 sigma=sl_sigma,
                 niter_clip=sl_niter_clip,
                 spoc_quality_mask=spoc_quality_mask,
+                diagnostic_plot=diagnostic_plot,
                 **kwargs,
             )
         else:
@@ -1525,6 +1527,34 @@ class MovingTPF:
             np.nan,
             bg_err,
         )
+
+        if diagnostic_plot:
+            fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 10))
+
+            vmin=np.nanpercentile(self.all_flux,1)
+            vmax=np.nanpercentile(self.all_flux,99)
+
+            ax1.set(ylabel="Pixel Index", title="Raw Flux")
+            im = ax1.imshow(self.all_flux.T, origin="lower", aspect="auto", interpolation="none", vmin=vmin, vmax=vmax)
+            # Add colorbar
+            cbar = fig.colorbar(im, ax=ax1, location="right")
+            cbar.set_label("Flux [$e^-/s$]")
+
+            ax2.set(ylabel="Pixel Index", title="Background Model")
+            im = ax2.imshow((star_model+sl_model).T, origin="lower", aspect="auto", interpolation="none", vmin=vmin, vmax=vmax)
+            # Add colorbar
+            cbar = fig.colorbar(im, ax=ax2, location="right")
+            cbar.set_label("Flux [$e^-/s$]")
+
+            ax3.set(xlabel="Time Index", ylabel="Pixel Index", title="Residuals excluding target (vmin=-5, vmax=5)")
+            im = ax3.imshow(np.where((~source_mask).T,(self.all_flux - star_model - sl_model).T, np.nan), origin="lower", aspect="auto", interpolation="none", cmap = "RdBu", vmin=-5, vmax=5)
+            # Add colorbar
+            cbar = fig.colorbar(im, ax=ax3, location="right")
+            cbar.set_label("Flux [$e^-/s$]")
+
+            fig.tight_layout()
+            plt.show()
+            plt.close(fig)
 
         return (
             bg,
