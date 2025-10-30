@@ -2417,7 +2417,7 @@ class MovingTPF:
             flux_err,
             red_chi2,
             quality,
-            spoc_quality,
+            spoc_quality.astype(int),
             n_cadences,
             bad_spoc_bits,
         )
