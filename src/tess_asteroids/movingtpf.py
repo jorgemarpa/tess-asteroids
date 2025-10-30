@@ -2782,7 +2782,10 @@ class MovingTPF:
             )
 
         # Get primary hdu from tesscube
-        hdu = self.cube.output_primary_ext
+        hdu = self.cube.output_primary_ext.copy()
+
+        # Remove TESSMAG keyword
+        hdu.header.remove("TESSMAG")
 
         # Update existing keywords
         hdu.header.set("DATE", datetime.now().strftime("%Y-%m-%d"))
@@ -2806,15 +2809,6 @@ class MovingTPF:
         hdu.header.set("PROCVER", __version__)
         hdu.header.set("DATA_REL", comment="SPOC data release version number")
         hdu.header.set("OBJECT", self.target, comment="object name")
-
-        # Add TESS magnitude zero-point to LCF
-        if file_type == "lc":
-            hdu.header.set(
-                "TESSMAG0",
-                round(TESSmag_zero_point, 3),
-                comment="[mag] TESS zero-point magnitude",
-                after="TESSMAG",
-            )
 
         # Add keywords from original FFI header
         hdu.header.set(
@@ -2857,6 +2851,15 @@ class MovingTPF:
             comment="method used for scattered light correction",
             after="BG_CORR",
         )
+
+        # Add TESS magnitude zero-point to LCF
+        if file_type == "lc":
+            hdu.header.set(
+                "TESSMAG0",
+                round(TESSmag_zero_point, 3),
+                comment="[mag] TESS zero-point magnitude",
+                after="SL_CORR",
+            )
 
         # Add aperture information to TPF
         if file_type == "tpf":
