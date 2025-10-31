@@ -711,20 +711,20 @@ class MovingTPF:
     def _data_chunks(self, data_chunks: Optional[Union[list, np.ndarray]] = None):
         """
         This function creates and/or checks the format of data chunks.
-        If `data_chunks=None`, this function will define `data_chunks` using TESS data downlink times. 
+        If `data_chunks=None`, this function will define `data_chunks` using TESS data downlink times.
         Otherwise, this function will check the format of user-defined `data_chunks`.
         These chunks are used by `_create_scattered_light_model()` and `_bg_linear_model()`.
 
         Parameters
         ----------
         data_chunks : ndarray
-            A boolean mask that defines chunks of data. The array must have shape (nchunks, ntimes). 
+            A boolean mask that defines chunks of data. The array must have shape (nchunks, ntimes).
             If None, chunks will be defined using TESS data downlink times.
-        
+
         Returns
         -------
         data_chunks : ndarray
-            A boolean mask that defines chunks of data. The array has shape (nchunks, ntimes). 
+            A boolean mask that defines chunks of data. The array has shape (nchunks, ntimes).
 
         """
 
@@ -779,13 +779,13 @@ class MovingTPF:
         # Enforce that `data_chunks` is an array of arrays.
         data_chunks = np.atleast_2d(data_chunks)
         # Check data_chunks has correct length and number of dimensions.
-        if data_chunks.ndim != 2 or data_chunks.shape[1] != len(self.time):
+        if data_chunks.ndim != 2 or data_chunks.shape[1] != len(self.time):  # type: ignore
             raise ValueError(
                 "`data_chunks` must be a two-dimensional boolean array, where each sub-array has length equal to `self.time`."
             )
 
         # Check that all data is included in exactly one chunk.
-        if not np.all(np.sum(data_chunks, axis=0) == 1):
+        if not np.all(np.sum(data_chunks, axis=0) == 1):  # type: ignore
             raise ValueError(
                 "All data must be included in exactly one data chunk, but this is not the case. Try re-defining `data_chunks`."
             )
@@ -938,7 +938,7 @@ class MovingTPF:
         logger.info("Started computation of scattered light model.")
         start_time = time.time()
 
-        for i, chunk in enumerate(data_chunks):
+        for i, chunk in enumerate(data_chunks):  # type: ignore
             # Define good quality cadences in the data chunk.
             cadence_mask = np.logical_and(spoc_quality_mask, chunk)
             # Initialise outlier mask
@@ -1218,8 +1218,13 @@ class MovingTPF:
         These two components get summed to create a global background model.
 
         Step one is done using the `_create_scattered_light_model` function. Step two loops through each pixel to model
-        the scattered light corrected flux, with the option to only model cadences in a time window around when the pixel
-        is in the TPF region.
+        the scattered light corrected flux:
+
+        - There is the option to only model cadences in a time window around when the pixel is in the TPF region. This is
+        controlled with the parameter `window_length`.
+        - The design matrix is defined with a 3rd degree B-spline in time. The knots of the spline can be controlled with
+        the parameter `knot_width`.
+        - The cadences flagged as bad quality by `bad_spoc_bits` do not have a BG model (it will be nan).
 
         Parameters
         ----------
@@ -1250,7 +1255,7 @@ class MovingTPF:
             Approximate spacing between spline knots used for star model, in days.
         window_length : float
             This defines the width of the window, in days, used for fitting the star model to each pixel. For each pixel, the fitting window
-            is centred on the time it is present in the TPF region. If None, the full time-series is modelled. A longer `window_length` will 
+            is centred on the time it is present in the TPF region. If None, the full time-series is modelled. A longer `window_length` will
             increase the runtime of this function.
         sigma : float
             Sigma threshold for outlier detection when creating star model. A larger value of `sigma` will mask less data.
@@ -1377,7 +1382,7 @@ class MovingTPF:
             )
         )
         # Break design matrix into data chunks.
-        X = np.hstack([X * chunk[:, None] for chunk in data_chunks])
+        X = np.hstack([X * chunk[:, None] for chunk in data_chunks])  # type: ignore
         # Remove components that don't contribute
         X = X[:, X.sum(axis=0) != 0]
 
@@ -2768,7 +2773,7 @@ class MovingTPF:
         9  - at least one pixel inside aperture had no star model (value is nan).
              Only relevant if `linear_model` background correction was used.
         10 - at least one pixel inside aperture had negative value BEFORE background correction was applied.
-        11 - at least one pixel inside aperture had a poor fitting background star model. 
+        11 - at least one pixel inside aperture had a poor fitting background star model.
              Only relevant if `linear_model` background correction was used.
 
         Parameters

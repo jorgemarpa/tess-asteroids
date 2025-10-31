@@ -116,7 +116,7 @@ def test_data_logic(caplog):
 def test_bg_linear_model():
     """
     Test background linear model. This checks the shapes and quality masks for the
-    scattered light model, the linear model and the global background model.
+    scattered light model, the star model and the global background model.
     """
     # Initialise MovingTPF for 1980 VR1 and get data.
     target = MovingTPF.from_name("1980 VR1", sector=1, camera=1, ccd=1)
@@ -124,29 +124,27 @@ def test_bg_linear_model():
     target.reshape_data()
 
     # Background correction using `pca` SL correction
-    bg, bg_err, sl, sl_err, linear, linear_err = target._bg_linear_model(
-        sl_method="pca"
-    )
+    bg, bg_err, sl, sl_err, star, star_err = target._bg_linear_model(sl_method="pca")
 
     # Check the components have the expected shape
     assert np.shape(bg) == np.shape(target.flux)
     assert np.shape(bg_err) == np.shape(target.flux)
     assert np.shape(sl) == np.shape(target.flux)
     assert np.shape(sl_err) == np.shape(target.flux)
-    assert np.shape(linear) == np.shape(target.flux)
-    assert np.shape(linear_err) == np.shape(target.flux)
+    assert np.shape(star) == np.shape(target.flux)
+    assert np.shape(star_err) == np.shape(target.flux)
 
     # Check method is recorded correctly.
     assert target.sl_method == "pca"
 
     # Check models are correctly summed for global model.
-    assert np.array_equal(bg, sl + linear, equal_nan=True)
+    assert np.array_equal(bg, sl + star, equal_nan=True)
 
-    # Check SL and LM quality masks catch issues by using too many components:
+    # Check SL and star quality masks catch issues caused by using too many components:
     target.background_correction(sl_method="pca", ncomponents=8000)
     assert np.shape(target.sl_nan_mask) == np.shape(target.time)
     assert np.array_equal(target.sl_nan_mask, np.ones_like(target.time, dtype=bool))
-    assert np.shape(target.lm_nan_mask) == np.shape(target.all_flux)
+    assert np.shape(target.star_nan_mask) == np.shape(target.all_flux)
 
 
 def test_create_threshold_aperture():
