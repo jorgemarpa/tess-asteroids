@@ -11,6 +11,7 @@ import tesswcs
 from astropy.io import fits
 from astropy.stats import sigma_clip
 from astropy.time import Time
+from astropy.utils.exceptions import AstropyUserWarning
 from fbpca import pca
 from lkspacecraft import TESSSpacecraft
 from lkspacecraft.spacecraft import BadEphemeris
@@ -505,10 +506,14 @@ class MovingTPF:
                 "Must run `get_data()` and `reshape_data()` before computing background."
             )
 
-        # Initialise masks that will flag NaNs in scattered light or star model, only used 
+        # Initialise masks that will flag NaNs in scattered light or star model, only used
         # if `linear_model` is the most recent method run.
         self.sl_nan_mask = np.zeros_like(self.time, dtype=bool)
         self.star_nan_mask = np.zeros_like(self.all_flux, dtype=bool)
+
+        # Initialise mask that will flag pixels with poor star model fit, only used
+        # if `linear_model` is the most recent method run.
+        self.star_fit_mask = np.zeros(len(self.pixels), dtype=bool)
 
         # Initialise bad SPOC bits, only used if `linear_model` is the most recent method run.
         self.bad_spoc_bits = "n/a"
@@ -521,7 +526,9 @@ class MovingTPF:
             self.bg, self.bg_err = self._bg_rolling_median(**kwargs)
 
         elif method == "linear_model":
-            self.bg, self.bg_err, _, _, _, _ = self._bg_linear_model(**kwargs)
+            self.bg, self.bg_err, _, _, _, _ = self._bg_linear_model(
+                reshape=True, **kwargs
+            )
 
         else:
             raise ValueError(
@@ -701,6 +708,71 @@ class MovingTPF:
             [np.logical_or(targ_mask, star_mask) for targ_mask in target_mask]
         )
 
+    def _data_chunks(self, data_chunks: Optional[Union[list, np.ndarray]] = None):
+        # If user has not provided data chunks, split data based upon data downlink times.
+        if data_chunks is None:
+            # If downlinks file was not found, data is not split into chunks.
+            if downlinks is None:
+                data_chunks = np.asarray([np.full(len(self.time), True)])
+                logger.warning(
+                    "The downlink file was not found. Data was not split into chunks and all cadences will be modelled simultaneously."
+                )
+
+            else:
+                sector_downlinks = downlinks[downlinks["Sector"] == self.sector]
+
+                # Check for expected number of chunks.
+                if self.sector <= 55 and len(sector_downlinks) != 2:
+                    raise RuntimeError(
+                        "For sector {0} there should be 2 data chunks, but there are actually {1} data chunks. Investigate or define your own `data_chunks`.".format(
+                            self.sector, len(sector_downlinks)
+                        )
+                    )
+                elif self.sector > 55 and len(sector_downlinks) != 4:
+                    raise RuntimeError(
+                        "For sector {0} there should be 4 data chunks, but there are actually {1} data chunks. Investigate or define your own `data_chunks`.".format(
+                            self.sector, len(sector_downlinks)
+                        )
+                    )
+
+                # Define data chunk mask
+                data_chunks = []
+                for _, downlink in sector_downlinks.iterrows():
+                    start = (
+                        Time(downlink["Start of Orbit"], format="iso", scale="utc").jd
+                        - 2457000
+                    )
+                    end = (
+                        Time(downlink["End of Orbit"], format="iso", scale="utc").jd
+                        - 2457000
+                    )
+                    # The buffer of 0.05 days accounts for inaccuracies in the downlink times.
+                    chunk = np.logical_and(
+                        self.time - self.timecorr >= start - 0.05,
+                        self.time - self.timecorr < end + 0.05,
+                    )
+                    # Only append chunks which have at least one True value i.e. target was observed during that chunk.
+                    if chunk.any():
+                        data_chunks.append(chunk)
+
+            logger.info("Defined {0} data chunks.".format(len(data_chunks)))
+
+        # Enforce that `data_chunks` is an array of arrays.
+        data_chunks = np.atleast_2d(data_chunks)
+        # Check data_chunks has correct length and number of dimensions.
+        if data_chunks.ndim != 2 or data_chunks.shape[1] != len(self.time):
+            raise ValueError(
+                "`data_chunks` must be a two-dimensional boolean array, where each sub-array has length equal to `self.time`."
+            )
+
+        # Check that all data is included in exactly one chunk.
+        if not np.all(np.sum(data_chunks, axis=0) == 1):
+            raise ValueError(
+                "All data must be included in exactly one data chunk, but this is not the case. Try re-defining `data_chunks`."
+            )
+
+        return data_chunks
+
     def _create_scattered_light_model(
         self,
         knot_width: float = 20,
@@ -833,71 +905,8 @@ class MovingTPF:
         # Account for strap columns in the design matrix.
         X = np.hstack([np.isin(col, straps["Column"] + 44)[:, None], X])
 
-        # If user has not provided data chunks, split data based upon data downlink times.
-        if data_chunks is None:
-            # If downlinks file was not found, data is not split into chunks.
-            if downlinks is None:
-                data_chunks = np.asarray([np.full(len(self.time), True)])
-                logger.warning(
-                    "The downlink file was not found. Data was not split into chunks and all cadences will be modelled simultaneously."
-                )
-
-            else:
-                sector_downlinks = downlinks[downlinks["Sector"] == self.sector]
-
-                # Check for expected number of chunks.
-                if self.sector <= 55 and len(sector_downlinks) != 2:
-                    raise RuntimeError(
-                        "For sector {0} there should be 2 data chunks, but there are actually {1} data chunks. Investigate or define your own `data_chunks`.".format(
-                            self.sector, len(sector_downlinks)
-                        )
-                    )
-                elif self.sector > 55 and len(sector_downlinks) != 4:
-                    raise RuntimeError(
-                        "For sector {0} there should be 4 data chunks, but there are actually {1} data chunks. Investigate or define your own `data_chunks`.".format(
-                            self.sector, len(sector_downlinks)
-                        )
-                    )
-
-                # Define data chunk mask
-                data_chunks = []
-                for _, downlink in sector_downlinks.iterrows():
-                    start = (
-                        Time(downlink["Start of Orbit"], format="iso", scale="utc").jd
-                        - 2457000
-                    )
-                    end = (
-                        Time(downlink["End of Orbit"], format="iso", scale="utc").jd
-                        - 2457000
-                    )
-                    # The buffer of 0.05 days accounts for inaccuracies in the downlink times.
-                    chunk = np.logical_and(
-                        self.time - self.timecorr >= start - 0.05,
-                        self.time - self.timecorr < end + 0.05,
-                    )
-                    # Only append chunks which have at least one True value i.e. target was observed during that chunk.
-                    if chunk.any():
-                        data_chunks.append(chunk)
-
-            logger.info(
-                "`_create_scattered_light_model()` defined {0} data chunks, saved in `self.data_chunks`.".format(
-                    len(data_chunks)
-                )
-            )
-
-        # Enforce that `data_chunks` is an array of arrays.
-        self.data_chunks = np.atleast_2d(data_chunks)
-        # Check data_chunks has correct length and number of dimensions.
-        if self.data_chunks.ndim != 2 or self.data_chunks.shape[1] != len(self.time):
-            raise ValueError(
-                "`data_chunks` must be a two-dimensional boolean array, where each sub-array has length equal to `self.time`."
-            )
-
-        # Check that all data is included in exactly one chunk.
-        if not np.all(np.sum(self.data_chunks, axis=0) == 1):
-            raise ValueError(
-                "All data must be included in exactly one data chunk, but this is not the case. Try re-defining `data_chunks`."
-            )
+        # Create and/or check data chunks
+        data_chunks = self._data_chunks(data_chunks)
 
         # Initialise priors on LM components
         prior_mu = np.zeros(X.shape[1])
@@ -910,7 +919,7 @@ class MovingTPF:
         logger.info("Started computation of scattered light model.")
         start_time = time.time()
 
-        for i, chunk in enumerate(self.data_chunks):
+        for i, chunk in enumerate(data_chunks):
             # Define good quality cadences in the data chunk.
             cadence_mask = np.logical_and(spoc_quality_mask, chunk)
             # Initialise outlier mask
@@ -1090,7 +1099,9 @@ class MovingTPF:
             im = ax.imshow(
                 sl_model.T, origin="lower", aspect="auto", interpolation="none"
             )
-            ax.set(xlabel="Time Index", ylabel="Pixel Index")
+            ax.set(
+                xlabel="Time Index", ylabel="Pixel Index", title="Scattered Light Model"
+            )
             # Add colorbar
             cbar = fig.colorbar(im, ax=ax, location="right")
             cbar.set_label("Flux [$e^-/s$]")
@@ -1165,14 +1176,16 @@ class MovingTPF:
     def _bg_linear_model(
         self,
         sl_method: str = "pca",
-        bad_spoc_bits: Union[list, str] = "default",
         sl_knot_width: float = 20,
         sl_sigma: float = 5,
         sl_niter_clip: int = 3,
+        bad_spoc_bits: Union[list, str] = "default",
         knot_width: float = 0.5,
         window_length: Optional[float] = 2,
         sigma: float = 3,
         niter_clip: int = 3,
+        data_chunks: Optional[Union[list, np.ndarray]] = None,
+        reshape: bool = True,
         progress_bar: bool = True,
         diagnostic_plot: bool = False,
         **kwargs,
@@ -1216,6 +1229,9 @@ class MovingTPF:
             Controls outlier clipping. Values where `(flux - model)/flux_err >= sigma` are clipped and the fitting
             is re-run. This is done iteratively until no more outliers remain.
             To turn off outlier clipping, set `sigma` to `np.inf`.
+        reshape : boolean
+            If True, the models are returned with a shape (ntimes, nrows, ncols).
+            If False, the models are returned with a shape (ntimes, npixels).
         progress_bar : bool
             If `True`, a progress bar will be displayed for the computation of the linear model.
         kwargs : dict
@@ -1259,12 +1275,16 @@ class MovingTPF:
             bad_spoc_bits
         )
 
+        # Create and/or check data chunks
+        data_chunks = self._data_chunks(data_chunks)
+
         # Compute scattered light model
         if sl_method == "pca":
             sl_model, sl_model_err = self._create_scattered_light_model(
                 knot_width=sl_knot_width,
                 sigma=sl_sigma,
                 niter_clip=sl_niter_clip,
+                data_chunks=data_chunks,
                 spoc_quality_mask=spoc_quality_mask,
                 diagnostic_plot=diagnostic_plot,
                 **kwargs,
@@ -1296,7 +1316,11 @@ class MovingTPF:
         # Define equally spaced knots between bounds, with spacing approximately equal to `knot_width`.
         # It is important to include an extra knot at the lower bound - this gives proper behaviour of spline.
         t = self.time
-        knots = np.linspace(t.min(), t.max(), int(np.round((t.max() - t.min()) / knot_width)) + 1,)[:-1]
+        knots = np.linspace(
+            t.min(),
+            t.max(),
+            int(np.round((t.max() - t.min()) / knot_width)) + 1,
+        )[:-1]
 
         # If `knot_width` is too large for the dataset, `knots` can be returned as an empty array.
         # The function will run, but we need to ensure that there is always one knot at the lower bound.
@@ -1312,16 +1336,22 @@ class MovingTPF:
             )
 
         # Create design matrix - third degree b-spline in time, with a global intercept
-        X = np.asarray(dmatrix("bs(t, knots=knots, degree=3, include_intercept=False)", {"t": t,"knots": knots}))
+        X = np.asarray(
+            dmatrix(
+                "bs(t, knots=knots, degree=3, include_intercept=False)",
+                {"t": t, "knots": knots},
+            )
+        )
         # Break design matrix into data chunks.
-        # >>> UPDATE Need data chunks from orbits to be a callable function, rather than repeating code.
-        X = np.hstack([X * chunk[:, None] for chunk in self.data_chunks])
+        X = np.hstack([X * chunk[:, None] for chunk in data_chunks])
         # Remove components that don't contribute
         X = X[:, X.sum(axis=0) != 0]
 
         # Compute width of window, in cadences
         if window_length is not None:
-            ncadences = np.round(window_length/2/np.nanmedian(np.diff(self.time))).astype(int)
+            ncadences = np.round(
+                window_length / 2 / np.nanmedian(np.diff(self.time))
+            ).astype(int)
 
         # Initialise priors on LM components (broad normal distributions). Prior on sigma is saturation level.
         prior_mu = np.zeros(X.shape[1])
@@ -1337,9 +1367,8 @@ class MovingTPF:
         start_time = time.time()
         # Loop through each pixel and fit time-series in a window around when pixel is present in TPF
         for pdx in tqdm(range(len(self.pixels)), disable=not progress_bar):
-
             # If all flux values are nan (e.g. non-science pixels), star model will also be nan.
-            if np.isnan(sl_corr_flux[:,pdx]).all():
+            if np.isnan(sl_corr_flux[:, pdx]).all():
                 continue
 
             # Good quality cadences with no nans.
@@ -1347,17 +1376,18 @@ class MovingTPF:
 
             # If using `window_length`, create a mask that defines a window around when the pixel is in TPF.
             if window_length is not None:
-        
                 # Create a copy of target mask for pdx
-                window = self.target_mask[:,pdx].copy()
-            
+                window = self.target_mask[:, pdx].copy()
+
                 # Define window around time when pixel is in TPF.
                 true_indices = np.nonzero(window)[0]
-                indices_to_set = true_indices[:, None] + np.arange(-ncadences, ncadences + 1)
-                
+                indices_to_set = true_indices[:, None] + np.arange(
+                    -ncadences, ncadences + 1
+                )
+
                 # Clip the indices to ensure they are within the array bounds
                 clipped_indices = np.clip(indices_to_set.flatten(), 0, window.size - 1)
-                
+
                 # Set the elements at the calculated indices to True
                 window[clipped_indices] = True
 
@@ -1365,21 +1395,19 @@ class MovingTPF:
                 mask = np.logical_and(mask, window)
 
                 # Create mask for model predicition - only during window when the pixel is in TPF.
-                mask_predict = np.logical_and(mask, self.target_mask[:,pdx])
+                mask_predict = np.logical_and(mask, self.target_mask[:, pdx])
             else:
                 # Create mask for model predicition - all times.
                 mask_predict = mask.copy()
 
-
             # Remove pixels containing target for fitting
-            mask = np.logical_and(mask,~source_mask[:, pdx])
+            mask = np.logical_and(mask, ~source_mask[:, pdx])
 
             # Prime while loop used for outlier clipping.
             n_clip = np.inf
             i_clip = 0
             exit_loop = False
             while n_clip != 0 and i_clip <= niter_clip:
-
                 # If there are no times to fit, star model and error will be nan for pixel at all times.
                 if (~mask).all():
                     logger.warning(
@@ -1390,19 +1418,25 @@ class MovingTPF:
 
                     exit_loop = True
                     break
-                
+
                 # Get flux time-series for pixel, excluding masked data
                 y, yerr = sl_corr_flux[mask, pdx], sl_corr_flux_err[mask, pdx]
 
                 # Use weighted Bayesian LS.
                 with warnings.catch_warnings():
-                    warnings.filterwarnings("ignore", message="divide by zero encountered in divide")
-                    warnings.filterwarnings("ignore", message="invalid value encountered in divide")
-                    sigma_w_inv = X[mask].T.dot(X[mask] / yerr[:, None]** 2) + np.diag(1 / prior_sigma**2)
-                    B = X[mask].T.dot(y/yerr**2) + prior_mu/prior_sigma**2
+                    warnings.filterwarnings(
+                        "ignore", message="divide by zero encountered in divide"
+                    )
+                    warnings.filterwarnings(
+                        "ignore", message="invalid value encountered in divide"
+                    )
+                    sigma_w_inv = X[mask].T.dot(X[mask] / yerr[:, None] ** 2) + np.diag(
+                        1 / prior_sigma**2
+                    )
+                    B = X[mask].T.dot(y / yerr**2) + prior_mu / prior_sigma**2
 
                 # Find the best-fitting weights
-                w = np.linalg.solve(sigma_w_inv,B)
+                w = np.linalg.solve(sigma_w_inv, B)
 
                 # Compute residuals, scaled by error
                 # If sl_corr_flux_err is zero, catch warning. We have seen this happen for S1, Cam1, CCD4
@@ -1413,20 +1447,21 @@ class MovingTPF:
                         message="divide by zero encountered in divide",
                         category=RuntimeWarning,
                     )
-                    resid = (y-X[mask].dot(w))/yerr
+                    resid = (y - X[mask].dot(w)) / yerr
 
                 # Clip outliers, if there are remaining iterations.
                 if i_clip < niter_clip:
                     n_clip_prev = np.sum(~mask)
-                    clipped = np.zeros_like(mask, dtype = bool)
+                    clipped = np.zeros_like(mask, dtype=bool)
                     with warnings.catch_warnings():
-                        warnings.filterwarnings(
-                            "ignore",
-                            category=AstropyUserWarning)
+                        warnings.filterwarnings("ignore", category=AstropyUserWarning)
                         clipped[mask] = ~sigma_clip(resid, sigma=sigma).mask
                         mask = np.logical_and(mask, clipped)
                         # Don't predict model for outliers, but ensure TPF pixels are always included.
-                        mask_predict = np.logical_and(mask_predict, np.logical_or(clipped, self.target_mask[:, pdx]))
+                        mask_predict = np.logical_and(
+                            mask_predict,
+                            np.logical_or(clipped, self.target_mask[:, pdx]),
+                        )
 
                     n_clip = np.sum(~mask) - n_clip_prev
                 i_clip += 1
@@ -1439,8 +1474,11 @@ class MovingTPF:
                         warnings.filterwarnings(
                             "ignore",
                             message="covariance is not symmetric positive-semidefinite",
-                            category=RuntimeWarning,)
-                        wdist = np.random.multivariate_normal(w, wcov, size=star_model_dist.shape[2])
+                            category=RuntimeWarning,
+                        )
+                        wdist = np.random.multivariate_normal(
+                            w, wcov, size=star_model_dist.shape[2]
+                        )
                 except np.linalg.LinAlgError:
                     logger.warning(
                         "When computing the star model for pixel {} (row {}, column {}), the computation of `wdist` failed with a `LinAlgError`. The model was set to nan at all times.".format(
@@ -1448,13 +1486,14 @@ class MovingTPF:
                         )
                     )
                     break
-            
+
                 # Calculate model distribution
                 star_model_dist[mask_predict, pdx] = X[mask_predict].dot(wdist.T)
 
                 # Compute reduced chi-squared using fit data:
-                red_chi2[pdx] = np.sum(resid**2)/(np.sum(mask) - np.linalg.matrix_rank(X[mask]))
-                    
+                red_chi2[pdx] = np.sum(resid**2) / (
+                    np.sum(mask) - np.linalg.matrix_rank(X[mask])
+                )
 
         # Compute star model and error from distribution.
         # Catch warnings that arise because of nan pixels.
@@ -1472,7 +1511,7 @@ class MovingTPF:
                 np.nanstd(star_model_dist, ddof=1, axis=2)
                 / np.sqrt(star_model_dist.shape[2]),
             )
-        
+
         logger.info(
             "Finished computation of star model in {0:.2f} sec.".format(
                 time.time() - start_time
@@ -1482,72 +1521,67 @@ class MovingTPF:
         # Flag cadences where star model is nan
         if hasattr(self, "star_nan_mask"):
             if window_length is not None:
-                self.star_nan_mask[np.where(np.logical_and(np.isnan(star_model),self.target_mask))] = True
+                self.star_nan_mask[
+                    np.where(np.logical_and(np.isnan(star_model), self.target_mask))
+                ] = True
             else:
                 self.star_nan_mask[np.where(np.isnan(star_model))] = True
 
-        # >>> UPDATE Poor fit mask
-
-        # Reshape arrays to match `self.flux`
-        sl_model_reshaped = []
-        sl_model_err_reshaped = []
-        star_model_reshaped = []
-        star_model_err_reshaped = []
-        for t in range(len(self.time)):
-            sl_model_reshaped.append(
-                sl_model[t][self.target_mask[t]].reshape(self.shape)
-            )
-            sl_model_err_reshaped.append(
-                sl_model_err[t][self.target_mask[t]].reshape(self.shape)
-            )
-            star_model_reshaped.append(
-                star_model[t][self.target_mask[t]].reshape(self.shape)
-            )
-            star_model_err_reshaped.append(
-                star_model_err[t][self.target_mask[t]].reshape(self.shape)
-            )
-
-        # Combine star model and scattered light model to create global BG model
-        bg = np.asarray(sl_model_reshaped) + np.asarray(star_model_reshaped)
-        bg_err = np.sqrt(
-            np.nansum(
-                [
-                    np.asarray(star_model_err_reshaped) ** 2,
-                    np.asarray(sl_model_err_reshaped) ** 2,
-                ],
-                axis=0,
-            )
-        )
-        # If both errors have nan value, propagate nan:
-        bg_err = np.where(
-            np.logical_and(
-                np.isnan(np.asarray(star_model_err_reshaped)),
-                np.isnan(np.asarray(sl_model_err_reshaped)),
-            ),
-            np.nan,
-            bg_err,
-        )
+        # Flag pixels where model fit was poor, using reduced chi-squared
+        if hasattr(self, "star_fit_mask"):
+            self.star_fit_mask = red_chi2 > 2
 
         if diagnostic_plot:
+            logger.info("Making diagnostic plots for background model...")
             fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 10))
 
-            vmin=np.nanpercentile(self.all_flux,1)
-            vmax=np.nanpercentile(self.all_flux,99)
+            vmin = np.nanpercentile(self.all_flux, 1)
+            vmax = np.nanpercentile(self.all_flux, 99)
 
             ax1.set(ylabel="Pixel Index", title="Raw Flux")
-            im = ax1.imshow(self.all_flux.T, origin="lower", aspect="auto", interpolation="none", vmin=vmin, vmax=vmax)
+            im = ax1.imshow(
+                self.all_flux.T,
+                origin="lower",
+                aspect="auto",
+                interpolation="none",
+                vmin=vmin,
+                vmax=vmax,
+            )
             # Add colorbar
             cbar = fig.colorbar(im, ax=ax1, location="right")
             cbar.set_label("Flux [$e^-/s$]")
 
-            ax2.set(ylabel="Pixel Index", title="Background Model")
-            im = ax2.imshow((star_model+sl_model).T, origin="lower", aspect="auto", interpolation="none", vmin=vmin, vmax=vmax)
+            ax2.set(
+                ylabel="Pixel Index", title="Background Model (Scattered Light + Star)"
+            )
+            im = ax2.imshow(
+                (star_model + sl_model).T,
+                origin="lower",
+                aspect="auto",
+                interpolation="none",
+                vmin=vmin,
+                vmax=vmax,
+            )
             # Add colorbar
             cbar = fig.colorbar(im, ax=ax2, location="right")
             cbar.set_label("Flux [$e^-/s$]")
 
-            ax3.set(xlabel="Time Index", ylabel="Pixel Index", title="Residuals excluding target (vmin=-5, vmax=5)")
-            im = ax3.imshow(np.where((~source_mask).T,(self.all_flux - star_model - sl_model).T, np.nan), origin="lower", aspect="auto", interpolation="none", cmap = "RdBu", vmin=-5, vmax=5)
+            ax3.set(
+                xlabel="Time Index",
+                ylabel="Pixel Index",
+                title="Residuals (excluding target, vmin=-5, vmax=5)",
+            )
+            im = ax3.imshow(
+                np.where(
+                    (~source_mask).T, (self.all_flux - star_model - sl_model).T, np.nan
+                ),
+                origin="lower",
+                aspect="auto",
+                interpolation="none",
+                cmap="RdBu",
+                vmin=-5,
+                vmax=5,
+            )
             # Add colorbar
             cbar = fig.colorbar(im, ax=ax3, location="right")
             cbar.set_label("Flux [$e^-/s$]")
@@ -1556,13 +1590,58 @@ class MovingTPF:
             plt.show()
             plt.close(fig)
 
+        # Reshape arrays to match `self.flux`
+        if reshape:
+            sl_model_reshaped = []
+            sl_model_err_reshaped = []
+            star_model_reshaped = []
+            star_model_err_reshaped = []
+            for t in range(len(self.time)):
+                sl_model_reshaped.append(
+                    sl_model[t][self.target_mask[t]].reshape(self.shape)
+                )
+                sl_model_err_reshaped.append(
+                    sl_model_err[t][self.target_mask[t]].reshape(self.shape)
+                )
+                star_model_reshaped.append(
+                    star_model[t][self.target_mask[t]].reshape(self.shape)
+                )
+                star_model_err_reshaped.append(
+                    star_model_err[t][self.target_mask[t]].reshape(self.shape)
+                )
+            sl_model = np.asarray(sl_model_reshaped)
+            sl_model_err = np.asarray(sl_model_err_reshaped)
+            star_model = np.asarray(star_model_reshaped)
+            star_model_err = np.asarray(star_model_err_reshaped)
+
+        # Combine star model and scattered light model to create global BG model
+        bg = sl_model + star_model
+        bg_err = np.sqrt(
+            np.nansum(
+                [
+                    star_model_err**2,
+                    sl_model_err**2,
+                ],
+                axis=0,
+            )
+        )
+        # If both errors have nan value, propagate nan:
+        bg_err = np.where(
+            np.logical_and(
+                np.isnan(star_model_err),
+                np.isnan(sl_model_err),
+            ),
+            np.nan,
+            bg_err,
+        )
+
         return (
             bg,
             bg_err,
-            np.asarray(sl_model_reshaped),
-            np.asarray(sl_model_err_reshaped),
-            np.asarray(star_model_reshaped),
-            np.asarray(star_model_err_reshaped),
+            sl_model,
+            sl_model_err,
+            star_model,
+            star_model_err,
         )
 
     def create_aperture(self, method: str = "prf", **kwargs):
@@ -1710,7 +1789,7 @@ class MovingTPF:
         """
 
         # Create PRF model
-        self.prf_model = self._create_target_prf_model(**kwargs)
+        self.prf_model = self._create_target_prf_model(all_flux=False, **kwargs)
 
         # Use PRF model to define aperture
         if threshold == "optimal":
@@ -2171,7 +2250,7 @@ class MovingTPF:
                     "bit": 5,
                     "value": np.full(self.shape, self.sl_nan_mask[t]),
                 },
-                # Pixel does not have a background star model (value is nan). 
+                # Pixel does not have a background star model (value is nan).
                 # It is only meaningful if the `linear_model` background correction was used.
                 "star_nan_mask": {
                     "bit": 6,
@@ -2180,6 +2259,14 @@ class MovingTPF:
                     ),
                 },
                 "negative_mask": {"bit": 7, "value": negative_mask[t]},
+                # Pixel has a poor fitting background star model.
+                # It is only meaningful if the `linear_model` background correction was used.
+                "star_fit_mask": {
+                    "bit": 8,
+                    "value": self.star_fit_mask[self.target_mask[t]].reshape(
+                        self.shape
+                    ),
+                },
             }
             # Compute bit-wise mask
             pixel_quality.append(
@@ -2749,6 +2836,15 @@ class MovingTPF:
                     "bit": 10,
                     "value": [
                         (self.pixel_quality[t][self.aperture_mask[t]] & 64 != 0).any()
+                        for t in range(len(self.time))
+                    ],
+                },
+                # Pixel in aperture with a poor fitting background star model.
+                # Only relevant if the `linear_model` background correction was used.
+                "star_fit_mask": {
+                    "bit": 11,
+                    "value": [
+                        (self.pixel_quality[t][self.aperture_mask[t]] & 128 != 0).any()
                         for t in range(len(self.time))
                     ],
                 },
