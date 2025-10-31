@@ -1271,7 +1271,7 @@ class MovingTPF:
             If True, the background model is returned with a shape (ntimes, nrows, ncols).
             If False, the background model is returned with a shape (ntimes, npixels).
         progress_bar : bool
-            If `True`, a progress bar will be displayed for the computation of the linear model.
+            If `True`, a progress bar will be displayed for the computation of the star model.
         diagnostic_plot : bool
             If True, shows diagnostic plots to check the scattered light model and star model.
         kwargs : dict
