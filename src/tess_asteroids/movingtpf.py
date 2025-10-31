@@ -709,6 +709,25 @@ class MovingTPF:
         )
 
     def _data_chunks(self, data_chunks: Optional[Union[list, np.ndarray]] = None):
+        """
+        This function creates and/or checks the format of data chunks.
+        If `data_chunks=None`, this function will define `data_chunks` using TESS data downlink times. 
+        Otherwise, this function will check the format of user-defined `data_chunks`.
+        These chunks are used by `_create_scattered_light_model()` and `_bg_linear_model()`.
+
+        Parameters
+        ----------
+        data_chunks : ndarray
+            A boolean mask that defines chunks of data. The array must have shape (nchunks, ntimes). 
+            If None, chunks will be defined using TESS data downlink times.
+        
+        Returns
+        -------
+        data_chunks : ndarray
+            A boolean mask that defines chunks of data. The array has shape (nchunks, ntimes). 
+
+        """
+
         # If user has not provided data chunks, split data based upon data downlink times.
         if data_chunks is None:
             # If downlinks file was not found, data is not split into chunks.
@@ -1175,16 +1194,17 @@ class MovingTPF:
 
     def _bg_linear_model(
         self,
+        bad_spoc_bits: Union[list, str] = "default",
+        data_chunks: Optional[Union[list, np.ndarray]] = None,
         sl_method: str = "pca",
         sl_knot_width: float = 20,
         sl_sigma: float = 5,
         sl_niter_clip: int = 3,
-        bad_spoc_bits: Union[list, str] = "default",
         knot_width: float = 0.5,
         window_length: Optional[float] = 2,
         sigma: float = 3,
         niter_clip: int = 3,
-        data_chunks: Optional[Union[list, np.ndarray]] = None,
+        red_chi2_tol: float = 2,
         reshape: bool = True,
         progress_bar: bool = True,
         diagnostic_plot: bool = False,
@@ -1197,13 +1217,12 @@ class MovingTPF:
                each cadence.
         These two components get summed to create a global background model.
 
-        Step one is done using the `_create_scattered_light_model` function. Step two loops through each cadence
-        and each relevant pixel to model the SL corrected flux in a time window around that cadence.
+        Step one is done using the `_create_scattered_light_model` function. Step two loops through each pixel to model
+        the scattered light corrected flux, with the option to only model cadences in a time window around when the pixel
+        is in the TPF region.
 
         Parameters
         ----------
-        sl_method : str
-            Method used to compute scattered light model. One of [`pca`].
         bad_spoc_bits : list or str
             Defines SPOC bits corresponding to bad quality data. Can be one of:
 
@@ -1214,26 +1233,42 @@ class MovingTPF:
             Data that is masked will not be used when creating the background model and its resulting background model will be NaN.
             More information about the SPOC quality flags can be found in Section 9 of the TESS Science Data Products
             Description Document.
+        data_chunks : ndarray
+            A boolean mask that defines chunks of data. The star model will account for discontinuities in the flux
+            time-series between chunks. `data_chunks` is also used by `_create_scattered_light_model()`. The array must have
+            shape (nchunks, ntimes). If you don't want to split data into chunks, define as `np.asarray([np.full(len(self.time), True)])`.
+            If None, chunks will be defined using TESS data downlink times.
+        sl_method : str
+            Method used to compute scattered light model. One of [`pca`].
         sl_knot_width : float
             Approximate pixel spacing between spline knots used for scattered light model.
         sl_sigma : float
-            Sigma threshold used for outlier detection in scattered light model.
+            Sigma threshold used for outlier detection when creating scattered light model.
         sl_niter_clip : int
-            Number of iterations of outlier clipping in scattered light model.
+            Number of iterations of outlier clipping when creating scattered light model. To turn off outlier clipping, set `sl_niter_clip=0`.
+        knot_width : float
+            Approximate spacing between spline knots used for star model, in days.
         window_length : float
-            This is used to define the time window around each frame when computing the linear model. It is
-            defined in days.
-        poly_deg : int
-            Degree for the time polynomial, used for the linear model.
+            This defines the width of the window, in days, used for fitting the star model to each pixel. For each pixel, the fitting window
+            is centred on the time it is present in the TPF region. If None, the full time-series is modelled. A longer `window_length` will 
+            increase the runtime of this function.
         sigma : float
-            Controls outlier clipping. Values where `(flux - model)/flux_err >= sigma` are clipped and the fitting
-            is re-run. This is done iteratively until no more outliers remain.
-            To turn off outlier clipping, set `sigma` to `np.inf`.
+            Sigma threshold for outlier detection when creating star model. A larger value of `sigma` will mask less data.
+        niter_clip : int
+            Number of iterations of outlier clipping when creating star model.
+
+            - To turn off outlier clipping, set `niter_clip` to zero.
+            - To clip until no outliers remain, set `niter_clip` to `np.inf`.
+        red_chi2_tol: float
+            Pixels with reduced chi-squared >= `red_chi2_tol` will be flagged to indicate the star model fit was poor. This flag
+            is used by `create_pixel_quality()` and `_create_lc_quality()`.
         reshape : boolean
-            If True, the models are returned with a shape (ntimes, nrows, ncols).
-            If False, the models are returned with a shape (ntimes, npixels).
+            If True, the background model is returned with a shape (ntimes, nrows, ncols).
+            If False, the background model is returned with a shape (ntimes, npixels).
         progress_bar : bool
             If `True`, a progress bar will be displayed for the computation of the linear model.
+        diagnostic_plot : bool
+            If True, shows diagnostic plots to check the scattered light model and star model.
         kwargs : dict
             Keywords arguments passed to `_create_scattered_light_model` (e.g. `niter`, `ncomponents`)
             and `_create_pca_source_mask` (e.g `target_threshold`, `star_flux_threshold`).
@@ -1241,18 +1276,17 @@ class MovingTPF:
         Returns
         -------
         bg : ndarray
-            Background flux estimate, with same shape as `self.flux`.
-            This is the sum of the scattered light model and linear model.
+            Background flux estimate. This is the sum of the scattered light model and star model.
         bg_err : ndarray
-            Error on background flux estimate, with same shape as `self.flux`.
+            Error on background flux estimate.
         sl_model : ndarray
-            Scattered light model, with same shape as `self.flux`.
+            Scattered light model.
         sl_model_err : ndarray
-            Error on scattered light model, with same shape as `self.flux`.
-        linear_model : ndarray
-            Linear  model, with same shape as `self.flux`.
-        linear_model_err : ndarray
-            Error on linear  model, with same shape as `self.flux`.
+            Error on scattered light model.
+        star_model : ndarray
+            Star model.
+        star_model_err : ndarray
+            Error on star model.
         """
 
         if not hasattr(self, "all_flux"):
@@ -1270,12 +1304,12 @@ class MovingTPF:
                 f"`niter_clip` must be greater than or equal to zero. Not '{niter_clip}'"
             )
 
-        # Define good quality data using user-defined SPOC quality flags.
+        # Define good quality data using user-defined SPOC bits.
         spoc_quality_mask, self.bad_spoc_bits = self._create_spoc_quality_mask(
             bad_spoc_bits
         )
 
-        # Create and/or check data chunks
+        # Create and/or check data chunks.
         data_chunks = self._data_chunks(data_chunks)
 
         # Compute scattered light model
@@ -1307,7 +1341,7 @@ class MovingTPF:
         )
         self.sl_method = sl_method
 
-        # Identify nans in SL corrected flux e.g. SL model failed.
+        # Identify nans in SL corrected flux (e.g. SL model failed).
         nan_mask = np.isnan(sl_corr_flux)
 
         # Create mask for moving target.
@@ -1330,7 +1364,7 @@ class MovingTPF:
         # Warn the user if there are no interior knots. This can lead to a poorly constrained spline.
         if len(knots) == 1:
             logger.warning(
-                "There are no interior knots in time with a `knot_width` of {0} days. Try re-defining `knot_width` to a smaller value.".format(
+                "There are no interior knots with a `knot_width` of {0} days. Try re-defining `knot_width` to a smaller value.".format(
                     knot_width
                 )
             )
@@ -1347,13 +1381,13 @@ class MovingTPF:
         # Remove components that don't contribute
         X = X[:, X.sum(axis=0) != 0]
 
-        # Compute width of window, in cadences
+        # Compute half-width of fitting window, in cadences
         if window_length is not None:
             ncadences = np.round(
                 window_length / 2 / np.nanmedian(np.diff(self.time))
             ).astype(int)
 
-        # Initialise priors on LM components (broad normal distributions). Prior on sigma is saturation level.
+        # Initialise priors on LM components (broad normal distributions). Prior on sigma uses saturation level.
         prior_mu = np.zeros(X.shape[1])
         prior_sigma = np.ones(X.shape[1]) * 1e5
 
@@ -1365,7 +1399,7 @@ class MovingTPF:
 
         logger.info("Started computation of star model.")
         start_time = time.time()
-        # Loop through each pixel and fit time-series in a window around when pixel is present in TPF
+        # Loop through each pixel and fit time-series
         for pdx in tqdm(range(len(self.pixels)), disable=not progress_bar):
             # If all flux values are nan (e.g. non-science pixels), star model will also be nan.
             if np.isnan(sl_corr_flux[:, pdx]).all():
@@ -1374,7 +1408,7 @@ class MovingTPF:
             # Good quality cadences with no nans.
             mask = np.logical_and(spoc_quality_mask, ~nan_mask[:, pdx])
 
-            # If using `window_length`, create a mask that defines a window around when the pixel is in TPF.
+            # If using `window_length`, create a mask that defines a window around when the pixel is in TPF region.
             if window_length is not None:
                 # Create a copy of target mask for pdx
                 window = self.target_mask[:, pdx].copy()
@@ -1391,10 +1425,10 @@ class MovingTPF:
                 # Set the elements at the calculated indices to True
                 window[clipped_indices] = True
 
-                # Add to overall mask
+                # Add to mask
                 mask = np.logical_and(mask, window)
 
-                # Create mask for model predicition - only during window when the pixel is in TPF.
+                # Create mask for model predicition - only when the pixel is in TPF region.
                 mask_predict = np.logical_and(mask, self.target_mask[:, pdx])
             else:
                 # Create mask for model predicition - all times.
@@ -1439,7 +1473,7 @@ class MovingTPF:
                 w = np.linalg.solve(sigma_w_inv, B)
 
                 # Compute residuals, scaled by error
-                # If sl_corr_flux_err is zero, catch warning. We have seen this happen for S1, Cam1, CCD4
+                # If yerr is zero, catch warning. We have seen this happen for S1, Cam1, CCD4
                 # where all_flux and all_flux_err are zero for several cadences.
                 with warnings.catch_warnings():
                     warnings.filterwarnings(
@@ -1529,7 +1563,12 @@ class MovingTPF:
 
         # Flag pixels where model fit was poor, using reduced chi-squared
         if hasattr(self, "star_fit_mask"):
-            self.star_fit_mask = red_chi2 > 2
+            self.star_fit_mask = red_chi2 > red_chi2_tol
+            logger.info(
+                "{0} pixels have poor fitting star model.".format(
+                    sum(self.star_fit_mask)
+                )
+            )
 
         if diagnostic_plot:
             logger.info("Making diagnostic plots for background model...")
@@ -2179,6 +2218,7 @@ class MovingTPF:
         - 6 - pixel had no background star model, value is nan. Only relevant if `linear_model` background correction was used.
         - 7 - pixel had negative flux value BEFORE background correction was applied.
             This can happen near bleed columns from saturated stars (e.g. see Sector 6, Camera 1, CCD 4).
+        - 8 - pixel has a poor fitting background star model. Only relevant if `linear_model` background correction was used.
 
         Parameters
         ----------
@@ -2728,6 +2768,8 @@ class MovingTPF:
         9  - at least one pixel inside aperture had no star model (value is nan).
              Only relevant if `linear_model` background correction was used.
         10 - at least one pixel inside aperture had negative value BEFORE background correction was applied.
+        11 - at least one pixel inside aperture had a poor fitting background star model. 
+             Only relevant if `linear_model` background correction was used.
 
         Parameters
         ----------
