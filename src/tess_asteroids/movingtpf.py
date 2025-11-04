@@ -2321,17 +2321,22 @@ class MovingTPF:
         if isinstance(time_bin_size, (float, int)):
             dt = np.median(np.diff(time))
             if time_bin_size >= dt:
-                time_bin = time_bin_size # in days
+                time_bin = time_bin_size  # in days
                 n_bins = int((time[-1] - time[0]) // time_bin)
                 # compute the bin edges and cadences inside each bin
                 bin_edges = np.histogram_bin_edges(time, bins=n_bins)
-                bin_index = [np.where((time >= l) & (time <= r))[0] for l, r in zip(bin_edges[:-1], bin_edges[1:])]
+                bin_index = [
+                    np.where((time >= le) & (time <= ra))[0]
+                    for le, ra in zip(bin_edges[:-1], bin_edges[1:])
+                ]
                 bin_index = [x for x in bin_index if len(x) > 0]
             else:
-                raise ValueError(f"Please provide a value for `time_bin_size` larger than the exposure time {dt:.5f} [d]")
-        # no time binning 
+                raise ValueError(
+                    f"Please provide a value for `time_bin_size` larger than the exposure time {dt:.5f} [d]"
+                )
+        # no time binning
         elif time_bin_size is None:
-            bin_index = np.arange(len(time))
+            bin_index = np.arange(len(time)).tolist()
         else:
             raise ValueError("Please provide a numerical value for `time_bin_size`")
         self.time_bin_size = time_bin_size
@@ -2381,8 +2386,7 @@ class MovingTPF:
                 # Compute flux
                 amp = np.linalg.solve(
                     sigma_w_inv,
-                    X[j].T.dot((f.ravel()[j] / fe.ravel()[j] ** 2))
-                    + pmu / psigma ** 2,
+                    X[j].T.dot((f.ravel()[j] / fe.ravel()[j] ** 2)) + pmu / psigma**2,
                 )[0]
                 # Compute flux error
                 amp_err = (np.linalg.inv(sigma_w_inv).diagonal() ** 0.5)[0]
