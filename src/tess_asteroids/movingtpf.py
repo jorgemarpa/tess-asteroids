@@ -2319,6 +2319,7 @@ class MovingTPF:
 
         # Number of points in the resulting light curve given the cadence binning
         n_points = len(time) // n_cadences
+        print(n_points)
         psf_phot = []
         nfails = 0
 
@@ -2357,8 +2358,11 @@ class MovingTPF:
 
             # Create DM from PRF model
             X = p.ravel()[:, None]
+            print(p.shape, X.shape)
             sigma_w_inv = X[j].T.dot(X[j] / fe.ravel()[j, None] ** 2)
+            pmu = np.atleast_1d(np.nanmean(pmu))
             psigma = np.ones_like(pmu) * 1e4
+            print(sigma_w_inv.shape, pmu.shape, psigma.shape)
             sigma_w_inv += np.diag(1 / psigma)
 
             # Solve linear model
