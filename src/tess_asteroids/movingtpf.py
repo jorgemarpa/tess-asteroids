@@ -2289,6 +2289,26 @@ class MovingTPF:
         spoc_quality = self.quality[spoc_quality_mask]
         cadno = self.cadence_number[spoc_quality_mask]
 
+        # get flux prior from Vmag (when available) --> Tmag --> flux
+        # we use Woods et al 2021 T = V - 0.671
+        # only asign priors when Vmag is finite and > 0
+        if (
+            np.isfinite(self.ephem["vmag"].values).all()
+            and (self.ephem["vmag"].values > 0).all()
+        ):
+            tmag_prior = (
+                CubicSpline(
+                    self.ephem["time"].astype(float),
+                    self.ephem["vmag"].astype(float),
+                    extrapolate=True,
+                )(self.time)
+                - 0.671
+            )
+            flux_prior = 10 ** ((TESSmag_zero_point - tmag_prior) / 2.5)
+            flux_prior = flux_prior[spoc_quality_mask]
+        else:
+            flux_prior = np.zeros_like(time)
+
         # Reject poorly corrected pixels with 3-sigma clipping
         if clip_data:
             mask = sigma_clip(cube, sigma=3).mask
@@ -2303,7 +2323,7 @@ class MovingTPF:
         nfails = 0
 
         # Iterate over each binning window to compute PSF photometry
-        for idx, t, f, fe, p, qu, cn, tc in tqdm(
+        for idx, t, f, fe, p, qu, cn, tc, pmu in tqdm(
             zip(
                 range(n_points),
                 np.array_split(time, n_points),
@@ -2313,10 +2333,11 @@ class MovingTPF:
                 np.array_split(spoc_quality, n_points),
                 np.array_split(cadno, n_points),
                 np.array_split(timecorr, n_points),
+                np.array_split(flux_prior, n_points),
             ),
             total=n_points,
         ):
-            # Find finite values and pixels with > 0.01% PRF value
+            # Find finite values and pixels with > 0.001% PRF value
             j = np.logical_and(
                 np.isfinite(f.ravel()),
                 np.logical_and(np.isfinite(fe.ravel()), (p.ravel() > 0.00001)),
@@ -2337,12 +2358,16 @@ class MovingTPF:
             # Create DM from PRF model
             X = p.ravel()[:, None]
             sigma_w_inv = X[j].T.dot(X[j] / fe.ravel()[j, None] ** 2)
+            psigma = np.ones_like(pmu) * 1e4
+            sigma_w_inv += np.diag(1 / psigma)
 
             # Solve linear model
             try:
                 # Compute flux
                 amp = np.linalg.solve(
-                    sigma_w_inv, X[j].T.dot((f.ravel()[j] / fe.ravel()[j] ** 2))
+                    sigma_w_inv,
+                    X[j].T.dot((f.ravel()[j] / fe.ravel()[j] ** 2))
+                    + pmu / psigma ** 2,
                 )[0]
                 # Compute flux error
                 amp_err = (np.linalg.inv(sigma_w_inv).diagonal() ** 0.5)[0]
