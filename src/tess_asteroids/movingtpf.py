@@ -2123,7 +2123,7 @@ class MovingTPF:
             Method to extract lightcurve. One of `aperture` or `psf`.
         kwargs : dict
             Keyword arguments, e.g `self._aperture_photometry` takes `bad_bits`,
-            `self._psf_photometry` takes `n_cadences`
+            `self._psf_photometry` takes `time_bin_size`
 
         Returns
         -------
@@ -2212,7 +2212,7 @@ class MovingTPF:
 
     def _psf_photometry(
         self,
-        n_cadences: int = 1,
+        time_bin_size: Optional[float] = None,
         bad_spoc_bits: Union[list, str] = "default",
         clip_data: bool = False,
         **kwargs,
@@ -2225,9 +2225,9 @@ class MovingTPF:
 
         Parameters
         ----------
-        n_cadences : int
-            Number of cadences used to fit the PRF model simultaneously, effectively doing data binning.
-            Default is 1, which is no binning.
+        time_bin_size : float
+            Time bin size in days used to fit the PRF model simultaneously, effectively doing data binning.
+            Default is None, which is no binning.
         bad_spoc_bits : list or str
             Defines SPOC bits corresponding to bad quality data. Can be one of:
 
@@ -2251,7 +2251,7 @@ class MovingTPF:
 
             - `time` is the average time in the binning window.
             - `time_uerr`/`time_lerr` are the upper/lower error on time (corresponds to limits of binning window).
-                These will be nan if `n_cadences = 1`.
+                These will be nan if `time_bin_size = None`.
             - `time_corr` is the average barycentric time correction in the binning window.
             - `cadenceno` is the average cadence number, as defined by `tesscube`, in the binning window.
             - `flux` and `flux_err` from the PRF fitting.
@@ -2261,9 +2261,9 @@ class MovingTPF:
                 - Bit 1 = model fitting failed.
                 - Bit 2 = model fitting returned negative flux value.
             - `spoc_quality` is the combined SPOC quality flag in the binning window.
-            Note: if `n_cadences = 1` then `time`, `time_corr`, `cadenceno` and `spoc_quality` are equal to `self.time`, `self.timecorr`,
+            Note: if `time_bin_size = None` then `time`, `time_corr`, `cadenceno` and `spoc_quality` are equal to `self.time`, `self.timecorr`,
             `self.cadence_number` and `self.quality`, respectively.
-        n_cadences: int
+        n_cadences: ndarray
             Number of cadences that were used to simultaneosuly fit the PRF model.
         bad_spoc_bits : list or str
             The SPOC bits used to define bad quality data.
@@ -2317,27 +2317,40 @@ class MovingTPF:
             )
             cube[mask] = np.nan
 
-        # Number of points in the resulting light curve given the cadence binning
-        n_points = len(time) // n_cadences
-        print(n_points)
+        # Make an array with the indices for the time binning
+        if isinstance(time_bin_size, (float, int)):
+            dt = np.median(np.diff(time))
+            if time_bin_size >= dt:
+                time_bin = time_bin_size # in days
+                n_bins = int((time[-1] - time[0]) // time_bin)
+                # compute the bin edges and cadences inside each bin
+                bin_edges = np.histogram_bin_edges(time, bins=n_bins)
+                bin_index = [np.where((time >= l) & (time <= r))[0] for l, r in zip(bin_edges[:-1], bin_edges[1:])]
+                bin_index = [x for x in bin_index if len(x) > 0]
+            else:
+                raise ValueError(f"Please provide a value for `time_bin_size` larger than the exposure time {dt:.5f} [d]")
+        # no time binning 
+        elif time_bin_size is None:
+            bin_index = np.arange(len(time))
+        else:
+            raise ValueError("Please provide a numerical value for `time_bin_size`")
+        self.time_bin_size = time_bin_size
         psf_phot = []
         nfails = 0
 
         # Iterate over each binning window to compute PSF photometry
-        for idx, t, f, fe, p, qu, cn, tc, pmu in tqdm(
-            zip(
-                range(n_points),
-                np.array_split(time, n_points),
-                np.array_split(cube, n_points),
-                np.array_split(cube_err, n_points),
-                np.array_split(prf_model, n_points),
-                np.array_split(spoc_quality, n_points),
-                np.array_split(cadno, n_points),
-                np.array_split(timecorr, n_points),
-                np.array_split(flux_prior, n_points),
-            ),
-            total=n_points,
-        ):
+        for bdx in tqdm(bin_index, total=len(bin_index)):
+            # asign wroking variables inside the loop
+            bdx = np.atleast_1d(bdx)
+            t = time[bdx]
+            f = cube[bdx]
+            fe = cube_err[bdx]
+            p = prf_model[bdx]
+            qu = spoc_quality[bdx]
+            cn = cadno[bdx]
+            tc = timecorr[bdx]
+            pmu = flux_prior[bdx]
+
             # Find finite values and pixels with > 0.001% PRF value
             j = np.logical_and(
                 np.isfinite(f.ravel()),
@@ -2351,7 +2364,7 @@ class MovingTPF:
 
             # Compute errors on time window
             t_mean = t.mean()
-            if n_cadences == 1:
+            if self.time_bin_size is None:
                 te_u, te_l = np.nan, np.nan
             else:
                 te_u, te_l = np.nanmax(t) - t_mean, t_mean - np.nanmin(t)
@@ -2391,6 +2404,7 @@ class MovingTPF:
                         amp_err,
                         red_chi2,
                         qual,
+                        len(bdx),
                     ]
                 )
 
@@ -2407,6 +2421,7 @@ class MovingTPF:
                         np.nan,
                         np.nan,
                         qual,
+                        len(bdx),
                     ]
                 )
                 nfails += 1
@@ -2427,6 +2442,7 @@ class MovingTPF:
             flux_err,
             red_chi2,
             spoc_quality,
+            n_cadences,
         ) = np.asarray(psf_phot).T
 
         # Flag cadences where model fiting failed - bit 1
@@ -2445,7 +2461,7 @@ class MovingTPF:
             red_chi2,
             quality,
             spoc_quality.astype(int),
-            n_cadences,
+            n_cadences.astype(int),
             bad_spoc_bits,
         )
 
@@ -3636,16 +3652,22 @@ class MovingTPF:
                     disp="B16.16",
                     array=self.lc["psf"]["quality"],
                 ),
+                # Number of cadences used for simultaneous PSF fit
+                fits.Column(
+                    name="N_CADENCES",
+                    format="I",
+                    array=self.lc["psf"]["n_cadences"],
+                ),
             ]
             # Create table HDU
             table_hdu_psf = fits.BinTableHDU.from_columns(cols_psf)
             table_hdu_psf.header["EXTNAME"] = "LIGHTCURVE_PSF"
 
-            # Add extra keywords to header
+            # Add extra keywords to header with time bin size
             table_hdu_psf.header.set(
-                "N_CAD",
-                self.lc["psf"]["n_cadences"],
-                comment="number of cadences for simultaneous PRF fitting",
+                "TBINSIZE",
+                self.time_bin_size,
+                comment="time binning size in [d]",
             )
             table_hdu_psf.header.set(
                 "BAD_SPOC",
