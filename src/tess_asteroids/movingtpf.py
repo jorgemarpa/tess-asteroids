@@ -2177,6 +2177,7 @@ class MovingTPF:
                 spoc_quality,
                 n_cadences,
                 bad_spoc_bits,
+                psffrac,
             ) = self._psf_photometry(**kwargs)
             self.lc["psf"] = {
                 "time": time,
@@ -2190,6 +2191,7 @@ class MovingTPF:
                 "spoc_quality": spoc_quality,
                 "n_cadences": n_cadences,
                 "bad_spoc_bits": bad_spoc_bits,
+                "psf_fraction": psffrac,
             }
             self.lc["psf"]["quality"] = self._create_lc_quality(
                 method="psf", bad_spoc_bits=bad_spoc_bits
@@ -2218,10 +2220,10 @@ class MovingTPF:
         **kwargs,
     ):
         """
-        Computes PSF photometry by fitting the amplitude of the target's PRF model to the data. 
+        Computes PSF photometry by fitting the amplitude of the target's PRF model to the data.
         The model is fitted using a linear model as in the LFD paper (Hedges et al. 2021).
 
-        This function can optionally fit all of the data in a cadence window simultaneously, 
+        This function can optionally fit all of the data in a cadence window simultaneously,
         effectively binning the data to improve SNR.
 
         Parameters
@@ -2236,14 +2238,14 @@ class MovingTPF:
             - "all" - mask all data with a SPOC quality flag.
             - "none" - mask no data.
             - list - mask custom bits provided in list.
-            Data that is masked will not be used when fitting the PRF model. If all cadences in a window are defined 
+            Data that is masked will not be used when fitting the PRF model. If all cadences in a window are defined
             as bad quality, there will be no lightcurve data for that window.
             More information about the SPOC quality flags can be found in Section 9 of the TESS Science Data Products
             Description Document.
 
         Returns:
         --------
-        time, time_uerr, time_lerr, time_corr, cadenceno, flux, flux_err, red_chi2, quality, spoc_quality: ndarrays
+        time, time_uerr, time_lerr, time_corr, cadenceno, flux, flux_err, red_chi2, n_cadences, spoc_quality, psffrac: ndarrays
 
             - `time` is the average time in the binning window.
             - `time_uerr`/`time_lerr` are the upper/lower error on time (corresponds to limits of binning window).
@@ -2253,10 +2255,10 @@ class MovingTPF:
             - `flux` and `flux_err` from the PRF fitting.
             - `red_chi2` is the reduced chi-squared of the fitted PRF model.
             - `spoc_quality` is the combined SPOC quality flag in the binning window.
-            Note: if `time_bin_size = None` then `time`, `time_corr`, `cadenceno` and `spoc_quality` are equal to 
+            Note: if `time_bin_size = None` then `time`, `time_corr`, `cadenceno` and `spoc_quality` are equal to
             `self.time`, `self.timecorr`, `self.cadence_number` and `self.quality`, respectively.
-        n_cadences: ndarray
-            Number of cadences that were used to simultaneosuly fit the PRF model.
+            - `psffrac` is the PSF fraction on the good quality pixel
+            - `n_cadences` is the number of cadences that were used to simultaneosuly fit the PRF model.
         bad_spoc_bits : list or str
             The SPOC bits used to define bad quality data.
         """
@@ -2280,6 +2282,7 @@ class MovingTPF:
         cube_err = self.corr_flux_err[spoc_quality_mask]
         spoc_quality = self.quality[spoc_quality_mask]
         cadno = self.cadence_number[spoc_quality_mask]
+        pixel_quality = self.pixel_quality[spoc_quality_mask]
 
         # get flux prior from Vmag (when available) --> Tmag --> flux
         # we use Woods et al 2021 T = V - 0.671
@@ -2341,6 +2344,7 @@ class MovingTPF:
             cn = cadno[bdx]
             tc = timecorr[bdx]
             pmu = flux_prior[bdx]
+            pq = pixel_quality[bdx]
 
             # Find finite values and pixels with > 0.001% PRF value
             j = np.logical_and(
@@ -2354,6 +2358,15 @@ class MovingTPF:
             qual = 0
             for q in qu:
                 qual |= q
+
+            # Compute psf frac to account for good quality pixels only
+            # this could not sum to 1 due to pixel sampling, many values are 0.99999
+            # JMP: is pixel_quality == 0 too harsh?
+            psffrac = np.round(p.ravel()[(j) & (pq == 0).ravel()].sum(), 5)
+            # normalize by time bin
+            # JMP: I think this gives a lower limit of the psf frac, as is illdefined
+            # when we use multiple cadences
+            psffrac /= len(bdx)
 
             # Compute errors on time window
             t_mean = t.mean()
@@ -2397,6 +2410,7 @@ class MovingTPF:
                         red_chi2,
                         qual,
                         len(bdx),
+                        psffrac,
                     ]
                 )
 
@@ -2414,6 +2428,7 @@ class MovingTPF:
                         np.nan,
                         qual,
                         len(bdx),
+                        psffrac,
                     ]
                 )
                 nfails += 1
@@ -2435,6 +2450,7 @@ class MovingTPF:
             red_chi2,
             spoc_quality,
             n_cadences,
+            psffrac,
         ) = np.asarray(psf_phot).T
 
         # save variables to compute cadence quality flag for (binned) PSF light curve
@@ -2453,6 +2469,7 @@ class MovingTPF:
             spoc_quality.astype(int),
             n_cadences.astype(int),
             bad_spoc_bits,
+            psffrac,
         )
 
     def _aperture_photometry(self, bad_bits: list = [1, 3, 7], **kwargs):
@@ -3678,12 +3695,19 @@ class MovingTPF:
                     disp="E14.7",
                     array=self.lc["psf"]["red_chi2"],
                 ),
-                # PSF quality flag
+                # PSF fit quality flag
                 fits.Column(
                     name="PSF_QUALITY",
                     format="B",
                     disp="B16.16",
                     array=self.lc["psf"]["quality"],
+                ),
+                # PSF fraction when accounting for good quality pixels
+                fits.Column(
+                    name="PSF_FRACTION",
+                    format="E",
+                    disp="E14.5",
+                    array=self.lc["psf"]["psf_fraction"],
                 ),
                 # Number of cadences used for simultaneous PSF fit
                 fits.Column(
