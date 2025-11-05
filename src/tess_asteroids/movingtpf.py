@@ -2157,7 +2157,7 @@ class MovingTPF:
                 "col_cen_err": col_cen_err,
                 "row_cen": row_cen,
                 "row_cen_err": row_cen_err,
-                "quality": self._create_lc_quality(),
+                "quality": self._create_lc_quality(method="aperture"),
                 "flux_fraction": flux_fraction,
                 "ra": [coord.ra.value for coord in measured_coords],
                 "dec": [coord.dec.value for coord in measured_coords],
@@ -2174,7 +2174,6 @@ class MovingTPF:
                 flux,
                 flux_err,
                 red_chi2,
-                quality,
                 spoc_quality,
                 n_cadences,
                 bad_spoc_bits,
@@ -2187,12 +2186,14 @@ class MovingTPF:
                 "cadenceno": cadenceno,
                 "flux": flux,
                 "flux_err": flux_err,
-                "quality": quality,
                 "red_chi2": red_chi2,
                 "spoc_quality": spoc_quality,
                 "n_cadences": n_cadences,
                 "bad_spoc_bits": bad_spoc_bits,
             }
+            self.lc["psf"]["quality"] = self._create_lc_quality(
+                method="psf", bad_spoc_bits=bad_spoc_bits
+            )
         else:
             raise ValueError(
                 f"Method must be one of: ['aperture', 'psf']. Not '{method}'"
@@ -2256,10 +2257,6 @@ class MovingTPF:
             - `cadenceno` is the average cadence number, as defined by `tesscube`, in the binning window.
             - `flux` and `flux_err` from the PRF fitting.
             - `red_chi2` is the reduced chi-squared of the fitted PRF model.
-            - `quality` identifies cadences where the PRF fit did not converge to a physical result:
-
-                - Bit 1 = model fitting failed.
-                - Bit 2 = model fitting returned negative flux value.
             - `spoc_quality` is the combined SPOC quality flag in the binning window.
             Note: if `time_bin_size = None` then `time`, `time_corr`, `cadenceno` and `spoc_quality` are equal to `self.time`, `self.timecorr`,
             `self.cadence_number` and `self.quality`, respectively.
@@ -2342,6 +2339,8 @@ class MovingTPF:
         self.time_bin_size = time_bin_size
         psf_phot = []
         nfails = 0
+        # this value is small so we include all pixels where the PRF has contribution.
+        self.threshold_psf_phot = 0.00001
 
         # Iterate over each binning window to compute PSF photometry
         for bdx in tqdm(bin_index, total=len(bin_index)):
@@ -2359,7 +2358,9 @@ class MovingTPF:
             # Find finite values and pixels with > 0.001% PRF value
             j = np.logical_and(
                 np.isfinite(f.ravel()),
-                np.logical_and(np.isfinite(fe.ravel()), (p.ravel() > 0.00001)),
+                np.logical_and(
+                    np.isfinite(fe.ravel()), (p.ravel() > self.threshold_psf_phot)
+                ),
             )
 
             # Derive SPOC quality value in window
@@ -2449,10 +2450,9 @@ class MovingTPF:
             n_cadences,
         ) = np.asarray(psf_phot).T
 
-        # Flag cadences where model fiting failed - bit 1
-        quality = np.isnan(flux).astype(int)
-        # Flag cadences with negative LC flux - bit 2
-        quality[flux < 0] += 2**1
+        # save variables to compute cadence quality flag for (binned) PSF light curve
+        self.psf_phot_fit_flag = np.isnan(flux).astype(int)
+        self.psf_n_cadences = n_cadences.astype(int)
 
         return (
             time,
@@ -2463,7 +2463,6 @@ class MovingTPF:
             flux,
             flux_err,
             red_chi2,
-            quality,
             spoc_quality.astype(int),
             n_cadences.astype(int),
             bad_spoc_bits,
@@ -2587,7 +2586,11 @@ class MovingTPF:
             np.asarray(flux_fraction),
         )
 
-    def _create_lc_quality(self, method: str = "aperture"):
+    def _create_lc_quality(
+        self,
+        method: str = "aperture",
+        bad_spoc_bits: Union[list, str] = "default",
+    ):
         """
         Creates quality mask for lightcurve. This is defined independently of SPOC quality flags.
         For `aperture` method, the mask is a bit-wise combination of the following flags:
@@ -2607,11 +2610,16 @@ class MovingTPF:
         9  - at least one pixel inside aperture had no background linear model, value was infilled.
              Only relevant if `linear_model` background correction was used.
         10 - at least one pixel inside aperture had negative value BEFORE background correction was applied.
+        11 - psf fit failed due to singular matrix (see np.linalg.LinAlgError) for tha cadence.
 
         Parameters
         ----------
         method : str
             Photometric extraction method. One of `aperture` or `psf`.
+        _create_spoc_quality_mask
+        bad_spoc_bits : list or str
+            Defines SPOC bits corresponding to bad quality data. See `_create_spoc_quality_mask()`
+            for details.
 
         Returns
         -------
@@ -2629,105 +2637,136 @@ class MovingTPF:
                 "Must run `get_data()`, `reshape_data()`, `background_correction()` and `create_pixel_quality()` before creating lightcurve quality."
             )
 
+        # we asign local variables to work depending if method is aperture or psf
+        # for aperture we only use pixels inside the paerture mask to define quality
+        # for psf we use pixels where `prf_model > 0.0001` and define quality within that
+        # aditionally, for the psf case we need to account for time binning
         if method == "aperture":
             if not hasattr(self, "aperture_mask") or not hasattr(self, "bad_bit_value"):
                 raise AttributeError(
                     "With `aperture` method, must run `create_aperture()` and `_aperture_photometry()` before creating lightcurve quality."
                 )
-
-            # Define masks
-            masks = {
-                # No pixels in aperture
-                "no_pixel_mask": {
-                    "bit": 1,
-                    "value": np.array(
-                        [self.aperture_mask[t].sum() for t in range(len(self.time))]
-                    )
-                    == 0,
-                },
-                # Non-science pixel in aperture
-                "science_mask": {
-                    "bit": 2,
-                    "value": [
-                        (self.pixel_quality[t][self.aperture_mask[t]] & 1 != 0).any()
-                        for t in range(len(self.time))
-                    ],
-                },
-                # Strap in aperture
-                "strap_mask": {
-                    "bit": 3,
-                    "value": [
-                        (self.pixel_quality[t][self.aperture_mask[t]] & 2 != 0).any()
-                        for t in range(len(self.time))
-                    ],
-                },
-                # Saturated pixel in aperture
-                "sat_mask": {
-                    "bit": 4,
-                    "value": [
-                        (self.pixel_quality[t][self.aperture_mask[t]] & 4 != 0).any()
-                        for t in range(len(self.time))
-                    ],
-                },
-                # Pixel in aperture is 4-adjacent to saturated pixel
-                "sat_buffer_mask": {
-                    "bit": 5,
-                    "value": [
-                        (self.pixel_quality[t][self.aperture_mask[t]] & 8 != 0).any()
-                        for t in range(len(self.time))
-                    ],
-                },
-                # All pixels in aperture are `bad_bits`, as defined by user in _aperture_photometry()
-                "bad_bit_mask": {
-                    "bit": 6,
-                    "value": [
-                        (
-                            self.pixel_quality[t][self.aperture_mask[t]]
-                            & self.bad_bit_value
-                            != 0
-                        ).all()
-                        for t in range(len(self.time))
-                    ],
-                },
-                # PRF model contained nans and was replaced with preceding/following frame.
-                # This will only be meaningful if the `prf` aperture was used.
-                "prf_nan_mask": {"bit": 7, "value": self.prf_nan_mask},
-                # Pixel in aperture with no scattered light correction
-                # Only relevant if `linear_model` background correction was used.
-                "sl_nan_mask": {
-                    "bit": 8,
-                    "value": [
-                        (self.pixel_quality[t][self.aperture_mask[t]] & 16 != 0).any()
-                        for t in range(len(self.time))
-                    ],
-                },
-                # Pixel in aperture with no background linear model, value was infilled.
-                # Only relevant if `linear_model` background correction was used.
-                "lm_nan_mask": {
-                    "bit": 9,
-                    "value": [
-                        (self.pixel_quality[t][self.aperture_mask[t]] & 32 != 0).any()
-                        for t in range(len(self.time))
-                    ],
-                },
-                # Negative pixel (before BG correction) in aperture
-                "negative_mask": {
-                    "bit": 10,
-                    "value": [
-                        (self.pixel_quality[t][self.aperture_mask[t]] & 64 != 0).any()
-                        for t in range(len(self.time))
-                    ],
-                },
-                # Add flag for negative pixels (after BG correction) in aperture?
-            }
-
+            pixel_mask = self.aperture_mask
+            prf_nan_mask = self.prf_nan_mask
+            # need to convert this to list of arrays to match the variable type that 
+            # `np.array_split` return for the case of psf with time binning
+            # this is to avoid mypy error
+            pixel_quality = [x for x in self.pixel_quality]
         elif method == "psf":
-            raise NotImplementedError("PSF photometry is not yet implemented.")
+            if not hasattr(self, "psf_phot_fit_flag") or not hasattr(
+                self, "psf_n_cadences"
+            ):
+                raise AttributeError(
+                    "With `psf` method, must run `_psf_photometry()` before creating lightcurve quality."
+                )
+            # recompute the pixels used for psf fitting
+            spoc_quality_mask, _ = self._create_spoc_quality_mask(bad_spoc_bits)
+            prf_models = self._create_target_prf_model()[spoc_quality_mask]
+            pixel_mask = prf_models >= self.threshold_psf_phot
+            # recompute time bins 
+            idx_split = [
+                self.psf_n_cadences[:k].sum() for k in range(len(self.psf_n_cadences))
+            ][1:]
+            pixel_mask = np.array_split(pixel_mask, idx_split)
+            prf_nan_mask = np.array(
+                [
+                    x.all()
+                    for x in np.array_split(
+                        self.prf_nan_mask[spoc_quality_mask], idx_split
+                    )
+                ]
+            )
+            pixel_quality = np.array_split(
+                self.pixel_quality[spoc_quality_mask], idx_split
+            )
 
         else:
             raise ValueError(
                 f"Method must be one of: ['aperture', 'psf']. Not '{method}'"
             )
+
+        # Define masks
+        masks = {
+            # No pixels in aperture
+            "no_pixel_mask": {
+                "bit": 1,
+                "value": np.array([pixel_mask[t].sum() for t in range(len(pixel_mask))])
+                == 0,
+            },
+            # Non-science pixel in aperture
+            "science_mask": {
+                "bit": 2,
+                "value": [
+                    (pixel_quality[t][pixel_mask[t]] & 1 != 0).any()
+                    for t in range(len(pixel_mask))
+                ],
+            },
+            # Strap in aperture
+            "strap_mask": {
+                "bit": 3,
+                "value": [
+                    (pixel_quality[t][pixel_mask[t]] & 2 != 0).any()
+                    for t in range(len(pixel_mask))
+                ],
+            },
+            # Saturated pixel in aperture
+            "sat_mask": {
+                "bit": 4,
+                "value": [
+                    (pixel_quality[t][pixel_mask[t]] & 4 != 0).any()
+                    for t in range(len(pixel_mask))
+                ],
+            },
+            # Pixel in aperture is 4-adjacent to saturated pixel
+            "sat_buffer_mask": {
+                "bit": 5,
+                "value": [
+                    (pixel_quality[t][pixel_mask[t]] & 8 != 0).any()
+                    for t in range(len(pixel_mask))
+                ],
+            },
+            # All pixels in aperture are `bad_bits`, as defined by user in _aperture_photometry()
+            "bad_bit_mask": {
+                "bit": 6,
+                "value": [
+                    (pixel_quality[t][pixel_mask[t]] & self.bad_bit_value != 0).all()
+                    for t in range(len(pixel_mask))
+                ],
+            },
+            # PRF model contained nans and was replaced with preceding/following frame.
+            # This will only be meaningful if the `prf` aperture was used.
+            "prf_nan_mask": {"bit": 7, "value": prf_nan_mask},
+            # Pixel in aperture with no scattered light correction
+            # Only relevant if `linear_model` background correction was used.
+            "sl_nan_mask": {
+                "bit": 8,
+                "value": [
+                    (pixel_quality[t][pixel_mask[t]] & 16 != 0).any()
+                    for t in range(len(pixel_mask))
+                ],
+            },
+            # Pixel in aperture with no background linear model, value was infilled.
+            # Only relevant if `linear_model` background correction was used.
+            "lm_nan_mask": {
+                "bit": 9,
+                "value": [
+                    (pixel_quality[t][pixel_mask[t]] & 32 != 0).any()
+                    for t in range(len(pixel_mask))
+                ],
+            },
+            # Negative pixel (before BG correction) in aperture
+            "negative_mask": {
+                "bit": 10,
+                "value": [
+                    (pixel_quality[t][pixel_mask[t]] & 64 != 0).any()
+                    for t in range(len(pixel_mask))
+                ],
+            },
+            # Add flag for negative pixels (after BG correction) in aperture?
+        }
+        # PSF fit fail, only for psf photometry
+        if method == "psf":
+            masks["psf_fit_fail"] = {"bit": 11, "value": self.psf_phot_fit_flag.astype(bool)}
 
         # Compute bit-wise mask
         lc_quality = np.sum(
