@@ -2648,7 +2648,7 @@ class MovingTPF:
                 )
             pixel_mask = self.aperture_mask
             prf_nan_mask = self.prf_nan_mask
-            # need to convert this to list of arrays to match the variable type that 
+            # need to convert this to list of arrays to match the variable type that
             # `np.array_split` return for the case of psf with time binning
             # this is to avoid mypy error
             pixel_quality = [x for x in self.pixel_quality]
@@ -2663,7 +2663,7 @@ class MovingTPF:
             spoc_quality_mask, _ = self._create_spoc_quality_mask(bad_spoc_bits)
             prf_models = self._create_target_prf_model()[spoc_quality_mask]
             pixel_mask = prf_models >= self.threshold_psf_phot
-            # recompute time bins 
+            # recompute time bins
             idx_split = [
                 self.psf_n_cadences[:k].sum() for k in range(len(self.psf_n_cadences))
             ][1:]
@@ -2766,7 +2766,10 @@ class MovingTPF:
         }
         # PSF fit fail, only for psf photometry
         if method == "psf":
-            masks["psf_fit_fail"] = {"bit": 11, "value": self.psf_phot_fit_flag.astype(bool)}
+            masks["psf_fit_fail"] = {
+                "bit": 11,
+                "value": self.psf_phot_fit_flag.astype(bool),
+            }
 
         # Compute bit-wise mask
         lc_quality = np.sum(
