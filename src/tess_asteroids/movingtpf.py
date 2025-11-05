@@ -2215,14 +2215,14 @@ class MovingTPF:
         self,
         time_bin_size: Optional[float] = None,
         bad_spoc_bits: Union[list, str] = "default",
-        clip_data: bool = False,
         **kwargs,
     ):
         """
-        Computes PSF photometry by fitting the amplitude of the target's PRF model to the data. The model is fitted using a linear model as
-        in the LFD paper (Hedges et al. 2021).
+        Computes PSF photometry by fitting the amplitude of the target's PRF model to the data. 
+        The model is fitted using a linear model as in the LFD paper (Hedges et al. 2021).
 
-        This function can optionally fit all of the data in a cadence window simultaneously, effectively binning the data to improve SNR.
+        This function can optionally fit all of the data in a cadence window simultaneously, 
+        effectively binning the data to improve SNR.
 
         Parameters
         ----------
@@ -2236,15 +2236,10 @@ class MovingTPF:
             - "all" - mask all data with a SPOC quality flag.
             - "none" - mask no data.
             - list - mask custom bits provided in list.
-            Data that is masked will not be used when fitting the PRF model. If all cadences in a window are defined as bad quality,
-            there will be no lightcurve data for that window.
+            Data that is masked will not be used when fitting the PRF model. If all cadences in a window are defined 
+            as bad quality, there will be no lightcurve data for that window.
             More information about the SPOC quality flags can be found in Section 9 of the TESS Science Data Products
             Description Document.
-        clip_data : bool
-            Removes pixels that are outliers using 3-sigma clipping. This is useful to remove
-            poorly corrected pixels, but it can remove pixels with strong target signal. It is only recommended for
-            very faint targets near the background level.
-            Default is False, which does not do any outlier clipping.
 
         Returns:
         --------
@@ -2258,8 +2253,8 @@ class MovingTPF:
             - `flux` and `flux_err` from the PRF fitting.
             - `red_chi2` is the reduced chi-squared of the fitted PRF model.
             - `spoc_quality` is the combined SPOC quality flag in the binning window.
-            Note: if `time_bin_size = None` then `time`, `time_corr`, `cadenceno` and `spoc_quality` are equal to `self.time`, `self.timecorr`,
-            `self.cadence_number` and `self.quality`, respectively.
+            Note: if `time_bin_size = None` then `time`, `time_corr`, `cadenceno` and `spoc_quality` are equal to 
+            `self.time`, `self.timecorr`, `self.cadence_number` and `self.quality`, respectively.
         n_cadences: ndarray
             Number of cadences that were used to simultaneosuly fit the PRF model.
         bad_spoc_bits : list or str
@@ -2305,14 +2300,6 @@ class MovingTPF:
             flux_prior = flux_prior[spoc_quality_mask]
         else:
             flux_prior = np.zeros_like(time)
-
-        # Reject poorly corrected pixels with 3-sigma clipping
-        if clip_data:
-            mask = sigma_clip(cube, sigma=3).mask
-            logger.info(
-                f"During PSF photometry, {mask.sum()/np.prod(cube.shape)*100:0.1f}% of the cadences were removed as outliers."
-            )
-            cube[mask] = np.nan
 
         # Make an array with the indices for the time binning
         if isinstance(time_bin_size, (float, int)):
