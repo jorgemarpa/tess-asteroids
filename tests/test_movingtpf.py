@@ -451,7 +451,7 @@ def test_to_lightcurve_psf():
     assert np.all(target.lc["psf"]["red_chi2"][target.lc["psf"]["quality"] == 0] >= 0)
 
     # Test PSF photometry, with binning
-    target.to_lightcurve(method="psf", n_cadences=10, bad_spoc_bits="none")
+    target.to_lightcurve(method="psf", time_bin_size=0.5, bad_spoc_bits="none")
 
     # Check the lightcurve has less datapoints than target.time
     assert len(target.lc["psf"]["time"]) < len(target.time)

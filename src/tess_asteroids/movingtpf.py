@@ -2735,7 +2735,9 @@ class MovingTPF:
                 "value": [
                     (pixel_quality[t][pixel_mask[t]] & self.bad_bit_value != 0).all()
                     for t in range(len(pixel_mask))
-                ],
+                ]
+                if method == "aperture"
+                else [False] * len(pixel_quality),
             },
             # PRF model contained nans and was replaced with preceding/following frame.
             # This will only be meaningful if the `prf` aperture was used.
