@@ -2177,7 +2177,6 @@ class MovingTPF:
                 spoc_quality,
                 n_cadences,
                 bad_spoc_bits,
-                psffrac,
             ) = self._psf_photometry(**kwargs)
             self.lc["psf"] = {
                 "time": time,
@@ -2191,7 +2190,6 @@ class MovingTPF:
                 "spoc_quality": spoc_quality,
                 "n_cadences": n_cadences,
                 "bad_spoc_bits": bad_spoc_bits,
-                "psf_fraction": psffrac,
             }
             self.lc["psf"]["quality"] = self._create_lc_quality(
                 method="psf", bad_spoc_bits=bad_spoc_bits
@@ -2223,14 +2221,14 @@ class MovingTPF:
         Computes PSF photometry by fitting the amplitude of the target's PRF model to the data.
         The model is fitted using a linear model as in the LFD paper (Hedges et al. 2021).
 
-        This function can optionally fit all of the data in a cadence window simultaneously,
+        This function can optionally fit all of the data in a time window simultaneously,
         effectively binning the data to improve SNR.
 
         Parameters
         ----------
         time_bin_size : float
-            Time bin size in days used to fit the PRF model simultaneously, effectively doing data binning.
-            Default is None, which is no binning.
+            Width of time window, in days. All cadences in the time window will be used to fit the PRF model simultaneously, 
+            effectively doing data binning. Default is None, which means each cadence is fit independently.
         bad_spoc_bits : list or str
             Defines SPOC bits corresponding to bad quality data. Can be one of:
 
@@ -2245,7 +2243,7 @@ class MovingTPF:
 
         Returns:
         --------
-        time, time_uerr, time_lerr, time_corr, cadenceno, flux, flux_err, red_chi2, n_cadences, spoc_quality, psffrac: ndarrays
+        time, time_uerr, time_lerr, time_corr, cadenceno, flux, flux_err, red_chi2, spoc_quality, n_cadences: ndarrays
 
             - `time` is the average time in the binning window.
             - `time_uerr`/`time_lerr` are the upper/lower error on time (corresponds to limits of binning window).
@@ -2255,10 +2253,9 @@ class MovingTPF:
             - `flux` and `flux_err` from the PRF fitting.
             - `red_chi2` is the reduced chi-squared of the fitted PRF model.
             - `spoc_quality` is the combined SPOC quality flag in the binning window.
+            - `n_cadences` is the number of cadences that were used to simultaneously fit the PRF model.
             Note: if `time_bin_size = None` then `time`, `time_corr`, `cadenceno` and `spoc_quality` are equal to
             `self.time`, `self.timecorr`, `self.cadence_number` and `self.quality`, respectively.
-            - `psffrac` is the PSF fraction on the good quality pixel
-            - `n_cadences` is the number of cadences that were used to simultaneosuly fit the PRF model.
         bad_spoc_bits : list or str
             The SPOC bits used to define bad quality data.
         """
@@ -2282,21 +2279,17 @@ class MovingTPF:
         cube_err = self.corr_flux_err[spoc_quality_mask]
         spoc_quality = self.quality[spoc_quality_mask]
         cadno = self.cadence_number[spoc_quality_mask]
-        pixel_quality = self.pixel_quality[spoc_quality_mask]
 
-        # get flux prior from Vmag (when available) --> Tmag --> flux
-        # we use Woods et al 2021 T = V - 0.671
-        # only asign priors when Vmag is finite and > 0
-        if (
-            np.isfinite(self.ephem["vmag"].values).all()
-            and (self.ephem["vmag"].values > 0).all()
-        ):
+        # Derive flux prior from Vmag (if available).
+        # Use Vmag to Tmag conversion from Woods et al 2021 (T = V - 0.671).
+        # Note: interpolation will fail if Vmag is not finite.
+        if "vmag" in self.ephem and np.isfinite(self.ephem["vmag"].values).all():
             tmag_prior = (
                 CubicSpline(
                     self.ephem["time"].astype(float),
                     self.ephem["vmag"].astype(float),
-                    extrapolate=True,
-                )(self.time)
+                    extrapolate=False,
+                )(self.time if self.barycentric else self.time-self.timecorr)
                 - 0.671
             )
             flux_prior = 10 ** ((TESSmag_zero_point - tmag_prior) / 2.5)
@@ -2304,37 +2297,42 @@ class MovingTPF:
         else:
             flux_prior = np.zeros_like(time)
 
-        # Make an array with the indices for the time binning
-        if isinstance(time_bin_size, (float, int)):
-            dt = np.median(np.diff(time))
-            if time_bin_size >= dt:
-                time_bin = time_bin_size  # in days
-                n_bins = int((time[-1] - time[0]) // time_bin)
-                # compute the bin edges and cadences inside each bin
+        # Define time bins
+        if time_bin_size is not None:
+            
+            dt = time[-1] - time[0]
+            cadence = np.nanmedian(np.diff(time))
+
+            if time_bin_size < cadence or time_bin_size > dt:
+                raise ValueError(f"`time_bin_size` must be larger than the observing cadence ({cadence:.5f} d) and less than the data span ({dt:.5f} d).")
+            
+            else:
+                n_bins = int(dt / time_bin_size)
+                # Compute the bin edges and indices that fall inside each bin
                 bin_edges = np.histogram_bin_edges(time, bins=n_bins)
                 bin_index = [
                     np.where((time >= le) & (time <= ra))[0]
                     for le, ra in zip(bin_edges[:-1], bin_edges[1:])
                 ]
+                # Remove empty bins
                 bin_index = [x for x in bin_index if len(x) > 0]
-            else:
-                raise ValueError(
-                    f"Please provide a value for `time_bin_size` larger than the exposure time {dt:.5f} [d]"
-                )
-        # no time binning
-        elif time_bin_size is None:
-            bin_index = np.arange(len(time)).tolist()
+
+        # No time binning
         else:
-            raise ValueError("Please provide a numerical value for `time_bin_size`")
+            bin_index = np.arange(len(time)).tolist()
+
         self.time_bin_size = time_bin_size
+
+        # This value is small to include all pixels where the PRF has contribution.
+        self.threshold_psf_phot = 0.00001
+
         psf_phot = []
         nfails = 0
-        # this value is small so we include all pixels where the PRF has contribution.
-        self.threshold_psf_phot = 0.00001
 
         # Iterate over each binning window to compute PSF photometry
         for bdx in tqdm(bin_index, total=len(bin_index)):
-            # asign wroking variables inside the loop
+
+            # Assign variables inside the loop
             bdx = np.atleast_1d(bdx)
             t = time[bdx]
             f = cube[bdx]
@@ -2344,9 +2342,8 @@ class MovingTPF:
             cn = cadno[bdx]
             tc = timecorr[bdx]
             pmu = flux_prior[bdx]
-            pq = pixel_quality[bdx]
 
-            # Find finite values and pixels with > 0.001% PRF value
+            # Find finite values and pixels with PRF value > `self.threshold_psf_phot`
             j = np.logical_and(
                 np.isfinite(f.ravel()),
                 np.logical_and(
@@ -2359,15 +2356,6 @@ class MovingTPF:
             for q in qu:
                 qual |= q
 
-            # Compute psf frac to account for good quality pixels only
-            # this could not sum to 1 due to pixel sampling, many values are 0.99999
-            # JMP: is pixel_quality == 0 too harsh?
-            psffrac = np.round(p.ravel()[(j) & (pq == 0).ravel()].sum(), 5)
-            # normalize by time bin
-            # JMP: I think this gives a lower limit of the psf frac, as is illdefined
-            # when we use multiple cadences
-            psffrac /= len(bdx)
-
             # Compute errors on time window
             t_mean = t.mean()
             if self.time_bin_size is None:
@@ -2377,17 +2365,20 @@ class MovingTPF:
 
             # Create DM from PRF model
             X = p.ravel()[:, None]
-            sigma_w_inv = X[j].T.dot(X[j] / fe.ravel()[j, None] ** 2)
+            
+            # Initialise prior on flux
             pmu = np.atleast_1d(np.nanmean(pmu))
-            psigma = np.ones_like(pmu) * 1e4
-            sigma_w_inv += np.diag(1 / psigma)
+            psigma = np.ones_like(pmu) * 1e5
+
+            # Use weighted Bayesian LS
+            sigma_w_inv = X[j].T.dot(X[j] / fe.ravel()[j, None] ** 2) + np.diag(1 / psigma**2)
 
             # Solve linear model
             try:
                 # Compute flux
                 amp = np.linalg.solve(
                     sigma_w_inv,
-                    X[j].T.dot((f.ravel()[j] / fe.ravel()[j] ** 2)) + pmu / psigma**2,
+                    X[j].T.dot(f.ravel()[j] / fe.ravel()[j] ** 2) + pmu/psigma**2,
                 )[0]
                 # Compute flux error
                 amp_err = (np.linalg.inv(sigma_w_inv).diagonal() ** 0.5)[0]
@@ -2410,7 +2401,6 @@ class MovingTPF:
                         red_chi2,
                         qual,
                         len(bdx),
-                        psffrac,
                     ]
                 )
 
@@ -2428,7 +2418,6 @@ class MovingTPF:
                         np.nan,
                         qual,
                         len(bdx),
-                        psffrac,
                     ]
                 )
                 nfails += 1
@@ -2450,7 +2439,6 @@ class MovingTPF:
             red_chi2,
             spoc_quality,
             n_cadences,
-            psffrac,
         ) = np.asarray(psf_phot).T
 
         # save variables to compute cadence quality flag for (binned) PSF light curve
@@ -2469,7 +2457,6 @@ class MovingTPF:
             spoc_quality.astype(int),
             n_cadences.astype(int),
             bad_spoc_bits,
-            psffrac,
         )
 
     def _aperture_photometry(self, bad_bits: list = [1, 3, 7], **kwargs):
@@ -3703,13 +3690,6 @@ class MovingTPF:
                     format="B",
                     disp="B16.16",
                     array=self.lc["psf"]["quality"],
-                ),
-                # PSF fraction when accounting for good quality pixels
-                fits.Column(
-                    name="PSF_FRACTION",
-                    format="E",
-                    disp="E14.5",
-                    array=self.lc["psf"]["psf_fraction"],
                 ),
                 # Number of cadences used for simultaneous PSF fit
                 fits.Column(
