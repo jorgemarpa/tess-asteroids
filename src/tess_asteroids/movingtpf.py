@@ -2176,6 +2176,7 @@ class MovingTPF:
                 red_chi2,
                 spoc_quality,
                 n_cadences,
+                qual_frac,
                 bad_spoc_bits,
             ) = self._psf_photometry(**kwargs)
             self.lc["psf"] = {
@@ -2189,6 +2190,7 @@ class MovingTPF:
                 "red_chi2": red_chi2,
                 "spoc_quality": spoc_quality,
                 "n_cadences": n_cadences,
+                "quality_fraction": qual_frac,
                 "bad_spoc_bits": bad_spoc_bits,
             }
             self.lc["psf"]["quality"] = self._create_lc_quality(
@@ -2243,7 +2245,7 @@ class MovingTPF:
 
         Returns:
         --------
-        time, time_uerr, time_lerr, time_corr, cadenceno, flux, flux_err, red_chi2, spoc_quality, n_cadences: ndarrays
+        time, time_uerr, time_lerr, time_corr, cadenceno, flux, flux_err, red_chi2, spoc_quality, n_cadences, qual_frac: ndarrays
 
             - `time` is the average time in the binning window.
             - `time_uerr`/`time_lerr` are the upper/lower error on time (corresponds to limits of binning window).
@@ -2254,6 +2256,7 @@ class MovingTPF:
             - `red_chi2` is the reduced chi-squared of the fitted PRF model.
             - `spoc_quality` is the combined SPOC quality flag in the binning window.
             - `n_cadences` is the number of cadences that were used to simultaneously fit the PRF model.
+            - `qual_frac` is the average fraction of flux in the PRF model that falls on good quality pixels (`self.pixel_quality` = 0).
             Note: if `time_bin_size = None` then `time`, `time_corr`, `cadenceno` and `spoc_quality` are equal to
             `self.time`, `self.timecorr`, `self.cadence_number` and `self.quality`, respectively.
         bad_spoc_bits : list or str
@@ -2263,9 +2266,10 @@ class MovingTPF:
             not hasattr(self, "all_flux")
             or not hasattr(self, "flux")
             or not hasattr(self, "corr_flux")
+            or not hasattr(self, "pixel_quality")
         ):
             raise AttributeError(
-                "Must run `get_data()`, `reshape_data()` and `background_correction()` before doing PSF photometry."
+                "Must run `get_data()`, `reshape_data()`, `background_correction()` and `create_pixel_quality()` before doing PSF photometry."
             )
 
         # Define good quality cadences using user-defined SPOC quality flags.
@@ -2279,6 +2283,7 @@ class MovingTPF:
         cube_err = self.corr_flux_err[spoc_quality_mask]
         spoc_quality = self.quality[spoc_quality_mask]
         cadno = self.cadence_number[spoc_quality_mask]
+        pixel_quality = self.pixel_quality[spoc_quality_mask]
 
         # Derive flux prior from Vmag (if available).
         # Use Vmag to Tmag conversion from Woods et al 2021 (T = V - 0.671).
@@ -2342,6 +2347,7 @@ class MovingTPF:
             cn = cadno[bdx]
             tc = timecorr[bdx]
             pmu = flux_prior[bdx]
+            pq = pixel_quality[bdx]
 
             # Find finite values and pixels with PRF value > `self.threshold_psf_phot`
             j = np.logical_and(
@@ -2355,6 +2361,9 @@ class MovingTPF:
             qual = 0
             for q in qu:
                 qual |= q
+
+            # Compute average fraction of flux in PRF model that falls on good quality pixels
+            qual_frac = p.ravel()[np.logical_and(j, (pq & bad_bit_value == 0).ravel())].sum() / len(bdx)
 
             # Compute errors on time window
             t_mean = t.mean()
@@ -2401,6 +2410,7 @@ class MovingTPF:
                         red_chi2,
                         qual,
                         len(bdx),
+                        qual_frac,
                     ]
                 )
 
@@ -2418,6 +2428,7 @@ class MovingTPF:
                         np.nan,
                         qual,
                         len(bdx),
+                        qual_frac,
                     ]
                 )
                 nfails += 1
@@ -2439,6 +2450,7 @@ class MovingTPF:
             red_chi2,
             spoc_quality,
             n_cadences,
+            qual_frac,
         ) = np.asarray(psf_phot).T
 
         # save variables to compute cadence quality flag for (binned) PSF light curve
@@ -2456,6 +2468,7 @@ class MovingTPF:
             red_chi2,
             spoc_quality.astype(int),
             n_cadences.astype(int),
+            qual_frac,
             bad_spoc_bits,
         )
 
@@ -3690,6 +3703,13 @@ class MovingTPF:
                     format="B",
                     disp="B16.16",
                     array=self.lc["psf"]["quality"],
+                ),
+                # Average fraction of flux in PRF model that falls on good quality pixels (`self.pixel_quality` = 0).
+                fits.Column(
+                    name="QUALITY_FRACTION",
+                    format="E",
+                    disp="E14.7",
+                    array=self.lc["psf"]["quality_fraction"],
                 ),
                 # Number of cadences used for simultaneous PSF fit
                 fits.Column(
