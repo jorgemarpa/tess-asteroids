@@ -2794,11 +2794,11 @@ class MovingTPF:
                     for t in range(len(pixel_mask))
                 ],
             },
-            # PSF fit failed. Only relevant if `method=prf`.
+            # PSF fit failed. Only relevant if `method=psf`.
             "psf_fit_fail": {
                 "bit": 11,
                 "value": np.isnan(self.lc["psf"]["flux"])
-                if method == "prf"
+                if method == "psf"
                 else np.zeros(len(pixel_mask), dtype=bool),
             },
             # Add flag for negative pixels (after BG correction) in aperture?
