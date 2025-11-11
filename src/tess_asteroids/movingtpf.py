@@ -2644,7 +2644,7 @@ class MovingTPF:
 
         For `aperture` method, pixels inside the aperture mask are used to define LC quality.
         For `psf` method, pixels that were used to fit the PRF model are used to define LC quality.
-        
+
         The mask is a bit-wise combination of the following flags:
 
         Bit - Description
@@ -3760,7 +3760,7 @@ class MovingTPF:
                 ",".join([str(bit) for bit in self.lc["psf"]["bad_spoc_bits"]])
                 if isinstance(self.lc["psf"]["bad_spoc_bits"], list)
                 else self.lc["psf"]["bad_spoc_bits"],
-                comment="bad quality SPOC bits excluded for PRF fitting",
+                comment="bad quality SPOC bits for PRF fitting",
             )
             # Average measured TESS magnitude of target
             # Catch warnings that arise if LC is nan at all times.
@@ -3770,6 +3770,12 @@ class MovingTPF:
                     message="All-NaN slice encountered",
                     category=RuntimeWarning,
                 )
+                warnings.filterwarnings(
+                    "ignore",
+                    message="Mean of empty slice",
+                    category=RuntimeWarning,
+                )
+
                 mag_header = round(np.nanmedian(self.lc["psf"]["TESSmag"]), 3)
             table_hdu_psf.header.set(
                 "TESSMAG",
