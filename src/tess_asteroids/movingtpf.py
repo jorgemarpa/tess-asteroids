@@ -2287,6 +2287,9 @@ class MovingTPF:
         # Define good quality cadences using user-defined SPOC quality flags.
         spoc_quality_mask, bad_spoc_bits = self._create_spoc_quality_mask(bad_spoc_bits)
 
+        # Save `time_bin_size` for LCF header
+        self.time_bin_size = time_bin_size
+
         # Apply quality mask to data
         time = self.time[spoc_quality_mask]
         timecorr = self.timecorr[spoc_quality_mask]
@@ -2307,6 +2310,7 @@ class MovingTPF:
                 "During PSF photometry, all times were masked and no PSF light curve was derived."
             )
             return (
+                np.array([]),
                 np.array([]),
                 np.array([]),
                 np.array([]),
@@ -2365,8 +2369,6 @@ class MovingTPF:
         else:
             bin_index = np.arange(len(time)).tolist()
 
-        self.time_bin_size = time_bin_size
-
         psf_phot = []
         pixel_masks = []
         pixel_qualities = []
@@ -2409,7 +2411,7 @@ class MovingTPF:
 
             # Compute errors on time window
             t_mean = t.mean()
-            if self.time_bin_size is None:
+            if time_bin_size is None:
                 te_u, te_l = np.nan, np.nan
             else:
                 te_u, te_l = np.nanmax(t) - t_mean, t_mean - np.nanmin(t)
