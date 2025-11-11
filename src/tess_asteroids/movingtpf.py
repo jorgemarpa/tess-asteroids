@@ -641,7 +641,7 @@ class MovingTPF:
             )
 
         # Create mask for moving target.
-        target_mask,_ = self._create_target_prf_model(all_flux=True, **kwargs) 
+        target_mask, _ = self._create_target_prf_model(all_flux=True, **kwargs)
         target_mask = target_mask >= target_threshold
         if not include_stars:
             return target_mask
@@ -1679,7 +1679,7 @@ class MovingTPF:
         prf_model : ndarray
             numpy array containing the PRF model of the moving target.
         prf_nan_mask : ndarray
-            Mask to identify cadences where PRF model contained NaNs and was replaced with model from 
+            Mask to identify cadences where PRF model contained NaNs and was replaced with model from
             preceding/following frame.
         """
 
@@ -2237,7 +2237,7 @@ class MovingTPF:
         Parameters
         ----------
         time_bin_size : float
-            Width of time window, in days. All cadences in the time window will be used to fit the PRF model simultaneously, 
+            Width of time window, in days. All cadences in the time window will be used to fit the PRF model simultaneously,
             effectively doing data binning. Default is None, which means each cadence is fit independently.
         bad_spoc_bits : list or str
             Defines SPOC bits corresponding to bad quality data. Can be one of:
@@ -2246,7 +2246,7 @@ class MovingTPF:
             - "all" - mask all data with a SPOC quality flag.
             - "none" - mask no data.
             - list - mask custom bits provided in list.
-            Data that is masked will not be used when fitting the PRF model. If all cadences in a window are defined
+            Data that is masked will not be used when fitting the PRF model. If all cadences in a binning window are defined
             as bad quality, there will be no lightcurve data for that window.
             More information about the SPOC quality flags can be found in Section 9 of the TESS Science Data Products
             Description Document.
@@ -2263,7 +2263,7 @@ class MovingTPF:
             - `flux` and `flux_err` from the PRF fitting.
             - `red_chi2` is the reduced chi-squared of the fitted PRF model.
             - `spoc_quality` is the combined SPOC quality flag in the binning window.
-            - `n_cadences` is the number of cadences that were used to simultaneously fit the PRF model.
+            - `n_cadences` is the number of cadences that were used to simultaneously fit the PRF model in the binning window.
             - `qual_frac` is the average fraction of flux in the PRF model that falls on good quality pixels (`self.pixel_quality` = 0).
             - `prf_nan_mask` is a mask to identify cadences where the PRF model contained NaNs and was replaced with model from the
                 preceding/following frame.
@@ -2291,12 +2291,37 @@ class MovingTPF:
         time = self.time[spoc_quality_mask]
         timecorr = self.timecorr[spoc_quality_mask]
         prf_model, prf_nan_mask = self._create_target_prf_model()
-        prf_model, prf_nan_mask = prf_model[spoc_quality_mask], prf_nan_mask[spoc_quality_mask]
+        prf_model, prf_nan_mask = (
+            prf_model[spoc_quality_mask],
+            prf_nan_mask[spoc_quality_mask],
+        )
         cube = self.corr_flux[spoc_quality_mask]
         cube_err = self.corr_flux_err[spoc_quality_mask]
         spoc_quality = self.quality[spoc_quality_mask]
         cadno = self.cadence_number[spoc_quality_mask]
         pixel_quality = self.pixel_quality[spoc_quality_mask]
+
+        # If all data has been masked, raise warning and return nan.
+        if len(time) == 0:
+            logger.warning(
+                "During PSF photometry, all times were masked and no PSF light curve was derived."
+            )
+            return (
+                np.array([]),
+                np.array([]),
+                np.array([]),
+                np.array([]),
+                np.array([]),
+                np.array([]),
+                np.array([]),
+                np.array([]),
+                np.array([]),
+                np.array([]),
+                np.array([]),
+                np.array([]),
+                np.array([]),
+                bad_spoc_bits,
+            )
 
         # Derive flux prior from Vmag (if available).
         # Use Vmag to Tmag conversion from Woods et al 2021 (T = V - 0.671).
@@ -2307,7 +2332,7 @@ class MovingTPF:
                     self.ephem["time"].astype(float),
                     self.ephem["vmag"].astype(float),
                     extrapolate=False,
-                )(self.time if self.barycentric else self.time-self.timecorr)
+                )(self.time if self.barycentric else self.time - self.timecorr)
                 - 0.671
             )
             flux_prior = 10 ** ((TESSmag_zero_point - tmag_prior) / 2.5)
@@ -2317,13 +2342,14 @@ class MovingTPF:
 
         # Define time bins
         if time_bin_size is not None:
-            
             dt = time[-1] - time[0]
             cadence = np.nanmedian(np.diff(time))
 
             if time_bin_size < cadence or time_bin_size > dt:
-                raise ValueError(f"`time_bin_size` must be larger than the observing cadence ({cadence:.5f} d) and less than the data span ({dt:.5f} d).")
-            
+                raise ValueError(
+                    f"`time_bin_size` must be larger than the observing cadence ({cadence:.5f} d) and less than the data span ({dt:.5f} d)."
+                )
+
             else:
                 n_bins = int(dt / time_bin_size)
                 # Compute the bin edges and indices that fall inside each bin
@@ -2348,7 +2374,6 @@ class MovingTPF:
 
         # Iterate over each binning window to compute PSF photometry
         for bdx in tqdm(bin_index, total=len(bin_index)):
-
             # Assign variables inside the loop
             bdx = np.atleast_1d(bdx)
             t = time[bdx]
@@ -2364,12 +2389,12 @@ class MovingTPF:
 
             # Find finite values and pixels with PRF value > 0.001%.
             # This value is small to include all pixels where the PRF has contribution.
-            pixel_masks.append(np.logical_and(
-                np.isfinite(f),
+            pixel_masks.append(
                 np.logical_and(
-                    np.isfinite(fe), (p > 0.00001)
-                ),
-            ))
+                    np.isfinite(f),
+                    np.logical_and(np.isfinite(fe), (p > 0.00001)),
+                )
+            )
             j = pixel_masks[-1].ravel()
 
             # Derive SPOC quality value in window
@@ -2378,7 +2403,9 @@ class MovingTPF:
                 qual |= q
 
             # Compute average fraction of flux in PRF model that falls on good quality pixels
-            qual_frac = p.ravel()[np.logical_and(j, (pixel_qualities[-1] == 0).ravel())].sum() / len(bdx)
+            qual_frac = p.ravel()[
+                np.logical_and(j, (pixel_qualities[-1] == 0).ravel())
+            ].sum() / len(bdx)
 
             # Compute errors on time window
             t_mean = t.mean()
@@ -2389,20 +2416,22 @@ class MovingTPF:
 
             # Create DM from PRF model
             X = p.ravel()[:, None]
-            
+
             # Initialise prior on flux
             pmu = np.atleast_1d(np.nanmean(pmu))
             psigma = np.ones_like(pmu) * 1e5
 
             # Use weighted Bayesian LS
-            sigma_w_inv = X[j].T.dot(X[j] / fe.ravel()[j, None] ** 2) + np.diag(1 / psigma**2)
+            sigma_w_inv = X[j].T.dot(X[j] / fe.ravel()[j, None] ** 2) + np.diag(
+                1 / psigma**2
+            )
 
             # Solve linear model
             try:
                 # Compute flux
                 amp = np.linalg.solve(
                     sigma_w_inv,
-                    X[j].T.dot(f.ravel()[j] / fe.ravel()[j] ** 2) + pmu/psigma**2,
+                    X[j].T.dot(f.ravel()[j] / fe.ravel()[j] ** 2) + pmu / psigma**2,
                 )[0]
                 # Compute flux error
                 amp_err = (np.linalg.inv(sigma_w_inv).diagonal() ** 0.5)[0]
@@ -2610,8 +2639,10 @@ class MovingTPF:
     def _create_lc_quality(self, method: str = "aperture"):
         """
         Creates quality mask for lightcurve. This is defined independently of SPOC quality flags.
-        For `aperture` method, pixels inside the aperture mask are used to define LC quality. 
+
+        For `aperture` method, pixels inside the aperture mask are used to define LC quality.
         For `psf` method, pixels that were used to fit the PRF model are used to define LC quality.
+        
         The mask is a bit-wise combination of the following flags:
 
         Bit - Description
@@ -2657,7 +2688,6 @@ class MovingTPF:
         # For `aperture` method, pixels inside the aperture mask are used to define LC quality.
         # For `psf` method, pixels that were used to fit the PRF model are used to define LC quality.
         if method == "aperture":
-
             if not hasattr(self, "aperture_mask") or not hasattr(self, "bad_bit_value"):
                 raise AttributeError(
                     "Must run `create_aperture()` and `to_lightcurve()` before creating lightcurve quality with `method=aperture`."
@@ -2668,7 +2698,6 @@ class MovingTPF:
             pixel_quality = self.pixel_quality
 
         elif method == "psf":
-
             if not hasattr(self, "lc") or "psf" not in self.lc:
                 raise AttributeError(
                     "Must run `to_lightcurve()` before creating lightcurve quality with `method=psf`."
@@ -2766,7 +2795,9 @@ class MovingTPF:
             # PSF fit failed. Only relevant if `method=prf`.
             "psf_fit_fail": {
                 "bit": 11,
-                "value": np.isnan(self.lc["psf"]["flux"]) if method == "prf" else np.zeros(len(pixel_mask), dtype=bool),
+                "value": np.isnan(self.lc["psf"]["flux"])
+                if method == "prf"
+                else np.zeros(len(pixel_mask), dtype=bool),
             },
             # Add flag for negative pixels (after BG correction) in aperture?
         }
