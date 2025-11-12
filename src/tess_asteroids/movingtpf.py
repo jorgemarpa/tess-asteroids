@@ -206,7 +206,7 @@ class MovingTPF:
         Parameters
         ----------
         method : str
-            Method to extract lightcurve. One of [`aperture`, `psf`].
+            Method to extract lightcurve. One of [`all`, `aperture`, `psf`].
         save : bool
             If True, save the lightcurve HDUList to a FITS file.
         outdir : str
@@ -220,7 +220,11 @@ class MovingTPF:
         Returns
         -------
         """
-        self.to_lightcurve(method=method, **kwargs)
+        if method == "all":
+            self.to_lightcurve(method="aperture", **kwargs)
+            self.to_lightcurve(method="psf", **kwargs)
+        else:
+            self.to_lightcurve(method=method, **kwargs)
         self.to_fits(
             file_type="lc", save=save, outdir=outdir, file_name=file_name, **kwargs
         )
@@ -637,9 +641,8 @@ class MovingTPF:
             )
 
         # Create mask for moving target.
-        target_mask = (
-            self._create_target_prf_model(all_flux=True, **kwargs) >= target_threshold
-        )
+        target_mask, _ = self._create_target_prf_model(all_flux=True, **kwargs)
+        target_mask = target_mask >= target_threshold
         if not include_stars:
             return target_mask
 
@@ -770,7 +773,9 @@ class MovingTPF:
 
         # If no SPOC quality mask is provided, the default mask is used.
         if spoc_quality_mask is None:
-            spoc_quality_mask = self._create_spoc_quality_mask(bad_spoc_bits="default")
+            spoc_quality_mask, self.bad_spoc_bits = self._create_spoc_quality_mask(
+                bad_spoc_bits="default"
+            )
 
         # Create mask for moving target and stars.
         source_mask = self._create_source_mask(include_stars=True, **kwargs)
@@ -1117,6 +1122,8 @@ class MovingTPF:
         -------
         spoc_quality_mask : ndarray
             A boolean mask, with the same length as `self.time`. Good quality data is `True` and bad quality data is `False`.
+        bad_spoc_bits : list or str
+            The SPOC bits used to define bad quality data.
         """
 
         if not hasattr(self, "quality"):
@@ -1127,28 +1134,21 @@ class MovingTPF:
         # Define bad quality SPOC bits.
         if bad_spoc_bits == "default":
             # Mask bits suggested in TESS archive manual (https://outerspace.stsci.edu/display/TESS/2.0+-+Data+Product+Overview)
-            self.bad_spoc_bits = [1, 2, 3, 4, 5, 6, 8, 10, 13, 15]  # type: ignore
-        elif bad_spoc_bits == "all":
-            # Mask all bits
-            self.bad_spoc_bits = "all"
+            bad_spoc_bits = [1, 2, 3, 4, 5, 6, 8, 10, 13, 15]
         elif bad_spoc_bits == "none":
             # No masking
-            self.bad_spoc_bits = "none"
-            return np.ones(len(self.time), dtype=bool)
-        elif isinstance(bad_spoc_bits, list):
-            # User defined list of bad bits
-            self.bad_spoc_bits = bad_spoc_bits  # type: ignore
-        else:
+            return np.ones(len(self.time), dtype=bool), bad_spoc_bits
+        elif not isinstance(bad_spoc_bits, list) and bad_spoc_bits != "all":
             raise ValueError(
                 "`bad_spoc_bits` must be either one of ['default', 'all', 'none'] or a custom list of bad quality SPOC bits."
             )
 
         # Define SPOC quality mask.
-        if self.bad_spoc_bits == "all":
+        if bad_spoc_bits == "all":
             spoc_quality_mask = self.quality == 0
         else:
             bad_spoc_bit_value = 0
-            for bit in self.bad_spoc_bits:
+            for bit in bad_spoc_bits:
                 bad_spoc_bit_value += 2 ** (bit - 1)  # type: ignore
             spoc_quality_mask = self.quality & bad_spoc_bit_value == 0
 
@@ -1159,7 +1159,7 @@ class MovingTPF:
                 spoc_quality_mask, np.logical_and(t >= 1385.89663, t <= 1406.29247)
             )
 
-        return spoc_quality_mask
+        return spoc_quality_mask, bad_spoc_bits
 
     def _bg_linear_model(
         self,
@@ -1191,7 +1191,7 @@ class MovingTPF:
         bad_spoc_bits : list or str
             Defines SPOC bits corresponding to bad quality data. Can be one of:
 
-            - "default" - mask bits [1,3,5,6,15], as suggested in the TESS Archive Manual.
+            - "default" - mask bits [1,2,3,4,5,6,8,10,13,15], as suggested in the TESS Archive Manual.
             - "all" - mask all data with a SPOC quality flag.
             - "none" - mask no data.
             - list - mask custom bits provided in list.
@@ -1250,7 +1250,9 @@ class MovingTPF:
             raise ValueError(f"`sigma` must be greater than zero. Not '{sigma}'")
 
         # Define good quality data using user-defined SPOC quality flags.
-        spoc_quality_mask = self._create_spoc_quality_mask(bad_spoc_bits)
+        spoc_quality_mask, self.bad_spoc_bits = self._create_spoc_quality_mask(
+            bad_spoc_bits
+        )
 
         # Compute scattered light model
         if sl_method == "pca":
@@ -1499,7 +1501,7 @@ class MovingTPF:
         """
         # Initialise mask that will flag NaNs in PRF model, only if PRF aperture is
         # the most recent method run. This is used by _create_lc_quality().
-        self.prf_nan_mask = np.zeros_like(self.time, dtype=bool)
+        self.ap_prf_nan_mask = np.zeros_like(self.time, dtype=bool)
 
         # Get mask via chosen method
         if method == "threshold":
@@ -1626,7 +1628,7 @@ class MovingTPF:
         """
 
         # Create PRF model
-        self.prf_model = self._create_target_prf_model(**kwargs)
+        self.prf_model, self.ap_prf_nan_mask = self._create_target_prf_model(**kwargs)
 
         # Use PRF model to define aperture
         if threshold == "optimal":
@@ -1676,6 +1678,9 @@ class MovingTPF:
         -------
         prf_model : ndarray
             numpy array containing the PRF model of the moving target.
+        prf_nan_mask : ndarray
+            Mask to identify cadences where PRF model contained NaNs and was replaced with model from
+            preceding/following frame.
         """
 
         if not hasattr(self, "all_flux"):
@@ -1691,6 +1696,9 @@ class MovingTPF:
 
         # Initialise PRF - don't specify sector => uses post-sector4 models in all cases.
         prf = lkprf.TESSPRF(camera=self.camera, ccd=self.ccd)  # , sector=self.sector)
+
+        # Initialise mask that will flag NaNs in PRF model.
+        prf_nan_mask = np.zeros_like(self.time, dtype=bool)
 
         # If no time_step is given, compute a value based upon the average target speed.
         # Note: some asteroids significantly change speed during the sector. Our tests
@@ -1799,8 +1807,7 @@ class MovingTPF:
             nan_ind = np.unique(np.where(np.isnan(prf_model))[0])
 
             # Update mask of NaNs in PRF model.
-            if hasattr(self, "prf_nan_mask"):
-                self.prf_nan_mask[nan_ind] = True
+            prf_nan_mask[nan_ind] = True
 
             for i in nan_ind:
                 # First frame, use following PRF model.
@@ -1827,7 +1834,7 @@ class MovingTPF:
                         )
                     )
 
-        return np.asarray(prf_model)
+        return np.asarray(prf_model), prf_nan_mask
 
     def _create_ellipse_aperture(
         self,
@@ -2119,7 +2126,8 @@ class MovingTPF:
         method : str
             Method to extract lightcurve. One of `aperture` or `psf`.
         kwargs : dict
-            Keyword arguments, e.g `self._aperture_photometry` takes `bad_bits`.
+            Keyword arguments, e.g `self._aperture_photometry` takes `bad_bits`,
+            `self._psf_photometry` takes `time_bin_size`
 
         Returns
         -------
@@ -2129,7 +2137,7 @@ class MovingTPF:
         if not hasattr(self, "lc"):
             self.lc = {}
 
-        # Get lightcurve and quality mask via aperture photometry
+        # Get lightcurve via aperture photometry
         if method == "aperture":
             (
                 flux,
@@ -2143,7 +2151,6 @@ class MovingTPF:
                 measured_coords,
                 flux_fraction,
             ) = self._aperture_photometry(**kwargs)
-            quality = self._create_lc_quality()
             self.lc["aperture"] = {
                 "time": self.time,
                 "flux": flux,
@@ -2154,28 +2161,363 @@ class MovingTPF:
                 "col_cen_err": col_cen_err,
                 "row_cen": row_cen,
                 "row_cen_err": row_cen_err,
-                "quality": quality,
+                "quality": self._create_lc_quality(method="aperture"),
                 "flux_fraction": flux_fraction,
                 "ra": [coord.ra.value for coord in measured_coords],
                 "dec": [coord.dec.value for coord in measured_coords],
             }
 
+        # Get lightcurve via PSF photometry
         elif method == "psf":
-            raise NotImplementedError("PSF photometry is not yet implemented.")
+            (
+                time,
+                time_uerr,
+                time_lerr,
+                time_corr,
+                cadenceno,
+                flux,
+                flux_err,
+                red_chi2,
+                spoc_quality,
+                n_cadences,
+                qual_frac,
+                prf_nan_mask,
+                pixel_mask,
+                pixel_quality,
+                bad_spoc_bits,
+            ) = self._psf_photometry(**kwargs)
+            self.lc["psf"] = {
+                "time": time,
+                "time_uerr": time_uerr,
+                "time_lerr": time_lerr,
+                "time_corr": time_corr,
+                "cadenceno": cadenceno,
+                "flux": flux,
+                "flux_err": flux_err,
+                "red_chi2": red_chi2,
+                "spoc_quality": spoc_quality,
+                "n_cadences": n_cadences,
+                "quality_fraction": qual_frac,
+                "prf_nan_mask": prf_nan_mask,
+                "pixel_mask": pixel_mask,
+                "pixel_quality": pixel_quality,
+                "bad_spoc_bits": bad_spoc_bits,
+            }
+            self.lc["psf"]["quality"] = self._create_lc_quality(method="psf")
         else:
             raise ValueError(
                 f"Method must be one of: ['aperture', 'psf']. Not '{method}'"
             )
 
         # Convert measured flux to TESS magnitude.
-        # If "prf" method was used to compute the aperture, there are meaningful flux fractions.
-        # Otherwise, assume 100% of the flux is inside the aperture.
+        # If PSF photometry was used, 100% of the flux is inside the aperture.
+        # If aperture photometry was used with a `prf` aperture, there are meaningful flux fractions. Otherwise,
+        # assume 100% of the flux is inside the aperture.
         self.lc[method]["TESSmag"], self.lc[method]["TESSmag_err"] = calculate_TESSmag(
             self.lc[method]["flux"],
             self.lc[method]["flux_err"],
             self.lc[method]["flux_fraction"]
-            if self.ap_method == "prf"
-            else np.ones_like(self.lc[method]["flux_fraction"]),
+            if method == "aperture" and self.ap_method == "prf"
+            else np.ones_like(self.lc[method]["flux"]),
+        )
+
+    def _psf_photometry(
+        self,
+        time_bin_size: Optional[float] = None,
+        bad_spoc_bits: Union[list, str] = "default",
+        **kwargs,
+    ):
+        """
+        Computes PSF photometry by fitting the amplitude of the target's PRF model to the data.
+        The model is fitted using a linear model as in the LFD paper (Hedges et al. 2021).
+
+        This function can optionally fit all of the data in a time window simultaneously,
+        effectively binning the data to improve SNR.
+
+        Parameters
+        ----------
+        time_bin_size : float
+            Width of time window, in days. All cadences in the time window will be used to fit the PRF model simultaneously,
+            effectively doing data binning. Default is None, which means each cadence is fit independently.
+        bad_spoc_bits : list or str
+            Defines SPOC bits corresponding to bad quality data. Can be one of:
+
+            - "default" - mask bits [1,2,3,4,5,6,8,10,13,15], as suggested in the TESS Archive Manual.
+            - "all" - mask all data with a SPOC quality flag.
+            - "none" - mask no data.
+            - list - mask custom bits provided in list.
+            Data that is masked will not be used when fitting the PRF model. If all cadences in a binning window are defined
+            as bad quality, there will be no lightcurve data for that window.
+            More information about the SPOC quality flags can be found in Section 9 of the TESS Science Data Products
+            Description Document.
+
+        Returns:
+        --------
+        time, time_uerr, time_lerr, time_corr, cadenceno, flux, flux_err, red_chi2, spoc_quality, n_cadences, qual_frac, prf_nan_mask, pixel_mask, pixel_quality: ndarrays
+
+            - `time` is the average time in the binning window.
+            - `time_uerr`/`time_lerr` are the upper/lower error on time (corresponds to limits of binning window).
+                These will be nan if `time_bin_size = None`.
+            - `time_corr` is the average barycentric time correction in the binning window.
+            - `cadenceno` is the average cadence number, as defined by `tesscube`, in the binning window.
+            - `flux` and `flux_err` from the PRF fitting.
+            - `red_chi2` is the reduced chi-squared of the fitted PRF model.
+            - `spoc_quality` is the combined SPOC quality flag in the binning window.
+            - `n_cadences` is the number of cadences that were used to simultaneously fit the PRF model in the binning window.
+            - `qual_frac` is the average fraction of flux in the PRF model that falls on good quality pixels (`self.pixel_quality` = 0).
+            - `prf_nan_mask` is a mask to identify cadences where the PRF model contained NaNs and was replaced with model from the
+                preceding/following frame.
+            - `pixel_mask` identifies pixels used for PRF fitting in each binning window.
+            - `pixel_quality` is the quality of the pixels in the binning window. It has the same shape as `pixel_mask`.
+            Note: if `time_bin_size = None` then `time`, `time_corr`, `cadenceno` and `spoc_quality` are equal to
+            `self.time`, `self.timecorr`, `self.cadence_number` and `self.quality`, respectively.
+        bad_spoc_bits : list or str
+            The SPOC bits used to define bad quality data.
+        """
+        if (
+            not hasattr(self, "all_flux")
+            or not hasattr(self, "flux")
+            or not hasattr(self, "corr_flux")
+            or not hasattr(self, "pixel_quality")
+        ):
+            raise AttributeError(
+                "Must run `get_data()`, `reshape_data()`, `background_correction()` and `create_pixel_quality()` before doing PSF photometry."
+            )
+
+        # Define good quality cadences using user-defined SPOC quality flags.
+        spoc_quality_mask, bad_spoc_bits = self._create_spoc_quality_mask(bad_spoc_bits)
+
+        # Save `time_bin_size` for LCF header
+        self.time_bin_size = time_bin_size
+
+        # Apply quality mask to data
+        time = self.time[spoc_quality_mask]
+        timecorr = self.timecorr[spoc_quality_mask]
+        prf_model, prf_nan_mask = self._create_target_prf_model()
+        prf_model, prf_nan_mask = (
+            prf_model[spoc_quality_mask],
+            prf_nan_mask[spoc_quality_mask],
+        )
+        cube = self.corr_flux[spoc_quality_mask]
+        cube_err = self.corr_flux_err[spoc_quality_mask]
+        spoc_quality = self.quality[spoc_quality_mask]
+        cadno = self.cadence_number[spoc_quality_mask]
+        pixel_quality = self.pixel_quality[spoc_quality_mask]
+
+        # If all data has been masked, raise warning and return nan.
+        if len(time) == 0:
+            logger.warning(
+                "During PSF photometry, all times were masked and no PSF light curve was derived."
+            )
+            return (
+                np.array([]),
+                np.array([]),
+                np.array([]),
+                np.array([]),
+                np.array([]),
+                np.array([]),
+                np.array([]),
+                np.array([]),
+                np.array([]),
+                np.array([]),
+                np.array([]),
+                np.array([]),
+                np.array([]),
+                np.array([]),
+                bad_spoc_bits,
+            )
+
+        # Derive flux prior from Vmag (if available).
+        # Use Vmag to Tmag conversion from Woods et al 2021 (T = V - 0.671).
+        # Note: interpolation will fail if Vmag is not finite.
+        if "vmag" in self.ephem and np.isfinite(self.ephem["vmag"].values).all():
+            tmag_prior = (
+                CubicSpline(
+                    self.ephem["time"].astype(float),
+                    self.ephem["vmag"].astype(float),
+                    extrapolate=False,
+                )(self.time if self.barycentric else self.time - self.timecorr)
+                - 0.671
+            )
+            flux_prior = 10 ** ((TESSmag_zero_point - tmag_prior) / 2.5)
+            flux_prior = flux_prior[spoc_quality_mask]
+        else:
+            flux_prior = np.zeros_like(time)
+
+        # Define time bins
+        if time_bin_size is not None:
+            dt = time[-1] - time[0]
+            cadence = np.nanmedian(np.diff(time))
+
+            if time_bin_size < cadence or time_bin_size > dt:
+                raise ValueError(
+                    f"`time_bin_size` must be larger than the observing cadence ({cadence:.5f} d) and less than the data span ({dt:.5f} d)."
+                )
+
+            else:
+                n_bins = int(dt / time_bin_size)
+                # Compute the bin edges and indices that fall inside each bin
+                bin_edges = np.histogram_bin_edges(time, bins=n_bins)
+                bin_index = [
+                    np.where((time >= le) & (time <= ra))[0]
+                    for le, ra in zip(bin_edges[:-1], bin_edges[1:])
+                ]
+                # Remove empty bins
+                bin_index = [x for x in bin_index if len(x) > 0]
+
+        # No time binning
+        else:
+            bin_index = np.arange(len(time)).tolist()
+
+        psf_phot = []
+        pixel_masks = []
+        pixel_qualities = []
+        nfails = 0
+
+        # Iterate over each binning window to compute PSF photometry
+        for bdx in tqdm(bin_index, total=len(bin_index)):
+            # Assign variables inside the loop
+            bdx = np.atleast_1d(bdx)
+            t = time[bdx]
+            f = cube[bdx]
+            fe = cube_err[bdx]
+            p = prf_model[bdx]
+            pn = prf_nan_mask[bdx]
+            qu = spoc_quality[bdx]
+            cn = cadno[bdx]
+            tc = timecorr[bdx]
+            pmu = flux_prior[bdx]
+            pixel_qualities.append(pixel_quality[bdx])
+
+            # Find finite values and pixels with PRF value > 0.001%.
+            # This value is small to include all pixels where the PRF has contribution.
+            pixel_masks.append(
+                np.logical_and(
+                    np.isfinite(f),
+                    np.logical_and(np.isfinite(fe), (p > 0.00001)),
+                )
+            )
+            j = pixel_masks[-1].ravel()
+
+            # Derive SPOC quality value in window
+            qual = 0
+            for q in qu:
+                qual |= q
+
+            # Compute average fraction of flux in PRF model that falls on good quality pixels
+            qual_frac = p.ravel()[
+                np.logical_and(j, (pixel_qualities[-1] == 0).ravel())
+            ].sum() / len(bdx)
+
+            # Compute errors on time window
+            t_mean = t.mean()
+            if time_bin_size is None:
+                te_u, te_l = np.nan, np.nan
+            else:
+                te_u, te_l = np.nanmax(t) - t_mean, t_mean - np.nanmin(t)
+
+            # Create DM from PRF model
+            X = p.ravel()[:, None]
+
+            # Initialise prior on flux
+            pmu = np.atleast_1d(np.nanmean(pmu))
+            psigma = np.ones_like(pmu) * 1e5
+
+            # Use weighted Bayesian LS
+            sigma_w_inv = X[j].T.dot(X[j] / fe.ravel()[j, None] ** 2) + np.diag(
+                1 / psigma**2
+            )
+
+            # Solve linear model
+            try:
+                # Compute flux
+                amp = np.linalg.solve(
+                    sigma_w_inv,
+                    X[j].T.dot(f.ravel()[j] / fe.ravel()[j] ** 2) + pmu / psigma**2,
+                )[0]
+                # Compute flux error
+                amp_err = (np.linalg.inv(sigma_w_inv).diagonal() ** 0.5)[0]
+                # Compute reduced chi-squared (X has 1 component)
+                red_chi2 = np.sum(
+                    ((f.ravel() - X.dot(amp).ravel()) ** 2 / (fe.ravel() ** 2))[j],
+                    axis=0,
+                ) / (j.sum() - 1)
+
+                # Save results
+                psf_phot.append(
+                    [
+                        t_mean,
+                        te_u,
+                        te_l,
+                        tc.mean(),
+                        np.median(cn),
+                        amp,
+                        amp_err,
+                        red_chi2,
+                        qual,
+                        len(bdx),
+                        qual_frac,
+                        pn.any(),
+                    ]
+                )
+
+            # Catch linalg errors and fill with nan values for this time
+            except np.linalg.LinAlgError:
+                psf_phot.append(
+                    [
+                        t_mean,
+                        te_u,
+                        te_l,
+                        tc.mean(),
+                        np.median(cn),
+                        np.nan,
+                        np.nan,
+                        np.nan,
+                        qual,
+                        len(bdx),
+                        qual_frac,
+                        pn.any(),
+                    ]
+                )
+                nfails += 1
+                continue
+
+        if nfails > 0:
+            logger.warning(
+                f"During PRF fitting, {nfails} cadences did not solve. These cadences will be replaced by `NaN`."
+            )
+
+        (
+            time,
+            time_uerr,
+            time_lerr,
+            time_corr,
+            cadenceno,
+            flux,
+            flux_err,
+            red_chi2,
+            spoc_quality,
+            n_cadences,
+            qual_frac,
+            prf_nan_mask,
+        ) = np.asarray(psf_phot).T
+
+        return (
+            time,
+            time_uerr,
+            time_lerr,
+            time_corr,
+            cadenceno,
+            flux,
+            flux_err,
+            red_chi2,
+            spoc_quality.astype(int),
+            n_cadences.astype(int),
+            qual_frac,
+            prf_nan_mask,
+            pixel_masks,
+            pixel_qualities,
+            bad_spoc_bits,
         )
 
     def _aperture_photometry(self, bad_bits: list = [1, 3, 7], **kwargs):
@@ -2299,23 +2641,29 @@ class MovingTPF:
     def _create_lc_quality(self, method: str = "aperture"):
         """
         Creates quality mask for lightcurve. This is defined independently of SPOC quality flags.
-        For `aperture` method, the mask is a bit-wise combination of the following flags:
+
+        For `aperture` method, pixels inside the aperture mask are used to define LC quality.
+        For `psf` method, pixels that were used to fit the PRF model are used to define LC quality.
+
+        The mask is a bit-wise combination of the following flags:
 
         Bit - Description
         ----------------
-        1  - no pixels inside aperture.
-        2  - at least one non-science pixel inside aperture.
-        3  - at least one pixel inside aperture is in a strap column.
-        4  - at least one saturated pixel inside aperture.
-        5  - at least one pixel inside aperture is 4-adjacent to a saturated pixel.
-        6  - all pixels inside aperture are `bad_bits`.
+        1  - no pixels inside mask.
+        2  - at least one non-science pixel inside mask.
+        3  - at least one pixel inside mask is in a strap column.
+        4  - at least one saturated pixel inside mask.
+        5  - at least one pixel inside mask is 4-adjacent to a saturated pixel.
+        6  - all pixels inside aperture are `bad_bits`. Only relevant if `method=aperture`.
         7  - PRF model contained nans.
-             Only relevant if `prf` aperture was used.
-        8  - at least one pixel inside aperture does not have scattered light correction.
+             If `method=aperture`, only relevant if `prf` aperture was used.
+        8  - at least one pixel inside mask does not have scattered light correction.
              Only relevant if `linear_model` background correction was used.
-        9  - at least one pixel inside aperture had no background linear model, value was infilled.
+        9  - at least one pixel inside mask had no background linear model, value was infilled.
              Only relevant if `linear_model` background correction was used.
-        10 - at least one pixel inside aperture had negative value BEFORE background correction was applied.
+        10 - at least one pixel inside mask had negative value BEFORE background correction was applied.
+        11 - PSF fit failed due to singular matrix (see np.linalg.LinAlgError).
+             Only relevant if `method=psf`.
 
         Parameters
         ----------
@@ -2338,105 +2686,123 @@ class MovingTPF:
                 "Must run `get_data()`, `reshape_data()`, `background_correction()` and `create_pixel_quality()` before creating lightcurve quality."
             )
 
+        # Assign local variables:
+        # For `aperture` method, pixels inside the aperture mask are used to define LC quality.
+        # For `psf` method, pixels that were used to fit the PRF model are used to define LC quality.
         if method == "aperture":
             if not hasattr(self, "aperture_mask") or not hasattr(self, "bad_bit_value"):
                 raise AttributeError(
-                    "With `aperture` method, must run `create_aperture()` and `_aperture_photometry()` before creating lightcurve quality."
+                    "Must run `create_aperture()` and `to_lightcurve()` before creating lightcurve quality with `method=aperture`."
                 )
 
-            # Define masks
-            masks = {
-                # No pixels in aperture
-                "no_pixel_mask": {
-                    "bit": 1,
-                    "value": np.array(
-                        [self.aperture_mask[t].sum() for t in range(len(self.time))]
-                    )
-                    == 0,
-                },
-                # Non-science pixel in aperture
-                "science_mask": {
-                    "bit": 2,
-                    "value": [
-                        (self.pixel_quality[t][self.aperture_mask[t]] & 1 != 0).any()
-                        for t in range(len(self.time))
-                    ],
-                },
-                # Strap in aperture
-                "strap_mask": {
-                    "bit": 3,
-                    "value": [
-                        (self.pixel_quality[t][self.aperture_mask[t]] & 2 != 0).any()
-                        for t in range(len(self.time))
-                    ],
-                },
-                # Saturated pixel in aperture
-                "sat_mask": {
-                    "bit": 4,
-                    "value": [
-                        (self.pixel_quality[t][self.aperture_mask[t]] & 4 != 0).any()
-                        for t in range(len(self.time))
-                    ],
-                },
-                # Pixel in aperture is 4-adjacent to saturated pixel
-                "sat_buffer_mask": {
-                    "bit": 5,
-                    "value": [
-                        (self.pixel_quality[t][self.aperture_mask[t]] & 8 != 0).any()
-                        for t in range(len(self.time))
-                    ],
-                },
-                # All pixels in aperture are `bad_bits`, as defined by user in _aperture_photometry()
-                "bad_bit_mask": {
-                    "bit": 6,
-                    "value": [
-                        (
-                            self.pixel_quality[t][self.aperture_mask[t]]
-                            & self.bad_bit_value
-                            != 0
-                        ).all()
-                        for t in range(len(self.time))
-                    ],
-                },
-                # PRF model contained nans and was replaced with preceding/following frame.
-                # This will only be meaningful if the `prf` aperture was used.
-                "prf_nan_mask": {"bit": 7, "value": self.prf_nan_mask},
-                # Pixel in aperture with no scattered light correction
-                # Only relevant if `linear_model` background correction was used.
-                "sl_nan_mask": {
-                    "bit": 8,
-                    "value": [
-                        (self.pixel_quality[t][self.aperture_mask[t]] & 16 != 0).any()
-                        for t in range(len(self.time))
-                    ],
-                },
-                # Pixel in aperture with no background linear model, value was infilled.
-                # Only relevant if `linear_model` background correction was used.
-                "lm_nan_mask": {
-                    "bit": 9,
-                    "value": [
-                        (self.pixel_quality[t][self.aperture_mask[t]] & 32 != 0).any()
-                        for t in range(len(self.time))
-                    ],
-                },
-                # Negative pixel (before BG correction) in aperture
-                "negative_mask": {
-                    "bit": 10,
-                    "value": [
-                        (self.pixel_quality[t][self.aperture_mask[t]] & 64 != 0).any()
-                        for t in range(len(self.time))
-                    ],
-                },
-                # Add flag for negative pixels (after BG correction) in aperture?
-            }
+            pixel_mask = self.aperture_mask
+            prf_nan_mask = self.ap_prf_nan_mask
+            pixel_quality = self.pixel_quality
 
         elif method == "psf":
-            raise NotImplementedError("PSF photometry is not yet implemented.")
+            if not hasattr(self, "lc") or "psf" not in self.lc:
+                raise AttributeError(
+                    "Must run `to_lightcurve()` before creating lightcurve quality with `method=psf`."
+                )
+
+            pixel_mask = self.lc["psf"]["pixel_mask"]
+            prf_nan_mask = self.lc["psf"]["prf_nan_mask"]
+            pixel_quality = self.lc["psf"]["pixel_quality"]
 
         else:
             raise ValueError(
                 f"Method must be one of: ['aperture', 'psf']. Not '{method}'"
             )
+
+        # Define masks
+        masks = {
+            # No pixels in mask
+            "no_pixel_mask": {
+                "bit": 1,
+                "value": np.array([pixel_mask[t].sum() for t in range(len(pixel_mask))])
+                == 0,
+            },
+            # Non-science pixel in mask
+            "science_mask": {
+                "bit": 2,
+                "value": [
+                    (pixel_quality[t][pixel_mask[t]] & 1 != 0).any()
+                    for t in range(len(pixel_mask))
+                ],
+            },
+            # Strap in mask
+            "strap_mask": {
+                "bit": 3,
+                "value": [
+                    (pixel_quality[t][pixel_mask[t]] & 2 != 0).any()
+                    for t in range(len(pixel_mask))
+                ],
+            },
+            # Saturated pixel in mask
+            "sat_mask": {
+                "bit": 4,
+                "value": [
+                    (pixel_quality[t][pixel_mask[t]] & 4 != 0).any()
+                    for t in range(len(pixel_mask))
+                ],
+            },
+            # Pixel in mask is 4-adjacent to saturated pixel
+            "sat_buffer_mask": {
+                "bit": 5,
+                "value": [
+                    (pixel_quality[t][pixel_mask[t]] & 8 != 0).any()
+                    for t in range(len(pixel_mask))
+                ],
+            },
+            # All pixels in aperture are `bad_bits`, as defined by user in _aperture_photometry()
+            # Only relevant if `method=aperture`.
+            "bad_bit_mask": {
+                "bit": 6,
+                "value": [
+                    (pixel_quality[t][pixel_mask[t]] & self.bad_bit_value != 0).all()
+                    for t in range(len(pixel_mask))
+                ]
+                if method == "aperture"
+                else np.zeros(len(pixel_mask), dtype=bool),
+            },
+            # PRF model contained nans and was replaced with preceding/following frame.
+            # If `method=aperture`, this is only relevant if the `prf` aperture was used.
+            "prf_nan_mask": {"bit": 7, "value": prf_nan_mask},
+            # Pixel in mask with no scattered light correction
+            # Only relevant if `linear_model` background correction was used.
+            "sl_nan_mask": {
+                "bit": 8,
+                "value": [
+                    (pixel_quality[t][pixel_mask[t]] & 16 != 0).any()
+                    for t in range(len(pixel_mask))
+                ],
+            },
+            # Pixel in mask with no background linear model, value was infilled.
+            # Only relevant if `linear_model` background correction was used.
+            "lm_nan_mask": {
+                "bit": 9,
+                "value": [
+                    (pixel_quality[t][pixel_mask[t]] & 32 != 0).any()
+                    for t in range(len(pixel_mask))
+                ],
+            },
+            # Negative pixel (before BG correction) in mask
+            "negative_mask": {
+                "bit": 10,
+                "value": [
+                    (pixel_quality[t][pixel_mask[t]] & 64 != 0).any()
+                    for t in range(len(pixel_mask))
+                ],
+            },
+            # PSF fit failed. Only relevant if `method=psf`.
+            "psf_fit_fail": {
+                "bit": 11,
+                "value": np.isnan(self.lc["psf"]["flux"])
+                if method == "psf"
+                else np.zeros(len(pixel_mask), dtype=bool),
+            },
+            # Add flag for negative pixels (after BG correction) in aperture?
+        }
 
         # Compute bit-wise mask
         lc_quality = np.sum(
@@ -2503,7 +2869,7 @@ class MovingTPF:
 
     def _make_primary_hdu(self, file_type: str):
         """
-        Make primary header for moving TPF and lightcurve file. Initialises using tesscube
+        Make primary header for moving TPF and LCF. Initialises using tesscube
         and updates/adds keywords, e.g. properties of target, settings used to create files.
 
         Parameters
@@ -2518,17 +2884,30 @@ class MovingTPF:
         """
 
         # Attribute checks
-        if (
-            not hasattr(self, "time")
-            or not hasattr(self, "bg_method")
-            or not hasattr(self, "ap_method")
-        ):
-            raise AttributeError(
-                "Must run `get_data()`, `background_correction()` and `create_aperture()` before creating primary header."
+        if file_type == "tpf":
+            if (
+                not hasattr(self, "time")
+                or not hasattr(self, "bg_method")
+                or not hasattr(self, "ap_method")
+            ):
+                raise AttributeError(
+                    "Must run `get_data()`, `background_correction()` and `create_aperture()` before creating primary header for TPF."
+                )
+        elif file_type == "lc":
+            if not hasattr(self, "time") or not hasattr(self, "bg_method"):
+                raise AttributeError(
+                    "Must run `get_data()` and `background_correction()` before creating primary header for LCF."
+                )
+        else:
+            raise ValueError(
+                f"`file_type` must be one of: ['tpf', 'lc']. Not '{file_type}'"
             )
 
         # Get primary hdu from tesscube
-        hdu = self.cube.output_primary_ext
+        hdu = self.cube.output_primary_ext.copy()
+
+        # Remove TESSMAG keyword
+        hdu.header.remove("TESSMAG")
 
         # Update existing keywords
         hdu.header.set("DATE", datetime.now().strftime("%Y-%m-%d"))
@@ -2552,32 +2931,6 @@ class MovingTPF:
         hdu.header.set("PROCVER", __version__)
         hdu.header.set("DATA_REL", comment="SPOC data release version number")
         hdu.header.set("OBJECT", self.target, comment="object name")
-
-        # Add average measured TESS magnitude of target and zero-point
-        if file_type == "lc" and hasattr(self, "lc") and "aperture" in self.lc:
-            # Catch warnings that arise if LC is nan at all times.
-            with warnings.catch_warnings():
-                warnings.filterwarnings(
-                    "ignore",
-                    message="All-NaN slice encountered",
-                    category=RuntimeWarning,
-                )
-                mag_header = round(np.nanmedian(self.lc["aperture"]["TESSmag"]), 3)
-        else:
-            mag_header = np.nan
-        hdu.header.set(
-            "TESSMAG",
-            mag_header if ~np.isnan(mag_header) else "n/a",
-            comment="[mag] measured TESS magnitude",
-        )
-        hdu.header.set(
-            "TESSMAG0",
-            round(TESSmag_zero_point, 3)
-            if file_type == "lc" and hasattr(self, "lc") and "aperture" in self.lc
-            else "n/a",
-            comment="[mag] TESS zero-point magnitude",
-            after="TESSMAG",
-        )
 
         # Add keywords from original FFI header
         hdu.header.set(
@@ -2620,24 +2973,29 @@ class MovingTPF:
             comment="method used for scattered light correction",
             after="BG_CORR",
         )
-        hdu.header.set(
-            "AP_TYPE",
-            self.ap_method,
-            comment="method used to create aperture",
-            after="SL_CORR",
-        )
-        hdu.header.set(
-            "AP_NPIX",
-            np.nanmedian([np.nansum(mask) for mask in self.aperture_mask]),
-            comment="average number of pixels in aperture",
-            after="AP_TYPE",
-        )
-        if file_type == "lc" and hasattr(self, "bad_bits"):
+
+        # Add TESS magnitude zero-point to LCF
+        if file_type == "lc":
             hdu.header.set(
-                "BAD_BITS",
-                f"{self.bad_bits}",
-                comment="bits excluded during aperture photometry",
-                after="AP_NPIX",
+                "TESSMAG0",
+                round(TESSmag_zero_point, 3),
+                comment="[mag] TESS zero-point magnitude",
+                after="SL_CORR",
+            )
+
+        # Add aperture information to TPF
+        if file_type == "tpf":
+            hdu.header.set(
+                "AP_TYPE",
+                self.ap_method,
+                comment="method used to create aperture",
+                after="SL_CORR",
+            )
+            hdu.header.set(
+                "AP_NPIX",
+                np.nanmedian([np.nansum(mask) for mask in self.aperture_mask]),
+                comment="average number of pixels in aperture",
+                after="AP_TYPE",
             )
 
         # Add keywords for object properties
@@ -3003,7 +3361,7 @@ class MovingTPF:
 
     def _make_lc_hdulist(self):
         """
-        Make HDUList for lightcurve file.
+        Make HDUList for lightcurve file. This includes a separate HDU for aperture and PSF photometry.
 
         Parameters
         ----------
@@ -3018,8 +3376,8 @@ class MovingTPF:
         if not hasattr(self, "lc") or len(self.lc) == 0:
             raise AttributeError("Must run `to_lightcurve()` before saving LC.")
 
-        # Define columns for lightcurve
-        cols = [
+        # Define columns for aperture lightcurve
+        cols_ap = [
             # Times in TDB at SS barycenter.
             fits.Column(
                 name="TIME",
@@ -3247,11 +3605,190 @@ class MovingTPF:
         ]
 
         # Create table HDU
-        table_hdu = fits.BinTableHDU.from_columns(cols)
-        table_hdu.header["EXTNAME"] = "LIGHTCURVE"
+        table_hdu_ap = fits.BinTableHDU.from_columns(cols_ap)
+        table_hdu_ap.header["EXTNAME"] = "LIGHTCURVE_AP"
+
+        # Add extra keywords to header
+        if "aperture" in self.lc:
+            table_hdu_ap.header.set(
+                "AP_TYPE",
+                self.ap_method,
+                comment="method used to create aperture",
+            )
+            table_hdu_ap.header.set(
+                "AP_NPIX",
+                np.nanmedian([np.nansum(mask) for mask in self.aperture_mask]),
+                comment="average number of pixels in aperture",
+            )
+            table_hdu_ap.header.set(
+                "BAD_BITS",
+                f"{self.bad_bits}",
+                comment="bits excluded during aperture photometry",
+            )
+            # Average measured TESS magnitude of target
+            # Catch warnings that arise if LC is nan at all times.
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message="All-NaN slice encountered",
+                    category=RuntimeWarning,
+                )
+                mag_header = round(np.nanmedian(self.lc["aperture"]["TESSmag"]), 3)
+            table_hdu_ap.header.set(
+                "TESSMAG",
+                mag_header if ~np.isnan(mag_header) else "n/a",
+                comment="[mag] avg measured TESS magnitude",
+            )
+
+        # Create HDU for PSF photometry, if it exists.
+        if "psf" in self.lc:
+            cols_psf = [
+                # Average time in binning window, in TDB at SS barycenter
+                fits.Column(
+                    name="TIME",
+                    format="D",
+                    unit="BJD - 2457000, days",
+                    disp="D14.7",
+                    array=self.lc["psf"]["time"],
+                ),
+                # Upper and lower error on time (corresponds to limits of binning window)
+                fits.Column(
+                    name="TIME_UERR",
+                    format="E",
+                    unit="d",
+                    disp="E14.7",
+                    array=self.lc["psf"]["time_uerr"],
+                ),
+                fits.Column(
+                    name="TIME_LERR",
+                    format="E",
+                    unit="d",
+                    disp="E14.7",
+                    array=self.lc["psf"]["time_lerr"],
+                ),
+                # Average barycentric time correction in binning window
+                fits.Column(
+                    name="TIMECORR",
+                    format="E",
+                    unit="d",
+                    disp="E14.7",
+                    array=self.lc["psf"]["time_corr"],
+                ),
+                # Average cadence number, as defined by tesscube, in binning window
+                fits.Column(
+                    name="CADENCENO",
+                    format="I",
+                    array=self.lc["psf"]["cadenceno"],
+                ),
+                # Combined SPOC quality flag in the cadence binning window
+                fits.Column(
+                    name="QUALITY",
+                    format="J",
+                    disp="B16.16",
+                    array=self.lc["psf"]["spoc_quality"],
+                ),
+                # PSF flux and error
+                fits.Column(
+                    name="FLUX",
+                    format="E",
+                    unit="e-/s",
+                    disp="E14.7",
+                    array=self.lc["psf"]["flux"],
+                ),
+                fits.Column(
+                    name="FLUX_ERR",
+                    format="E",
+                    unit="e-/s",
+                    disp="E14.7",
+                    array=self.lc["psf"]["flux_err"],
+                ),
+                # TESS magnitude and error
+                fits.Column(
+                    name="TESSMAG",
+                    format="E",
+                    unit="mag",
+                    disp="E14.7",
+                    array=self.lc["psf"]["TESSmag"],
+                ),
+                fits.Column(
+                    name="TESSMAG_ERR",
+                    format="E",
+                    unit="mag",
+                    disp="E14.7",
+                    array=self.lc["psf"]["TESSmag_err"],
+                ),
+                # Model fit reduced chi-squared
+                fits.Column(
+                    name="RED_CHI2",
+                    format="E",
+                    disp="E14.7",
+                    array=self.lc["psf"]["red_chi2"],
+                ),
+                # Quality from _create_lc_quality()
+                fits.Column(
+                    name="PSF_QUALITY",
+                    format="I",
+                    disp="B16.16",
+                    array=self.lc["psf"]["quality"],
+                ),
+                # Average fraction of flux in PRF model that falls on good quality pixels (`self.pixel_quality` = 0).
+                fits.Column(
+                    name="QUALITY_FRACTION",
+                    format="E",
+                    disp="E14.7",
+                    array=self.lc["psf"]["quality_fraction"],
+                ),
+                # Number of cadences used for simultaneous PSF fit
+                fits.Column(
+                    name="N_CADENCES",
+                    format="I",
+                    array=self.lc["psf"]["n_cadences"],
+                ),
+            ]
+            # Create table HDU
+            table_hdu_psf = fits.BinTableHDU.from_columns(cols_psf)
+            table_hdu_psf.header["EXTNAME"] = "LIGHTCURVE_PSF"
+
+            # Add extra keywords to header
+            table_hdu_psf.header.set(
+                "TBINSIZE",
+                self.time_bin_size,
+                comment="[d] width of window for PSF fitting",
+            )
+            table_hdu_psf.header.set(
+                "BAD_SPOC",
+                ",".join([str(bit) for bit in self.lc["psf"]["bad_spoc_bits"]])
+                if isinstance(self.lc["psf"]["bad_spoc_bits"], list)
+                else self.lc["psf"]["bad_spoc_bits"],
+                comment="bad quality SPOC bits for PRF fitting",
+            )
+            # Average measured TESS magnitude of target
+            # Catch warnings that arise if LC is nan at all times.
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message="All-NaN slice encountered",
+                    category=RuntimeWarning,
+                )
+                warnings.filterwarnings(
+                    "ignore",
+                    message="Mean of empty slice",
+                    category=RuntimeWarning,
+                )
+
+                mag_header = round(np.nanmedian(self.lc["psf"]["TESSmag"]), 3)
+            table_hdu_psf.header.set(
+                "TESSMAG",
+                mag_header if ~np.isnan(mag_header) else "n/a",
+                comment="[mag] avg measured TESS magnitude",
+            )
+
+            return fits.HDUList(
+                [self._make_primary_hdu(file_type="lc"), table_hdu_ap, table_hdu_psf]
+            )
 
         # Return hdulist
-        return fits.HDUList([self._make_primary_hdu(file_type="lc"), table_hdu])
+        return fits.HDUList([self._make_primary_hdu(file_type="lc"), table_hdu_ap])
 
     def _save_hdulist(
         self,

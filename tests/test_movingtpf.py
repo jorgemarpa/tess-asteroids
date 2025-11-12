@@ -323,8 +323,6 @@ def test_make_tpf():
         assert hdul[0].header["SL_CORR"].strip() == "pca"
         assert hdul[0].header["VMAG"] > 0
         assert hdul[0].header["HMAG"] > 0
-        assert hdul[0].header["TESSMAG"] == "n/a"
-        assert hdul[0].header["TESSMAG0"] == "n/a"
         assert "SPOCDATE" in hdul[0].header.keys()
         assert "TIME" in hdul[1].columns.names
         assert "TIMECORR" in hdul[1].columns.names
@@ -367,7 +365,7 @@ def test_make_tpf():
     os.remove("tests/tess-1998YT6-s0006-1-1-shape11x11-moving_tp.fits")
 
 
-def test_to_lightcurve():
+def test_to_lightcurve_aperture():
     """
     Test the to_lightcurve() function with the method `aperture`.  This internally calls
     _aperture_photometry() and _create_lc_quality(). The tests check the expected length
@@ -421,6 +419,76 @@ def test_to_lightcurve():
         - [coord.dec.value for coord in target.coords[dec_nan_mask]]
         < 1
     ).all()
+
+
+def test_to_lightcurve_psf():
+    """
+    Test the to_lightcurve() function with the method `psf`.  This internally calls
+    _psf_photometry(). The tests check the expected length of the lightcurve, the expected value
+    of the time errors and the expected values of the reduced chi-squared.
+    """
+
+    # Make TPF for asteroid 1998 YT6.
+    target = MovingTPF.from_name("1998 YT6", sector=6)
+    target.make_tpf()
+
+    # Test PSF photometry to extract lightcurve from TPF.
+    target.to_lightcurve(method="psf", bad_spoc_bits="none")
+
+    # Check the lightcurve has the same length as target.time
+    assert len(target.lc["psf"]["time"]) == len(target.time)
+    assert len(target.lc["psf"]["flux"]) == len(target.time)
+    assert len(target.lc["psf"]["flux_err"]) == len(target.time)
+    assert len(target.lc["psf"]["TESSmag"]) == len(target.time)
+    assert len(target.lc["psf"]["TESSmag_err"]) == len(target.time)
+    assert len(target.lc["psf"]["quality"]) == len(target.time)
+
+    # Check the upper and lower errors are nan
+    assert np.isnan(target.lc["psf"]["time_uerr"]).all()
+    assert np.isnan(target.lc["psf"]["time_lerr"]).all()
+
+    # Check n_cadences is one (no binning was used)
+    assert np.all(target.lc["psf"]["n_cadences"] == 1)
+
+    # Check quality fraction is between 0 and 1
+    assert np.all(
+        np.logical_and(
+            np.round(target.lc["psf"]["quality_fraction"], 2) >= 0,
+            np.round(target.lc["psf"]["quality_fraction"], 2) <= 1,
+        )
+    )
+
+    # Check reduced chi-squared values are positives
+    assert np.all(target.lc["psf"]["red_chi2"][target.lc["psf"]["quality"] == 0] >= 0)
+
+    # Test PSF photometry, with binning
+    target.to_lightcurve(method="psf", time_bin_size=0.5, bad_spoc_bits="none")
+
+    # Check the lightcurve has less datapoints than target.time
+    assert len(target.lc["psf"]["time"]) < len(target.time)
+    assert len(target.lc["psf"]["flux"]) < len(target.time)
+    assert len(target.lc["psf"]["flux_err"]) < len(target.time)
+    assert len(target.lc["psf"]["TESSmag"]) < len(target.time)
+    assert len(target.lc["psf"]["TESSmag_err"]) < len(target.time)
+    assert len(target.lc["psf"]["quality"]) < len(target.time)
+
+    # Check the upper and lower errors are not nan
+    assert ~np.isnan(target.lc["psf"]["time_uerr"]).all()
+    assert ~np.isnan(target.lc["psf"]["time_lerr"]).all()
+
+    # Check n_cadences is > 1 (no binning was used)
+    assert np.all(target.lc["psf"]["n_cadences"] > 1)
+
+    # Check quality fraction is between 0 and 1
+    assert np.all(
+        np.logical_and(
+            np.round(target.lc["psf"]["quality_fraction"], 2) >= 0,
+            np.round(target.lc["psf"]["quality_fraction"], 2) <= 1,
+        )
+    )
+
+    # Check reduced chi-squared values are positives
+    assert np.all(target.lc["psf"]["red_chi2"][target.lc["psf"]["quality"] == 0] >= 0)
 
 
 def test_calculate_TESSmag():
@@ -477,14 +545,14 @@ def test_make_lc():
     # Open the file with astropy and check some attributes
     with fits.open("tests/tess-1998YT6-s0006-1-1-shape11x11_lc.fits") as hdul:
         # Check primary header
-        assert "BAD_BITS" in hdul[0].header.keys()
+        assert "BAD_BITS" in hdul[1].header.keys()
         assert hdul[0].header["PROCVER"].strip() == __version__
-        assert hdul[0].header["AP_TYPE"].strip() == "prf"
+        assert hdul[1].header["AP_TYPE"].strip() == "prf"
         assert hdul[0].header["BG_CORR"].strip() == "rolling"
         assert hdul[0].header["SL_CORR"].strip() == "n/a"
         assert hdul[0].header["VMAG"] > 0
         assert hdul[0].header["HMAG"] > 0
-        assert hdul[0].header["TESSMAG"] > 0
+        assert hdul[1].header["TESSMAG"] > 0
         assert hdul[0].header["TESSMAG0"] > 0
         assert "SPOCDATE" in hdul[0].header.keys()
 
