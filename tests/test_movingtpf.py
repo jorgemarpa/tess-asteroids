@@ -431,7 +431,7 @@ def test_to_lightcurve_psf():
     target.make_tpf()
 
     # Test PSF photometry to extract lightcurve from TPF.
-    target.to_lightcurve(method="psf", n_cadences=1, bad_spoc_bits="none")
+    target.to_lightcurve(method="psf", bad_spoc_bits="none")
 
     # Check the lightcurve has the same length as target.time
     assert len(target.lc["psf"]["time"]) == len(target.time)
@@ -445,11 +445,22 @@ def test_to_lightcurve_psf():
     assert np.isnan(target.lc["psf"]["time_uerr"]).all()
     assert np.isnan(target.lc["psf"]["time_lerr"]).all()
 
+    # Check n_cadences is one (no binning was used)
+    assert np.all(target.lc["psf"]["n_cadences"] == 1)
+
+    # Check quality fraction is between 0 and 1
+    assert np.all(
+        np.logical_and(
+            np.round(target.lc["psf"]["quality_fraction"], 2) >= 0,
+            np.round(target.lc["psf"]["quality_fraction"], 2) <= 1,
+        )
+    )
+
     # Check reduced chi-squared values are positives
     assert np.all(target.lc["psf"]["red_chi2"][target.lc["psf"]["quality"] == 0] >= 0)
 
     # Test PSF photometry, with binning
-    target.to_lightcurve(method="psf", n_cadences=10, bad_spoc_bits="none")
+    target.to_lightcurve(method="psf", time_bin_size=0.5, bad_spoc_bits="none")
 
     # Check the lightcurve has less datapoints than target.time
     assert len(target.lc["psf"]["time"]) < len(target.time)
@@ -462,6 +473,17 @@ def test_to_lightcurve_psf():
     # Check the upper and lower errors are not nan
     assert ~np.isnan(target.lc["psf"]["time_uerr"]).all()
     assert ~np.isnan(target.lc["psf"]["time_lerr"]).all()
+
+    # Check n_cadences is > 1 (no binning was used)
+    assert np.all(target.lc["psf"]["n_cadences"] > 1)
+
+    # Check quality fraction is between 0 and 1
+    assert np.all(
+        np.logical_and(
+            np.round(target.lc["psf"]["quality_fraction"], 2) >= 0,
+            np.round(target.lc["psf"]["quality_fraction"], 2) <= 1,
+        )
+    )
 
     # Check reduced chi-squared values are positives
     assert np.all(target.lc["psf"]["red_chi2"][target.lc["psf"]["quality"] == 0] >= 0)
