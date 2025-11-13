@@ -1267,8 +1267,8 @@ class MovingTPF:
             Pixels with reduced chi-squared >= `red_chi2_tol` will be flagged to indicate the star model fit was poor. This flag
             is used by `create_pixel_quality()` and `_create_lc_quality()`.
         reshape : boolean
-            If True, the background model is returned with a shape (ntimes, nrows, ncols).
-            If False, the background model is returned with a shape (ntimes, npixels).
+            If True, the background model is returned with a shape (ntimes, nrows, ncols) i.e. same shape as `self.flux`.
+            If False, the background model is returned with a shape (ntimes, npixels) i.e. same shape as `self.all_flux`.
         progress_bar : bool
             If `True`, a progress bar will be displayed for the computation of the star model.
         diagnostic_plot : bool
