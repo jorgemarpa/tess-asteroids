@@ -1528,10 +1528,16 @@ class MovingTPF:
                 # Calculate model distribution
                 star_model_dist[mask_predict, pdx] = X[mask_predict].dot(wdist.T)
 
-                # Compute reduced chi-squared using fit data:
-                red_chi2[pdx] = np.sum(resid**2) / (
-                    np.sum(mask) - np.linalg.matrix_rank(X[mask])
-                )
+                # Compute reduced chi-squared using fit data.
+                # Catch warnings that arise if denominator is zero (reduced chi squared will be returned as inf).
+                with warnings.catch_warnings():
+                    warnings.filterwarnings(
+                        "ignore",
+                        message="divide by zero encountered in scalar divide",
+                    )
+                    red_chi2[pdx] = np.sum(resid**2) / (
+                        np.sum(mask) - np.linalg.matrix_rank(X[mask])
+                    )
 
         # Compute star model and error from distribution.
         # Catch warnings that arise because of nan pixels.
@@ -1832,7 +1838,9 @@ class MovingTPF:
         """
 
         # Create PRF model
-        self.prf_model, self.ap_prf_nan_mask = self._create_target_prf_model(all_flux=False, **kwargs)
+        self.prf_model, self.ap_prf_nan_mask = self._create_target_prf_model(
+            all_flux=False, **kwargs
+        )
 
         # Use PRF model to define aperture
         if threshold == "optimal":
@@ -2878,7 +2886,7 @@ class MovingTPF:
         11 - PSF fit failed due to singular matrix (see np.linalg.LinAlgError).
              Only relevant if `method=psf`.
         12 - at least one pixel inside mask had a poor fitting background star model.
-             Only relevant if `linear_model` background correction was used.             
+             Only relevant if `linear_model` background correction was used.
 
         Parameters
         ----------
@@ -3025,7 +3033,6 @@ class MovingTPF:
                     for t in range(len(pixel_mask))
                 ],
             },
-
             # Add flag for negative pixels (after BG correction) in aperture?
         }
 
