@@ -309,7 +309,7 @@ def test_make_tpf():
     target = MovingTPF.from_name("1998 YT6", sector=6)
     target.get_data()
     target.reshape_data()
-    #target.background_correction()
+    target.background_correction()
     #target.create_pixel_quality()
     #target.create_aperture()
     #target.to_fits(file_type="tpf", save=True, outdir="tests")    
