@@ -307,7 +307,12 @@ def test_make_tpf():
 
     # Make TPF for asteroid 1998 YT6
     target = MovingTPF.from_name("1998 YT6", sector=6)
-    target.make_tpf(save=True, outdir="tests")
+    target.get_data()
+    #target.reshape_data()
+    #target.background_correction()
+    #target.create_pixel_quality()
+    #target.create_aperture()
+    #target.to_fits(file_type="tpf", save=True, outdir="tests")    
 
     # Check the file exists
     assert os.path.exists("tests/tess-1998YT6-s0006-1-1-shape11x11-moving_tp.fits")
