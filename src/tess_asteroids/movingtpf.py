@@ -1395,8 +1395,8 @@ class MovingTPF:
         prior_mu = np.zeros(X.shape[1])
         prior_sigma = np.ones(X.shape[1]) * 1e5
 
-        # Initialise star model distribution.
-        star_model_dist = np.full((*self.all_flux.shape, 100), np.nan)
+        # Initialise star model.
+        star_model, star_model_err = np.full_like(self.all_flux, np.nan), np.full_like(self.all_flux, np.nan)
 
         # Initialise reduced chi-squared
         red_chi2 = np.full(len(self.pixels), np.nan)
@@ -1515,7 +1515,7 @@ class MovingTPF:
                             category=RuntimeWarning,
                         )
                         wdist = np.random.multivariate_normal(
-                            w, wcov, size=star_model_dist.shape[2]
+                            w, wcov, size=100
                         )
                 except np.linalg.LinAlgError:
                     logger.warning(
@@ -1526,7 +1526,24 @@ class MovingTPF:
                     break
 
                 # Calculate model distribution
-                star_model_dist[mask_predict, pdx] = X[mask_predict].dot(wdist.T)
+                star_model_dist = X[mask_predict].dot(wdist.T)
+
+                # Compute star model and error from distribution.
+                # Catch warnings that arise because of nan pixels.
+                with warnings.catch_warnings():
+                    warnings.filterwarnings(
+                        "ignore", message="Mean of empty slice", category=RuntimeWarning
+                    )
+                    warnings.filterwarnings(
+                        "ignore",
+                        message="Degrees of freedom <= 0 for slice.",
+                        category=RuntimeWarning,
+                    )
+                    star_model[mask_predict, pdx], star_model_err[mask_predict, pdx] = (
+                        np.nanmean(star_model_dist, axis=1),
+                        np.nanstd(star_model_dist, ddof=1, axis=1)
+                        / np.sqrt(star_model_dist.shape[1]),
+                    )
 
                 # Compute reduced chi-squared using fit data.
                 # Catch warnings that arise if denominator is zero (reduced chi squared will be returned as inf).
@@ -1538,23 +1555,6 @@ class MovingTPF:
                     red_chi2[pdx] = np.sum(resid**2) / (
                         np.sum(mask) - np.linalg.matrix_rank(X[mask])
                     )
-
-        # Compute star model and error from distribution.
-        # Catch warnings that arise because of nan pixels.
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore", message="Mean of empty slice", category=RuntimeWarning
-            )
-            warnings.filterwarnings(
-                "ignore",
-                message="Degrees of freedom <= 0 for slice.",
-                category=RuntimeWarning,
-            )
-            star_model, star_model_err = (
-                np.nanmean(star_model_dist, axis=2),
-                np.nanstd(star_model_dist, ddof=1, axis=2)
-                / np.sqrt(star_model_dist.shape[2]),
-            )
 
         logger.info(
             "Finished computation of star model in {0:.2f} sec.".format(
