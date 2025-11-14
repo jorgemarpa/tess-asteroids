@@ -11,6 +11,12 @@ all: mypy ruff pytest
 pytest:
 	$(CMD) pytest $(PYMODULE) $(TESTS)
 
+# Run the unit tests using `pytest` with memray
+pytest_memray:
+	@rm -rf $(TESTS)/memray
+	$(CMD) pytest --memray --memray-bin-path $(TESTS)/memray --memray-bin-prefix memory-usage $(PYMODULE) $(TESTS)
+	@find $(TESTS)/memray -name "*.bin" -exec $(CMD) memray flamegraph {} \;
+
 # Run ruff linter/formatter - does not change files
 ruff:
 	$(CMD) ruff check $(PYMODULE) $(TESTS)
