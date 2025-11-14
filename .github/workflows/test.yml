@@ -28,4 +28,4 @@ jobs:
         poetry install --with dev
     - name: Test with pytest
       run: |
-        poetry run pytest tests/test_movingtpf.py::test_make_tpf
+        make pytest
