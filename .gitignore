@@ -9,3 +9,6 @@ tests/*.fits
 
 # Jupyter notebook checkpoints
 .ipynb_checkpoints
+
+# memray
+tests/memray/
