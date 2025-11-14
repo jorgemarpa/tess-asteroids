@@ -1396,7 +1396,10 @@ class MovingTPF:
         prior_sigma = np.ones(X.shape[1]) * 1e5
 
         # Initialise star model.
-        star_model, star_model_err = np.full_like(self.all_flux, np.nan), np.full_like(self.all_flux, np.nan)
+        star_model, star_model_err = (
+            np.full_like(self.all_flux, np.nan),
+            np.full_like(self.all_flux, np.nan),
+        )
 
         # Initialise reduced chi-squared
         red_chi2 = np.full(len(self.pixels), np.nan)
@@ -1514,9 +1517,7 @@ class MovingTPF:
                             message="covariance is not symmetric positive-semidefinite",
                             category=RuntimeWarning,
                         )
-                        wdist = np.random.multivariate_normal(
-                            w, wcov, size=100
-                        )
+                        wdist = np.random.multivariate_normal(w, wcov, size=100)
                 except np.linalg.LinAlgError:
                     logger.warning(
                         "When computing the star model for pixel {} (row {}, column {}), the computation of `wdist` failed with a `LinAlgError`. The model was set to nan at all times.".format(
