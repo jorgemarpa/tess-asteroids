@@ -2372,6 +2372,8 @@ class MovingTPF:
                 row_cen_err,
                 measured_coords,
                 flux_fraction,
+                bg_std,
+                bg_mad,
             ) = self._aperture_photometry(**kwargs)
             self.lc["aperture"] = {
                 "time": self.time,
@@ -2385,6 +2387,8 @@ class MovingTPF:
                 "row_cen_err": row_cen_err,
                 "quality": self._create_lc_quality(method="aperture"),
                 "flux_fraction": flux_fraction,
+                "bg_std": bg_std,
+                "bg_mad": bg_mad,
                 "ra": [coord.ra.value for coord in measured_coords],
                 "dec": [coord.dec.value for coord in measured_coords],
             }
@@ -2787,6 +2791,8 @@ class MovingTPF:
         ap_bg = []
         ap_bg_err = []
         flux_fraction = []
+        bg_std = []
+        bg_mad = []
 
         for t in range(len(self.time)):
             # Combine aperture mask with masking of bad bits.
@@ -2817,11 +2823,28 @@ class MovingTPF:
             # Compute fraction of PRF model flux inside aperture, excluding bad_bits.
             # If aperture method is not `prf`, this will be nan.
             if self.ap_method == "prf":
-                flux_fraction.append(np.nansum(self.prf_model[t][mask[-1]], axis=0))
+                flux_fraction.append(np.nansum(self.prf_model[t][mask[-1]]))
                 if np.isnan(self.prf_model[t][mask[-1]]).all():
                     flux_fraction[-1] = np.nan
             else:
                 flux_fraction.append(np.nan)
+
+            # Compute standard deviation and MAD for BG pixels (PRF model < 0.1%).
+            # If aperture method is not `prf`, these will be nan.
+            if self.ap_method == "prf":
+                bg_mask = np.logical_and(self.prf_model[t]<0.001, self.pixel_quality[t] & self.bad_bit_value == 0)
+                # Catch warnings that arise because of nan pixels.
+                with warnings.catch_warnings():
+                    warnings.filterwarnings(
+                        "ignore",
+                        message="Degrees of freedom <= 0 for slice.",
+                        category=RuntimeWarning,
+                    )
+                    bg_std.append(np.nanstd(self.corr_flux[t][bg_mask], ddof=1))
+                bg_mad.append(stats.median_abs_deviation(self.corr_flux[t][bg_mask], nan_policy="omit"))
+            else:
+                bg_std.append(np.nan)
+                bg_mad.append(np.nan)
 
         # Compute flux-weighted centroid inside aperture
         # These values are zero-indexed i.e. lower left pixel in TPF is (0,0).
@@ -2858,6 +2881,8 @@ class MovingTPF:
             row_cen_err,
             measured_coords,
             np.asarray(flux_fraction),
+            np.asarray(bg_std),
+            np.asarray(bg_mad),
         )
 
     def _create_lc_quality(self, method: str = "aperture"):
@@ -3786,6 +3811,26 @@ class MovingTPF:
                 format="E",
                 disp="E14.7",
                 array=self.lc["aperture"]["flux_fraction"]
+                if "aperture" in self.lc
+                else np.full(len(self.time), np.nan),
+            ),
+            # Standard deviation of background pixels. If `prf`
+            # aperture was not used, this will be nan.
+            fits.Column(
+                name="BG_STD",
+                format="E",
+                disp="E14.7",
+                array=self.lc["aperture"]["bg_std"]
+                if "aperture" in self.lc
+                else np.full(len(self.time), np.nan),
+            ),
+            # Median absolute deviation of background pixels. If `prf`
+            # aperture was not used, this will be nan.
+            fits.Column(
+                name="BG_MAD",
+                format="E",
+                disp="E14.7",
+                array=self.lc["aperture"]["bg_mad"]
                 if "aperture" in self.lc
                 else np.full(len(self.time), np.nan),
             ),
