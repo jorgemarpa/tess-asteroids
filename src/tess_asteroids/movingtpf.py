@@ -3850,7 +3850,7 @@ class MovingTPF:
             # Standard deviation of background pixels. If `prf`
             # aperture was not used, this will be nan.
             fits.Column(
-                name="BG_STD",
+                name="BKG_STD",
                 format="E",
                 disp="E14.7",
                 array=self.lc["aperture"]["bg_std"]
@@ -3860,7 +3860,7 @@ class MovingTPF:
             # Median absolute deviation of background pixels. If `prf`
             # aperture was not used, this will be nan.
             fits.Column(
-                name="BG_MAD",
+                name="BKG_MAD",
                 format="E",
                 disp="E14.7",
                 array=self.lc["aperture"]["bg_mad"]

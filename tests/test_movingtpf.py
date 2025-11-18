@@ -384,6 +384,8 @@ def test_to_lightcurve_aperture():
     assert len(target.lc["aperture"]["TESSmag"]) == len(target.time)
     assert len(target.lc["aperture"]["quality"]) == len(target.time)
     assert len(target.lc["aperture"]["flux_fraction"]) == len(target.time)
+    assert len(target.lc["aperture"]["n_pixels"]) == len(target.time)
+    assert len(target.lc["aperture"]["bg_std"]) == len(target.time)
 
     # Check the average centroid is within 1/2 a pixel of the center of the TPF.
     assert (
@@ -567,6 +569,8 @@ def test_make_lc():
         assert "RA" in hdul[1].columns.names
         assert "RA_PRED" in hdul[1].columns.names
         assert "EPHEM1" in hdul[1].columns.names
+        assert "N_PIX" in hdul[1].columns.names
+        assert "BKG_STD" in hdul[1].columns.names
 
         # Check the barycentric time correction has been applied.
         assert (hdul[1].data["TIME"] != hdul[1].data["ORIGINAL_TIME"]).all()
