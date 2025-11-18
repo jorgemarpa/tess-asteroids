@@ -3838,10 +3838,10 @@ class MovingTPF:
                 if "aperture" in self.lc
                 else np.full(len(self.time), np.nan),
             ),
-            # Number of pixels inside aperture. This excludes pixels flagged as
-            # `bad_bits` by the user. inside aperture.
+            # Number of pixels inside aperture, excluding pixels flagged as
+            # `bad_bits` by the user.
             fits.Column(
-                name="N_PIX",
+                name="NPIX",
                 format="I",
                 array=self.lc["aperture"]["n_pixels"]
                 if "aperture" in self.lc
