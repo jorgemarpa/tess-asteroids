@@ -2372,6 +2372,7 @@ class MovingTPF:
                 row_cen_err,
                 measured_coords,
                 flux_fraction,
+                npix,
                 bg_std,
                 bg_mad,
             ) = self._aperture_photometry(**kwargs)
@@ -2387,6 +2388,7 @@ class MovingTPF:
                 "row_cen_err": row_cen_err,
                 "quality": self._create_lc_quality(method="aperture"),
                 "flux_fraction": flux_fraction,
+                "n_pixels": npix,
                 "bg_std": bg_std,
                 "bg_mad": bg_mad,
                 "ra": [coord.ra.value for coord in measured_coords],
@@ -2881,6 +2883,7 @@ class MovingTPF:
             row_cen_err,
             measured_coords,
             np.asarray(flux_fraction),
+            np.asarray(mask).sum(axis=(1,2)),
             np.asarray(bg_std),
             np.asarray(bg_mad),
         )
@@ -3811,6 +3814,15 @@ class MovingTPF:
                 format="E",
                 disp="E14.7",
                 array=self.lc["aperture"]["flux_fraction"]
+                if "aperture" in self.lc
+                else np.full(len(self.time), np.nan),
+            ),
+            # Number of pixels inside aperture. This excludes pixels flagged as 
+            # `bad_bits` by the user. inside aperture.
+            fits.Column(
+                name="N_PIX",
+                format="I",
+                array=self.lc["aperture"]["n_pixels"]
                 if "aperture" in self.lc
                 else np.full(len(self.time), np.nan),
             ),
