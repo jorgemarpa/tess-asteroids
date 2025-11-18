@@ -2761,13 +2761,20 @@ class MovingTPF:
 
         Returns
         -------
-        ap_flux, ap_flux_err, ap_bg, ap_bg_err, col_cen, row_cen, col_cen_err, row_cen_err, measured_coords, flux_fraction : ndarrays
-            Sum of flux inside aperture and error (ap_flux, ap_flux_err), sum of background flux inside
-            aperture and error (ap_bg, ap_bg_err), flux-weighted centroids inside aperture and errors
-            (col_cen, row_cen, col_cen_err, row_cen_err), flux-weighted centroids converted to world coordinates using WCS (measured_coords)
-            and fraction of PRF model flux inside aperture (flux_fraction).
+        ap_flux, ap_flux_err, ap_bg, ap_bg_err, col_cen, row_cen, col_cen_err, row_cen_err, measured_coords, flux_fraction, npix, bg_std, bg_mad : ndarrays
+            
+            - ap_flux, ap_flux_err: sum of flux inside aperture and error
+            - ap_bg, ap_bg_err: sum of background flux inside aperture and error
+            - col_cen, row_cen, col_cen_err, row_cen_err: flux-weighted centroids inside aperture and errors
+            - measured_coords: flux-weighted centroids converted to world coordinates using WCS
+            - flux_fraction: fraction of PRF model flux inside aperture
+            - npix: number of pixels inside aperture, excluding pixels flagged as `bad_bits`
+            - bg_std: standad deviation of background pixels (where PRF model < 0.1%)
+            - bg_mad: median absolute deviation of background pixels (where PRF model < 0.1%)
+
             The row and column centroids are one-indexed and correspond to the position in the full FFI, where the
-            lower left pixel has the value (1,1). Flux fraction will be nan unless `prf` aperture is used.
+            lower left pixel has the value (1,1). `flux_fraction`, `bg_std` and `bg_mad` will be nan unless `prf` aperture is used.
+            If `prf` aperture is used, `ap_flux` is corrected using `flux_fraction` to represent 100% of the target's flux.
         """
 
         if (
@@ -2832,8 +2839,8 @@ class MovingTPF:
                     flux_fraction[-1] = np.nan
 
                 # Correct flux to represent 100% of target's flux.
-                ap_flux[-1] = ap_flux[-1]/flux_fraction[-1]
-                ap_flux_err[-1] = ap_flux_err[-1]/flux_fraction[-1]
+                ap_flux[-1] /= flux_fraction[-1]
+                ap_flux_err[-1] /= flux_fraction[-1]
 
             else:
                 flux_fraction.append(np.nan)
