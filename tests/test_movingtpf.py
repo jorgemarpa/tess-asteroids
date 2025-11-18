@@ -569,7 +569,7 @@ def test_make_lc():
         assert "RA" in hdul[1].columns.names
         assert "RA_PRED" in hdul[1].columns.names
         assert "EPHEM1" in hdul[1].columns.names
-        assert "N_PIX" in hdul[1].columns.names
+        assert "NPIX" in hdul[1].columns.names
         assert "BKG_STD" in hdul[1].columns.names
 
         # Check the barycentric time correction has been applied.
