@@ -2826,8 +2826,15 @@ class MovingTPF:
             # If aperture method is not `prf`, this will be nan.
             if self.ap_method == "prf":
                 flux_fraction.append(np.nansum(self.prf_model[t][mask[-1]]))
+
+                # Uncertain when this occurs - PRF model should not contain NaNs.
                 if np.isnan(self.prf_model[t][mask[-1]]).all():
                     flux_fraction[-1] = np.nan
+
+                # Correct flux to represent 100% of target's flux.
+                ap_flux[-1] = ap_flux[-1]/flux_fraction[-1]
+                ap_flux_err[-1] = ap_flux_err[-1]/flux_fraction[-1]
+
             else:
                 flux_fraction.append(np.nan)
 
