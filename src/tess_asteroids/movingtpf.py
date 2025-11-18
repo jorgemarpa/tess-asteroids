@@ -2762,7 +2762,7 @@ class MovingTPF:
         Returns
         -------
         ap_flux, ap_flux_err, ap_bg, ap_bg_err, col_cen, row_cen, col_cen_err, row_cen_err, measured_coords, flux_fraction, npix, bg_std, bg_mad : ndarrays
-            
+
             - ap_flux, ap_flux_err: sum of flux inside aperture and error
             - ap_bg, ap_bg_err: sum of background flux inside aperture and error
             - col_cen, row_cen, col_cen_err, row_cen_err: flux-weighted centroids inside aperture and errors
@@ -2848,7 +2848,10 @@ class MovingTPF:
             # Compute standard deviation and MAD for BG pixels (PRF model < 0.1%).
             # If aperture method is not `prf`, these will be nan.
             if self.ap_method == "prf":
-                bg_mask = np.logical_and(self.prf_model[t]<0.001, self.pixel_quality[t] & self.bad_bit_value == 0)
+                bg_mask = np.logical_and(
+                    self.prf_model[t] < 0.001,
+                    self.pixel_quality[t] & self.bad_bit_value == 0,
+                )
                 # Catch warnings that arise because of nan pixels.
                 with warnings.catch_warnings():
                     warnings.filterwarnings(
@@ -2857,7 +2860,11 @@ class MovingTPF:
                         category=RuntimeWarning,
                     )
                     bg_std.append(np.nanstd(self.corr_flux[t][bg_mask], ddof=1))
-                bg_mad.append(stats.median_abs_deviation(self.corr_flux[t][bg_mask], nan_policy="omit"))
+                bg_mad.append(
+                    stats.median_abs_deviation(
+                        self.corr_flux[t][bg_mask], nan_policy="omit"
+                    )
+                )
             else:
                 bg_std.append(np.nan)
                 bg_mad.append(np.nan)
@@ -2897,7 +2904,7 @@ class MovingTPF:
             row_cen_err,
             measured_coords,
             np.asarray(flux_fraction),
-            np.asarray(mask).sum(axis=(1,2)),
+            np.asarray(mask).sum(axis=(1, 2)),
             np.asarray(bg_std),
             np.asarray(bg_mad),
         )
@@ -3831,7 +3838,7 @@ class MovingTPF:
                 if "aperture" in self.lc
                 else np.full(len(self.time), np.nan),
             ),
-            # Number of pixels inside aperture. This excludes pixels flagged as 
+            # Number of pixels inside aperture. This excludes pixels flagged as
             # `bad_bits` by the user. inside aperture.
             fits.Column(
                 name="N_PIX",
