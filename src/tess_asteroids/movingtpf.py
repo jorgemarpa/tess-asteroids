@@ -2412,6 +2412,8 @@ class MovingTPF:
                 prf_nan_mask,
                 pixel_mask,
                 pixel_quality,
+                bg_std,
+                bg_mad,
                 bad_spoc_bits,
             ) = self._psf_photometry(**kwargs)
             self.lc["psf"] = {
@@ -2429,6 +2431,8 @@ class MovingTPF:
                 "prf_nan_mask": prf_nan_mask,
                 "pixel_mask": pixel_mask,
                 "pixel_quality": pixel_quality,
+                "bg_std": bg_std,
+                "bg_mad": bg_mad,
                 "bad_spoc_bits": bad_spoc_bits,
             }
             self.lc["psf"]["quality"] = self._create_lc_quality(method="psf")
@@ -2481,7 +2485,7 @@ class MovingTPF:
 
         Returns:
         --------
-        time, time_uerr, time_lerr, time_corr, cadenceno, flux, flux_err, red_chi2, spoc_quality, n_cadences, qual_frac, prf_nan_mask, pixel_mask, pixel_quality: ndarrays
+        time, time_uerr, time_lerr, time_corr, cadenceno, flux, flux_err, red_chi2, spoc_quality, n_cadences, qual_frac, prf_nan_mask, pixel_mask, pixel_quality, bg_std, bg_mad: ndarrays
 
             - `time` is the average time in the binning window.
             - `time_uerr`/`time_lerr` are the upper/lower error on time (corresponds to limits of binning window).
@@ -2497,6 +2501,8 @@ class MovingTPF:
                 preceding/following frame.
             - `pixel_mask` identifies pixels used for PRF fitting in each binning window.
             - `pixel_quality` is the quality of the pixels in the binning window. It has the same shape as `pixel_mask`.
+            - `bg_std` is the standad deviation of the background pixels (where PRF model < 0.1%) in each binning window.
+            - `bg_mad` is the median absolute deviation of background pixels (where PRF model < 0.1%) in each binning window.
             Note: if `time_bin_size = None` then `time`, `time_corr`, `cadenceno` and `spoc_quality` are equal to
             `self.time`, `self.timecorr`, `self.cadence_number` and `self.quality`, respectively.
         bad_spoc_bits : list or str
@@ -2600,6 +2606,8 @@ class MovingTPF:
         psf_phot = []
         pixel_masks = []
         pixel_qualities = []
+        bg_std = []
+        bg_mad = []
         nfails = 0
 
         # Iterate over each binning window to compute PSF photometry
@@ -2626,6 +2634,22 @@ class MovingTPF:
                 )
             )
             j = pixel_masks[-1].ravel()
+
+            # Compute standard deviation and MAD for BG pixels (PRF model < 0.1%).
+            bg_mask = np.logical_and(
+                p < 0.001, np.logical_and(np.isfinite(f), np.isfinite(fe))
+            )
+            # Catch warnings that arise because of nan pixels.
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message="Degrees of freedom <= 0 for slice.",
+                    category=RuntimeWarning,
+                )
+                bg_std.append(np.nanstd(f[bg_mask], ddof=1))
+            bg_mad.append(
+                stats.median_abs_deviation(f[bg_mask], nan_policy="omit")
+            )
 
             # Derive SPOC quality value in window
             qual = 0
@@ -2743,8 +2767,10 @@ class MovingTPF:
             n_cadences.astype(int),
             qual_frac,
             prf_nan_mask,
-            pixel_masks,
-            pixel_qualities,
+            np.asarray(pixel_masks),
+            np.asarray(pixel_qualities),
+            np.asarray(bg_std),
+            np.asarray(bg_mad),
             bad_spoc_bits,
         )
 
@@ -4054,6 +4080,20 @@ class MovingTPF:
                     name="N_CADENCES",
                     format="I",
                     array=self.lc["psf"]["n_cadences"],
+                ),
+                # Standard deviation of background pixels.
+                fits.Column(
+                    name="BKG_STD",
+                    format="E",
+                    disp="E14.7",
+                    array=self.lc["psf"]["bg_std"],
+                ),
+                # Median absolute deviation of background pixels.
+                fits.Column(
+                    name="BKG_MAD",
+                    format="E",
+                    disp="E14.7",
+                    array=self.lc["psf"]["bg_mad"],
                 ),
             ]
             # Create table HDU
