@@ -1710,10 +1710,6 @@ class MovingTPF:
         Returns
         -------
         """
-        # Initialise mask that will flag NaNs in PRF model, only if PRF aperture is
-        # the most recent method run. This is used by _create_lc_quality().
-        self.ap_prf_nan_mask = np.zeros_like(self.time, dtype=bool)
-
         # Get mask via chosen method
         if method == "threshold":
             self.aperture_mask = self._create_threshold_aperture(**kwargs)
@@ -2410,10 +2406,10 @@ class MovingTPF:
                 n_cadences,
                 qual_frac,
                 prf_nan_mask,
-                pixel_mask,
-                pixel_quality,
                 bg_std,
                 bg_mad,
+                pixel_mask,
+                pixel_quality,
                 bad_spoc_bits,
             ) = self._psf_photometry(**kwargs)
             self.lc["psf"] = {
@@ -2429,10 +2425,10 @@ class MovingTPF:
                 "n_cadences": n_cadences,
                 "quality_fraction": qual_frac,
                 "prf_nan_mask": prf_nan_mask,
-                "pixel_mask": pixel_mask,
-                "pixel_quality": pixel_quality,
                 "bg_std": bg_std,
                 "bg_mad": bg_mad,
+                "pixel_mask": pixel_mask,
+                "pixel_quality": pixel_quality,
                 "bad_spoc_bits": bad_spoc_bits,
             }
             self.lc["psf"]["quality"] = self._create_lc_quality(method="psf")
@@ -2442,15 +2438,13 @@ class MovingTPF:
             )
 
         # Convert measured flux to TESS magnitude.
-        # If PSF photometry was used, 100% of the flux is inside the aperture.
-        # If aperture photometry was used with a `prf` aperture, there are meaningful flux fractions. Otherwise,
-        # assume 100% of the flux is inside the aperture.
+        # Flux fraction is one:
+        # - If PSF photometry was used, the fitted amplitude is 100% of the target's flux.
+        # - If aperture photometry was used, the flux has already been corrected with `flux_fraction`.
         self.lc[method]["TESSmag"], self.lc[method]["TESSmag_err"] = calculate_TESSmag(
             self.lc[method]["flux"],
             self.lc[method]["flux_err"],
-            self.lc[method]["flux_fraction"]
-            if method == "aperture" and self.ap_method == "prf"
-            else np.ones_like(self.lc[method]["flux"]),
+            np.ones_like(self.lc[method]["flux"]),
         )
 
     def _psf_photometry(
@@ -2485,7 +2479,7 @@ class MovingTPF:
 
         Returns:
         --------
-        time, time_uerr, time_lerr, time_corr, cadenceno, flux, flux_err, red_chi2, spoc_quality, n_cadences, qual_frac, prf_nan_mask, pixel_mask, pixel_quality, bg_std, bg_mad: ndarrays
+        time, time_uerr, time_lerr, time_corr, cadenceno, flux, flux_err, red_chi2, spoc_quality, n_cadences, qual_frac, prf_nan_mask, bg_std, bg_mad, pixel_mask, pixel_quality: ndarrays
 
             - `time` is the average time in the binning window.
             - `time_uerr`/`time_lerr` are the upper/lower error on time (corresponds to limits of binning window).
@@ -2499,10 +2493,10 @@ class MovingTPF:
             - `qual_frac` is the average fraction of flux in the PRF model that falls on good quality pixels (`self.pixel_quality` = 0).
             - `prf_nan_mask` is a mask to identify cadences where the PRF model contained NaNs and was replaced with model from the
                 preceding/following frame.
-            - `pixel_mask` identifies pixels used for PRF fitting in each binning window.
-            - `pixel_quality` is the quality of the pixels in the binning window. It has the same shape as `pixel_mask`.
             - `bg_std` is the standad deviation of the background pixels (where PRF model < 0.1%) in each binning window.
             - `bg_mad` is the median absolute deviation of background pixels (where PRF model < 0.1%) in each binning window.
+            - `pixel_mask` identifies pixels used for PRF fitting in each binning window.
+            - `pixel_quality` is the quality of the pixels in the binning window. It has the same shape as `pixel_mask`.
             Note: if `time_bin_size = None` then `time`, `time_corr`, `cadenceno` and `spoc_quality` are equal to
             `self.time`, `self.timecorr`, `self.cadence_number` and `self.quality`, respectively.
         bad_spoc_bits : list or str
@@ -2544,6 +2538,8 @@ class MovingTPF:
                 "During PSF photometry, all times were masked and no PSF light curve was derived."
             )
             return (
+                np.array([]),
+                np.array([]),
                 np.array([]),
                 np.array([]),
                 np.array([]),
@@ -2606,8 +2602,6 @@ class MovingTPF:
         psf_phot = []
         pixel_masks = []
         pixel_qualities = []
-        bg_std = []
-        bg_mad = []
         nfails = 0
 
         # Iterate over each binning window to compute PSF photometry
@@ -2629,8 +2623,8 @@ class MovingTPF:
             # This value is small to include all pixels where the PRF has contribution.
             pixel_masks.append(
                 np.logical_and(
-                    np.isfinite(f),
-                    np.logical_and(np.isfinite(fe), (p > 0.00001)),
+                    p > 0.00001,
+                    np.logical_and(np.isfinite(f), np.isfinite(fe)),
                 )
             )
             j = pixel_masks[-1].ravel()
@@ -2646,8 +2640,8 @@ class MovingTPF:
                     message="Degrees of freedom <= 0 for slice.",
                     category=RuntimeWarning,
                 )
-                bg_std.append(np.nanstd(f[bg_mask], ddof=1))
-            bg_mad.append(stats.median_abs_deviation(f[bg_mask], nan_policy="omit"))
+                bg_std = np.nanstd(f[bg_mask], ddof=1)
+            bg_mad = stats.median_abs_deviation(f[bg_mask], nan_policy="omit")
 
             # Derive SPOC quality value in window
             qual = 0
@@ -2708,6 +2702,8 @@ class MovingTPF:
                         len(bdx),
                         qual_frac,
                         pn.any(),
+                        bg_std,
+                        bg_mad,
                     ]
                 )
 
@@ -2727,6 +2723,8 @@ class MovingTPF:
                         len(bdx),
                         qual_frac,
                         pn.any(),
+                        bg_std,
+                        bg_mad,
                     ]
                 )
                 nfails += 1
@@ -2750,6 +2748,8 @@ class MovingTPF:
             n_cadences,
             qual_frac,
             prf_nan_mask,
+            bg_std,
+            bg_mad,
         ) = np.asarray(psf_phot).T
 
         return (
@@ -2765,10 +2765,10 @@ class MovingTPF:
             n_cadences.astype(int),
             qual_frac,
             prf_nan_mask,
+            bg_std,
+            bg_mad,
             pixel_masks,
             pixel_qualities,
-            np.asarray(bg_std),
-            np.asarray(bg_mad),
             bad_spoc_bits,
         )
 
@@ -2797,8 +2797,8 @@ class MovingTPF:
             - bg_mad: median absolute deviation of background pixels (where PRF model < 0.1%)
 
             The row and column centroids are one-indexed and correspond to the position in the full FFI, where the
-            lower left pixel has the value (1,1). `flux_fraction`, `bg_std` and `bg_mad` will be nan unless `prf` aperture is used.
-            If `prf` aperture is used, `ap_flux` is corrected using `flux_fraction` to represent 100% of the target's flux.
+            lower left pixel has the value (1,1).
+            `ap_flux` is corrected using `flux_fraction` to represent 100% of the target's flux.
         """
 
         if (
@@ -2811,6 +2811,10 @@ class MovingTPF:
             raise AttributeError(
                 "Must run `get_data()`, `reshape_data()`, `background_correction()`, `create_pixel_quality()` and `create_aperture()` before doing aperture photometry."
             )
+
+        # Get target's PRF model.
+        if not hasattr(self, "prf_model"):
+            self.prf_model, self.ap_prf_nan_mask = self._create_target_prf_model()
 
         # Compute `value` to mask bad bits.
         self.bad_bit_value = 0
@@ -2854,44 +2858,34 @@ class MovingTPF:
                 ap_bg_err[-1] = np.nan
 
             # Compute fraction of PRF model flux inside aperture, excluding bad_bits.
-            # If aperture method is not `prf`, this will be nan.
-            if self.ap_method == "prf":
-                flux_fraction.append(np.nansum(self.prf_model[t][mask[-1]]))
+            flux_fraction.append(np.nansum(self.prf_model[t][mask[-1]]))
 
-                # Uncertain when this occurs - PRF model should not contain NaNs.
-                if np.isnan(self.prf_model[t][mask[-1]]).all():
-                    flux_fraction[-1] = np.nan
+            # PRF model should not contain NaNs, but have this catch here just in case.
+            if np.isnan(self.prf_model[t][mask[-1]]).all():
+                flux_fraction[-1] = np.nan
 
-                # Correct flux to represent 100% of target's flux.
-                ap_flux[-1] /= flux_fraction[-1]
-                ap_flux_err[-1] /= flux_fraction[-1]
-
-            else:
-                flux_fraction.append(np.nan)
+            # Correct flux to represent 100% of target's flux.
+            ap_flux[-1] /= flux_fraction[-1]
+            ap_flux_err[-1] /= flux_fraction[-1]
 
             # Compute standard deviation and MAD for BG pixels (PRF model < 0.1%).
-            # If aperture method is not `prf`, these will be nan.
-            if self.ap_method == "prf":
-                bg_mask = np.logical_and(
-                    self.prf_model[t] < 0.001,
-                    self.pixel_quality[t] & self.bad_bit_value == 0,
+            bg_mask = np.logical_and(
+                self.prf_model[t] < 0.001,
+                self.pixel_quality[t] & self.bad_bit_value == 0,
+            )
+            # Catch warnings that arise because of nan pixels.
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message="Degrees of freedom <= 0 for slice.",
+                    category=RuntimeWarning,
                 )
-                # Catch warnings that arise because of nan pixels.
-                with warnings.catch_warnings():
-                    warnings.filterwarnings(
-                        "ignore",
-                        message="Degrees of freedom <= 0 for slice.",
-                        category=RuntimeWarning,
-                    )
-                    bg_std.append(np.nanstd(self.corr_flux[t][bg_mask], ddof=1))
-                bg_mad.append(
-                    stats.median_abs_deviation(
-                        self.corr_flux[t][bg_mask], nan_policy="omit"
-                    )
+                bg_std.append(np.nanstd(self.corr_flux[t][bg_mask], ddof=1))
+            bg_mad.append(
+                stats.median_abs_deviation(
+                    self.corr_flux[t][bg_mask], nan_policy="omit"
                 )
-            else:
-                bg_std.append(np.nan)
-                bg_mad.append(np.nan)
+            )
 
         # Compute flux-weighted centroid inside aperture
         # These values are zero-indexed i.e. lower left pixel in TPF is (0,0).
@@ -2951,7 +2945,6 @@ class MovingTPF:
         5  - at least one pixel inside mask is 4-adjacent to a saturated pixel.
         6  - all pixels inside aperture are `bad_bits`. Only relevant if `method=aperture`.
         7  - PRF model contained nans.
-             If `method=aperture`, only relevant if `prf` aperture was used.
         8  - at least one pixel inside mask does not have scattered light correction.
              Only relevant if `linear_model` background correction was used.
         9  - at least one pixel inside mask had no star model (value is nan).
@@ -3063,7 +3056,6 @@ class MovingTPF:
                 else np.zeros(len(pixel_mask), dtype=bool),
             },
             # PRF model contained nans and was replaced with preceding/following frame.
-            # If `method=aperture`, this is only relevant if the `prf` aperture was used.
             "prf_nan_mask": {"bit": 7, "value": prf_nan_mask},
             # Pixel in mask with no scattered light correction
             # Only relevant if `linear_model` background correction was used.
@@ -3852,8 +3844,7 @@ class MovingTPF:
                 if "aperture" in self.lc
                 else np.full(len(self.time), np.nan),
             ),
-            # Fraction of PRF model flux inside aperture. If `prf`
-            # aperture was not used, this will be nan.
+            # Fraction of PRF model flux inside aperture.
             fits.Column(
                 name="FLUX_FRACTION",
                 format="E",
@@ -3871,8 +3862,7 @@ class MovingTPF:
                 if "aperture" in self.lc
                 else np.full(len(self.time), np.nan),
             ),
-            # Standard deviation of background pixels. If `prf`
-            # aperture was not used, this will be nan.
+            # Standard deviation of background pixels.
             fits.Column(
                 name="BKG_STD",
                 format="E",
@@ -3881,8 +3871,7 @@ class MovingTPF:
                 if "aperture" in self.lc
                 else np.full(len(self.time), np.nan),
             ),
-            # Median absolute deviation of background pixels. If `prf`
-            # aperture was not used, this will be nan.
+            # Median absolute deviation of background pixels.
             fits.Column(
                 name="BKG_MAD",
                 format="E",
