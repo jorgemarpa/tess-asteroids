@@ -2647,9 +2647,7 @@ class MovingTPF:
                     category=RuntimeWarning,
                 )
                 bg_std.append(np.nanstd(f[bg_mask], ddof=1))
-            bg_mad.append(
-                stats.median_abs_deviation(f[bg_mask], nan_policy="omit")
-            )
+            bg_mad.append(stats.median_abs_deviation(f[bg_mask], nan_policy="omit"))
 
             # Derive SPOC quality value in window
             qual = 0
@@ -2767,8 +2765,8 @@ class MovingTPF:
             n_cadences.astype(int),
             qual_frac,
             prf_nan_mask,
-            np.asarray(pixel_masks),
-            np.asarray(pixel_qualities),
+            pixel_masks,
+            pixel_qualities,
             np.asarray(bg_std),
             np.asarray(bg_mad),
             bad_spoc_bits,

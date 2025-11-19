@@ -442,6 +442,7 @@ def test_to_lightcurve_psf():
     assert len(target.lc["psf"]["TESSmag"]) == len(target.time)
     assert len(target.lc["psf"]["TESSmag_err"]) == len(target.time)
     assert len(target.lc["psf"]["quality"]) == len(target.time)
+    assert len(target.lc["psf"]["bg_std"]) == len(target.time)
 
     # Check the upper and lower errors are nan
     assert np.isnan(target.lc["psf"]["time_uerr"]).all()
@@ -471,6 +472,7 @@ def test_to_lightcurve_psf():
     assert len(target.lc["psf"]["TESSmag"]) < len(target.time)
     assert len(target.lc["psf"]["TESSmag_err"]) < len(target.time)
     assert len(target.lc["psf"]["quality"]) < len(target.time)
+    assert len(target.lc["psf"]["bg_std"]) < len(target.time)
 
     # Check the upper and lower errors are not nan
     assert ~np.isnan(target.lc["psf"]["time_uerr"]).all()
