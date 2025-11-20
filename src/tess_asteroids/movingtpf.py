@@ -3866,6 +3866,7 @@ class MovingTPF:
             fits.Column(
                 name="BKG_STD",
                 format="E",
+                unit="e-/s",
                 disp="E14.7",
                 array=self.lc["aperture"]["bg_std"]
                 if "aperture" in self.lc
@@ -3875,6 +3876,7 @@ class MovingTPF:
             fits.Column(
                 name="BKG_MAD",
                 format="E",
+                unit="e-/s",
                 disp="E14.7",
                 array=self.lc["aperture"]["bg_mad"]
                 if "aperture" in self.lc
@@ -4072,6 +4074,7 @@ class MovingTPF:
                 fits.Column(
                     name="BKG_STD",
                     format="E",
+                    unit="e-/s",
                     disp="E14.7",
                     array=self.lc["psf"]["bg_std"],
                 ),
@@ -4079,6 +4082,7 @@ class MovingTPF:
                 fits.Column(
                     name="BKG_MAD",
                     format="E",
+                    unit="e-/s",
                     disp="E14.7",
                     array=self.lc["psf"]["bg_mad"],
                 ),
