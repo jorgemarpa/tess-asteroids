@@ -3101,7 +3101,9 @@ class MovingTPF:
 
         # Make HDUList
         if file_type == "tpf":
-            self.tpf_hdulist = self._make_tpf_hdulist()
+            self.tpf_hdulist = self._make_tpf_hdulist(
+                ap_masks=[self.aperture_mask], ap_methods=[self.ap_method]
+            )
         elif file_type == "lc":
             self.lc_hdulist = self._make_lc_hdulist()
         else:
@@ -3118,269 +3120,7 @@ class MovingTPF:
                 file_name=file_name,
             )
 
-    def _make_primary_hdu(self, file_type: str):
-        """
-        Make primary header for moving TPF and LCF. Initialises using tesscube
-        and updates/adds keywords, e.g. properties of target, settings used to create files.
-
-        Parameters
-        ----------
-        file_type : str
-            Type of file to create a primary HDU for. One of ['tpf', 'lc'].
-
-        Returns
-        -------
-        hdulist : astropy.io.fits.PrimaryHDU
-            Primary HDU to use in moving TPF or lightcurve file.
-        """
-
-        # Attribute checks
-        if file_type == "tpf":
-            if (
-                not hasattr(self, "time")
-                or not hasattr(self, "bg_method")
-                or not hasattr(self, "ap_method")
-            ):
-                raise AttributeError(
-                    "Must run `get_data()`, `background_correction()` and `create_aperture()` before creating primary header for TPF."
-                )
-        elif file_type == "lc":
-            if not hasattr(self, "time") or not hasattr(self, "bg_method"):
-                raise AttributeError(
-                    "Must run `get_data()` and `background_correction()` before creating primary header for LCF."
-                )
-        else:
-            raise ValueError(
-                f"`file_type` must be one of: ['tpf', 'lc']. Not '{file_type}'"
-            )
-
-        # Get primary hdu from tesscube
-        hdu = self.cube.output_primary_ext.copy()
-
-        # Remove TESSMAG keyword
-        hdu.header.remove("TESSMAG")
-
-        # Update existing keywords
-        hdu.header.set("DATE", datetime.now().strftime("%Y-%m-%d"))
-        hdu.header.set(
-            "TSTART",
-            self.time[0],
-            comment="observation start time in BTJD of first frame",
-        )
-        hdu.header.set(
-            "TSTOP",
-            self.time[-1],
-            comment="observation start time in BTJD of last frame",
-        )
-        hdu.header.set(
-            "DATE-OBS", Time(self.time[0] + 2457000, scale="tdb", format="jd").utc.isot
-        )
-        hdu.header.set(
-            "DATE-END", Time(self.time[-1] + 2457000, scale="tdb", format="jd").utc.isot
-        )
-        hdu.header.set("CREATOR", "tess-asteroids")
-        hdu.header.set("PROCVER", __version__)
-        hdu.header.set("DATA_REL", comment="SPOC data release version number")
-        hdu.header.set("OBJECT", self.target, comment="object name")
-
-        # Add keywords from original FFI header
-        hdu.header.set(
-            "SPOCDATE",
-            self.primary_hdu["DATE"],
-            comment="original SPOC FFI creation date",
-            after="ORIGIN",
-        )
-        hdu.header.set(
-            "SPOCVER",
-            self.primary_hdu["PROCVER"],
-            comment="SPOC version that processed FFI data",
-            after="SPOCDATE",
-        )
-
-        # Add keywords to describe how file was created
-        hdu.header.set(
-            "SHAPE",
-            "({0},{1})".format(*self.shape),
-            comment="shape of TPF (row, column)",
-            after="CCD",
-        )
-        hdu.header.set(
-            "BAD_SPOC",
-            f"{','.join([str(bit) for bit in self.bad_spoc_bits])}"
-            if isinstance(self.bad_spoc_bits, list)
-            else self.bad_spoc_bits,
-            comment="bad quality SPOC bits for BG correction",
-            after="SHAPE",
-        )
-        hdu.header.set(
-            "BG_CORR",
-            self.bg_method,
-            comment="method used for BG correction",
-            after="BAD_SPOC",
-        )
-        hdu.header.set(
-            "SL_CORR",
-            self.sl_method,
-            comment="method used for scattered light correction",
-            after="BG_CORR",
-        )
-
-        # Add TESS magnitude zero-point to LCF
-        if file_type == "lc":
-            hdu.header.set(
-                "TESSMAG0",
-                round(TESSmag_zero_point, 3),
-                comment="[mag] TESS zero-point magnitude",
-                after="SL_CORR",
-            )
-
-        # Add aperture information to TPF
-        if file_type == "tpf":
-            hdu.header.set(
-                "AP_TYPE",
-                self.ap_method,
-                comment="method used to create aperture",
-                after="SL_CORR",
-            )
-            hdu.header.set(
-                "AP_NPIX",
-                np.nanmedian([np.nansum(mask) for mask in self.aperture_mask]),
-                comment="average number of pixels in aperture",
-                after="AP_TYPE",
-            )
-
-        # Add keywords for object properties
-        hdu.header.set(
-            "VMAG",
-            round(
-                np.nanmean(
-                    self.ephem.loc[
-                        np.logical_and(
-                            self.ephem["time"]
-                            >= (
-                                self.time_original[0]
-                                if self.barycentric
-                                else self.time_original[0] - self.timecorr_original[0]
-                            ),
-                            self.ephem["time"]
-                            <= (
-                                self.time_original[-1]
-                                if self.barycentric
-                                else self.time_original[-1] - self.timecorr_original[-1]
-                            ),
-                        ),
-                        "vmag",
-                    ]
-                ),
-                3,
-            )
-            if "vmag" in self.ephem
-            else 0.0,
-            comment="[mag] predicted V magnitude",
-            after="TICVER",
-        )
-        hdu.header.set(
-            "HMAG",
-            round(
-                np.nanmean(
-                    self.ephem.loc[
-                        np.logical_and(
-                            self.ephem["time"]
-                            >= (
-                                self.time_original[0]
-                                if self.barycentric
-                                else self.time_original[0] - self.timecorr_original[0]
-                            ),
-                            self.ephem["time"]
-                            <= (
-                                self.time_original[-1]
-                                if self.barycentric
-                                else self.time_original[-1] - self.timecorr_original[-1]
-                            ),
-                        ),
-                        "hmag",
-                    ]
-                ),
-                3,
-            )
-            if "hmag" in self.ephem and ~np.isnan(self.ephem["hmag"]).all()
-            else 0.0,
-            comment="[mag] H absolute magnitude",
-            after="VMAG",
-        )
-        hdu.header.set(
-            "PERIHEL",
-            round(self.peri, 3) if hasattr(self, "peri") else 0.0,
-            comment="[AU] perihelion distance",
-            after="HMAG",
-        )
-        hdu.header.set(
-            "ORBECC",
-            round(self.ecc, 3) if hasattr(self, "ecc") else 0.0,
-            comment="orbit eccentricity",
-            after="PERIHEL",
-        )
-        hdu.header.set(
-            "ORBINC",
-            round(self.inc, 3) if hasattr(self, "inc") else 0.0,
-            comment="[deg] orbit inclination",
-            after="ORBECC",
-        )
-
-        # RA and Dec rates are computed from predicted coordinates so TPF and LCF can use
-        # consistent values.
-        # Use np.unwrap() for RA to ensure angles correctly wrap at 0/360.
-        hdu.header.set(
-            "RARATE",
-            round(
-                np.nanmean(
-                    np.gradient(
-                        np.unwrap(
-                            [coord.ra.value for coord in self.coords], period=360
-                        ),
-                        self.time,
-                    )
-                    * 3600
-                    / 24
-                ),
-                3,
-            ),
-            comment="[arcsec/h] average RA rate",
-            after="ORBINC",
-        )
-        hdu.header.set(
-            "DECRATE",
-            round(
-                np.nanmean(
-                    np.gradient([coord.dec.value for coord in self.coords], self.time)
-                    * 3600
-                    / 24
-                ),
-                3,
-            ),
-            comment="[arcsec/h] average Dec rate",
-            after="RARATE",
-        )
-        # Pixel speed is computed from input ephemeris so TPF and LCF can use consistent values.
-        hdu.header.set(
-            "PIXVEL",
-            round(
-                np.nanmean(
-                    np.hypot(
-                        np.gradient(self.ephemeris[:, 0], self.time),
-                        np.gradient(self.ephemeris[:, 1], self.time),
-                    )
-                    / 24
-                ),
-                3,
-            ),
-            comment="[pix/h] average speed",
-            after="DECRATE",
-        )
-
-        return hdu
-
-    def _make_tpf_hdulist(self):
+    def _make_tpf_hdulist(self, ap_masks: list, ap_methods: list):
         """
         Make HDUList for moving TPF, using similar format to SPOC.
 
@@ -3400,19 +3140,21 @@ class MovingTPF:
             or not hasattr(self, "pixel_quality")
         ):
             raise AttributeError(
-                "Must run `get_data()`, `reshape_data()`, `background_correction()`, `create_pixel_quality()` and `create_aperture()` before saving TPF."
+                "Must run `get_data()`, `reshape_data()`, `background_correction()`, `create_pixel_quality()` and `create_aperture()` before creating TPF HDUList."
             )
 
         # Compute WCS header
         wcs_header = make_wcs_header(self.shape)
+
+        # Compute form and dimensions
+        tform = str(self.corr_flux[0].size) + "E"
+        dims = str(self.corr_flux[0].shape[::-1])
 
         # Offset between expected target position and center of TPF
         pos_corr1 = self.ephemeris[:, 1] - self.corner[:, 1] - 0.5 * (self.shape[1] - 1)
         pos_corr2 = self.ephemeris[:, 0] - self.corner[:, 0] - 0.5 * (self.shape[0] - 1)
 
         # Define SPOC-like FITS columns
-        tform = str(self.corr_flux[0].size) + "E"
-        dims = str(self.corr_flux[0].shape[::-1])
         cols = [
             # Times in TDB at SS barycenter.
             fits.Column(
@@ -3511,22 +3253,19 @@ class MovingTPF:
         )
         table_hdu_spoc.header["EXTNAME"] = "PIXELS"
 
-        # Create HDU containing average aperture
+        # Create image HDU containing average aperture.
         # Aperture has values 0 and 2, where 0/2 indicates the pixel is outside/inside the aperture.
         # This format is used to be consistent with the aperture HDU from SPOC.
         aperture_hdu_average = fits.ImageHDU(
-            data=np.nanmedian(self.aperture_mask, axis=0).astype("int32") * 2,
+            data=[
+                np.nanmedian(ap_mask, axis=0).astype("int32") * 2
+                for ap_mask in ap_masks
+            ],
             header=fits.Header(
                 [*self.cube.output_secondary_header.cards, *wcs_header.cards]
             ),
         )
         aperture_hdu_average.header["EXTNAME"] = "APERTURE"
-        aperture_hdu_average.header.set(
-            "NPIXSAP", None, "Number of pixels in optimal aperture"
-        )
-        aperture_hdu_average.header.set(
-            "NPIXMISS", None, "Number of op. aperture pixels not collected"
-        )
 
         # Define extra FITS columns
         cols = [
@@ -3585,16 +3324,20 @@ class MovingTPF:
                 disp="B16.16",
                 array=self.pixel_quality,
             ),
+        ]
+
+        for i, ap_mask in enumerate(ap_masks):
             # Aperture as a function of time.
             # Aperture has values 0 and 2, where 0/2 indicates the pixel is outside/inside the aperture.
             # This format is used to be consistent with the aperture HDU from SPOC.
-            fits.Column(
-                name="APERTURE",
-                format=tform.replace("E", "J"),
-                dim=dims,
-                array=self.aperture_mask.astype("int32") * 2,
-            ),
-        ]
+            cols.append(
+                fits.Column(
+                    name="APERTURE{0}".format(i if len(ap_masks) > 1 else ""),
+                    format=tform.replace("E", "J"),
+                    dim=dims,
+                    array=ap_mask.astype("int32") * 2,
+                ),
+            )
 
         # Create table HDU for extra columns
         table_hdu_extra = fits.BinTableHDU.from_columns(cols)
@@ -3603,7 +3346,9 @@ class MovingTPF:
         # Return hdulist
         return fits.HDUList(
             [
-                self._make_primary_hdu(file_type="tpf"),
+                self._make_primary_hdu(
+                    file_type="tpf", ap_masks=ap_masks, ap_methods=ap_methods
+                ),
                 table_hdu_spoc,
                 aperture_hdu_average,
                 table_hdu_extra,
@@ -4084,6 +3829,264 @@ class MovingTPF:
 
         # Return hdulist
         return fits.HDUList([self._make_primary_hdu(file_type="lc"), table_hdu_ap])
+
+    def _make_primary_hdu(
+        self, file_type: str, ap_masks: list = [], ap_methods: list = []
+    ):
+        """
+        Make primary header for moving TPF and LCF. Initialises using tesscube
+        and updates/adds keywords, e.g. properties of target, settings used to create files.
+
+        Parameters
+        ----------
+        file_type : str
+            Type of file to create a primary HDU for. One of ['tpf', 'lc'].
+
+        Returns
+        -------
+        hdulist : astropy.io.fits.PrimaryHDU
+            Primary HDU to use in moving TPF or lightcurve file.
+        """
+
+        # Attribute checks
+        if file_type in ["tpf", "lc"]:
+            if not hasattr(self, "time") or not hasattr(self, "bg_method"):
+                raise AttributeError(
+                    "Must run `get_data()` and `background_correction()` before creating primary header for {0}".format(
+                        file_type.upper()
+                    )
+                )
+        else:
+            raise ValueError(
+                f"`file_type` must be one of: ['tpf', 'lc']. Not '{file_type}'"
+            )
+
+        # Get primary hdu from tesscube
+        hdu = self.cube.output_primary_ext.copy()
+
+        # Remove TESSMAG keyword
+        hdu.header.remove("TESSMAG")
+
+        # Update existing keywords
+        hdu.header.set("DATE", datetime.now().strftime("%Y-%m-%d"))
+        hdu.header.set(
+            "TSTART",
+            self.time[0],
+            comment="observation start time in BTJD of first frame",
+        )
+        hdu.header.set(
+            "TSTOP",
+            self.time[-1],
+            comment="observation start time in BTJD of last frame",
+        )
+        hdu.header.set(
+            "DATE-OBS", Time(self.time[0] + 2457000, scale="tdb", format="jd").utc.isot
+        )
+        hdu.header.set(
+            "DATE-END", Time(self.time[-1] + 2457000, scale="tdb", format="jd").utc.isot
+        )
+        hdu.header.set("CREATOR", "tess-asteroids")
+        hdu.header.set("PROCVER", __version__)
+        hdu.header.set("DATA_REL", comment="SPOC data release version number")
+        hdu.header.set("OBJECT", self.target, comment="object name")
+
+        # Add keywords from original FFI header
+        hdu.header.set(
+            "SPOCDATE",
+            self.primary_hdu["DATE"],
+            comment="original SPOC FFI creation date",
+            after="ORIGIN",
+        )
+        hdu.header.set(
+            "SPOCVER",
+            self.primary_hdu["PROCVER"],
+            comment="SPOC version that processed FFI data",
+            after="SPOCDATE",
+        )
+
+        # Add keywords to describe how file was created
+        hdu.header.set(
+            "SHAPE",
+            "({0},{1})".format(*self.shape),
+            comment="shape of TPF (row, column)",
+            after="CCD",
+        )
+        hdu.header.set(
+            "BAD_SPOC",
+            f"{','.join([str(bit) for bit in self.bad_spoc_bits])}"
+            if isinstance(self.bad_spoc_bits, list)
+            else self.bad_spoc_bits,
+            comment="bad quality SPOC bits for BG correction",
+            after="SHAPE",
+        )
+        hdu.header.set(
+            "BG_CORR",
+            self.bg_method,
+            comment="method used for BG correction",
+            after="BAD_SPOC",
+        )
+        hdu.header.set(
+            "SL_CORR",
+            self.sl_method,
+            comment="method used for scattered light correction",
+            after="BG_CORR",
+        )
+
+        # Add TESS magnitude zero-point to LCF
+        if file_type == "lc":
+            hdu.header.set(
+                "TESSMAG0",
+                round(TESSmag_zero_point, 3),
+                comment="[mag] TESS zero-point magnitude",
+                after="SL_CORR",
+            )
+
+        # Add aperture information to TPF
+        if file_type == "tpf":
+            for i in range(len(ap_masks)):
+                hdu.header.set(
+                    "AP{0}_TYPE".format(i if len(ap_masks) > 1 else ""),
+                    ap_methods[i],
+                    comment="method used to create aperture",
+                    after="SL_CORR" if i == 0 else "AP{0}_NPIX".format(i - 1),
+                )
+                hdu.header.set(
+                    "AP{0}_NPIX".format(i if len(ap_masks) > 1 else ""),
+                    np.nanmedian([np.nansum(mask) for mask in ap_masks[i]]),
+                    comment="average number of pixels in aperture",
+                    after="AP{0}_TYPE".format(i if len(ap_masks) > 1 else ""),
+                )
+
+        # Add keywords for object properties
+        hdu.header.set(
+            "VMAG",
+            round(
+                np.nanmean(
+                    self.ephem.loc[
+                        np.logical_and(
+                            self.ephem["time"]
+                            >= (
+                                self.time_original[0]
+                                if self.barycentric
+                                else self.time_original[0] - self.timecorr_original[0]
+                            ),
+                            self.ephem["time"]
+                            <= (
+                                self.time_original[-1]
+                                if self.barycentric
+                                else self.time_original[-1] - self.timecorr_original[-1]
+                            ),
+                        ),
+                        "vmag",
+                    ]
+                ),
+                3,
+            )
+            if "vmag" in self.ephem
+            else 0.0,
+            comment="[mag] predicted V magnitude",
+            after="TICVER",
+        )
+        hdu.header.set(
+            "HMAG",
+            round(
+                np.nanmean(
+                    self.ephem.loc[
+                        np.logical_and(
+                            self.ephem["time"]
+                            >= (
+                                self.time_original[0]
+                                if self.barycentric
+                                else self.time_original[0] - self.timecorr_original[0]
+                            ),
+                            self.ephem["time"]
+                            <= (
+                                self.time_original[-1]
+                                if self.barycentric
+                                else self.time_original[-1] - self.timecorr_original[-1]
+                            ),
+                        ),
+                        "hmag",
+                    ]
+                ),
+                3,
+            )
+            if "hmag" in self.ephem and ~np.isnan(self.ephem["hmag"]).all()
+            else 0.0,
+            comment="[mag] H absolute magnitude",
+            after="VMAG",
+        )
+        hdu.header.set(
+            "PERIHEL",
+            round(self.peri, 3) if hasattr(self, "peri") else 0.0,
+            comment="[AU] perihelion distance",
+            after="HMAG",
+        )
+        hdu.header.set(
+            "ORBECC",
+            round(self.ecc, 3) if hasattr(self, "ecc") else 0.0,
+            comment="orbit eccentricity",
+            after="PERIHEL",
+        )
+        hdu.header.set(
+            "ORBINC",
+            round(self.inc, 3) if hasattr(self, "inc") else 0.0,
+            comment="[deg] orbit inclination",
+            after="ORBECC",
+        )
+
+        # RA and Dec rates are computed from predicted coordinates so TPF and LCF can use
+        # consistent values.
+        # Use np.unwrap() for RA to ensure angles correctly wrap at 0/360.
+        hdu.header.set(
+            "RARATE",
+            round(
+                np.nanmean(
+                    np.gradient(
+                        np.unwrap(
+                            [coord.ra.value for coord in self.coords], period=360
+                        ),
+                        self.time,
+                    )
+                    * 3600
+                    / 24
+                ),
+                3,
+            ),
+            comment="[arcsec/h] average RA rate",
+            after="ORBINC",
+        )
+        hdu.header.set(
+            "DECRATE",
+            round(
+                np.nanmean(
+                    np.gradient([coord.dec.value for coord in self.coords], self.time)
+                    * 3600
+                    / 24
+                ),
+                3,
+            ),
+            comment="[arcsec/h] average Dec rate",
+            after="RARATE",
+        )
+        # Pixel speed is computed from input ephemeris so TPF and LCF can use consistent values.
+        hdu.header.set(
+            "PIXVEL",
+            round(
+                np.nanmean(
+                    np.hypot(
+                        np.gradient(self.ephemeris[:, 0], self.time),
+                        np.gradient(self.ephemeris[:, 1], self.time),
+                    )
+                    / 24
+                ),
+                3,
+            ),
+            comment="[pix/h] average speed",
+            after="DECRATE",
+        )
+
+        return hdu
 
     def _save_hdulist(
         self,
