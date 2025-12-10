@@ -1,5 +1,6 @@
 import time
 import warnings
+from copy import deepcopy
 from datetime import datetime
 from typing import Optional, Tuple, Union
 
@@ -2756,7 +2757,6 @@ class MovingTPF:
         bad_bit_value = 0
         for bit in bad_bits:
             bad_bit_value += 2 ** (bit - 1)
-        self.bad_bits = ",".join([str(bit) for bit in bad_bits])
 
         mask = []
         ap_flux = []
@@ -2869,6 +2869,9 @@ class MovingTPF:
             "bg_mad": np.asarray(bg_mad),
             "ra": [coord.ra.value for coord in measured_coords],
             "dec": [coord.dec.value for coord in measured_coords],
+            "ap_mask": self.aperture_mask,
+            "ap_method": self.ap_method,
+            "bad_bits": ",".join([str(bit) for bit in bad_bits]),
         }
 
     def _create_lc_quality(
@@ -3101,11 +3104,21 @@ class MovingTPF:
 
         # Make HDUList
         if file_type == "tpf":
+            if not hasattr(self, "aperture_mask"):
+                raise AttributeError(
+                    "Must run `create_aperture()` before creating TPF HDUList."
+                )
+
             self.tpf_hdulist = self._make_tpf_hdulist(
                 ap_masks=[self.aperture_mask], ap_methods=[self.ap_method]
             )
         elif file_type == "lc":
-            self.lc_hdulist = self._make_lc_hdulist()
+            if not hasattr(self, "lc"):
+                raise AttributeError(
+                    "Must run `to_lightcurve()` before creating LCF HDUList."
+                )
+
+            self.lc_hdulist = self._make_lc_hdulist(lc=deepcopy(self.lc))
         else:
             raise ValueError(
                 f"`file_type` must be one of: ['tpf', 'lc']. Not '{file_type}'"
@@ -3355,7 +3368,7 @@ class MovingTPF:
             ]
         )
 
-    def _make_lc_hdulist(self):
+    def _make_lc_hdulist(self, lc: dict):
         """
         Make HDUList for lightcurve file. This includes a separate HDU for aperture and PSF photometry.
 
@@ -3369,11 +3382,372 @@ class MovingTPF:
         """
 
         # Attribute checks
-        if not hasattr(self, "lc") or len(self.lc) == 0:
-            raise AttributeError("Must run `to_lightcurve()` before saving LC.")
+        if len(lc) == 0:
+            raise AttributeError("Must have at least one lightcurve in `lc`.")
 
-        # Define columns for aperture lightcurve
-        cols_ap = [
+        # Initialize overall HDUList
+        table_hdu = [self._make_primary_hdu(file_type="lc")]
+
+        # Ensure aperture is at least 1D
+        if "aperture" in lc:
+            lc["aperture"] = np.atleast_1d(lc["aperture"])
+        else:
+            lc["aperture"] = []
+
+        # Create HDU for each aperature
+        for i, ap_lc in enumerate(lc["aperture"]):
+            cols_ap = [
+                # Times in TDB at SS barycenter.
+                fits.Column(
+                    name="TIME",
+                    format="D",
+                    unit="BJD - 2457000, days",
+                    disp="D14.7",
+                    array=self.time,
+                ),
+                # Cadence number, as defined by tesscube.
+                fits.Column(name="CADENCENO", format="I", array=self.cadence_number),
+                # SPOC quality flag
+                fits.Column(
+                    name="QUALITY",
+                    format="J",
+                    disp="B16.16",
+                    array=self.quality,
+                ),
+                # --------------
+                # Aperture photometry
+                # Sum of flux inside aperture and err
+                fits.Column(
+                    name="FLUX",
+                    format="E",
+                    unit="e-/s",
+                    disp="E14.7",
+                    array=ap_lc["flux"],
+                ),
+                fits.Column(
+                    name="FLUX_ERR",
+                    format="E",
+                    unit="e-/s",
+                    disp="E14.7",
+                    array=ap_lc["flux_err"],
+                ),
+                # TESS magnitude and error
+                fits.Column(
+                    name="TESSMAG",
+                    format="E",
+                    unit="mag",
+                    disp="E14.7",
+                    array=ap_lc["TESSmag"],
+                ),
+                fits.Column(
+                    name="TESSMAG_ERR",
+                    format="E",
+                    unit="mag",
+                    disp="E14.7",
+                    array=ap_lc["TESSmag_err"],
+                ),
+                # Sum of BG flux inside aperture and err
+                fits.Column(
+                    name="FLUX_BKG",
+                    format="E",
+                    unit="e-/s",
+                    disp="E14.7",
+                    array=ap_lc["bg"],
+                ),
+                fits.Column(
+                    name="FLUX_BKG_ERR",
+                    format="E",
+                    unit="e-/s",
+                    disp="E14.7",
+                    array=ap_lc["bg_err"],
+                ),
+                # Measured column centroid and err
+                fits.Column(
+                    name="MOM_CENTR1",
+                    format="E",
+                    unit="pixel",
+                    disp="E14.7",
+                    array=ap_lc["col_cen"],
+                ),
+                fits.Column(
+                    name="MOM_CENTR1_ERR",
+                    format="E",
+                    unit="pixel",
+                    disp="E14.7",
+                    array=ap_lc["col_cen_err"],
+                ),
+                # Measured row centroid and err
+                fits.Column(
+                    name="MOM_CENTR2",
+                    format="E",
+                    unit="pixel",
+                    disp="E14.7",
+                    array=ap_lc["row_cen"],
+                ),
+                fits.Column(
+                    name="MOM_CENTR2_ERR",
+                    format="E",
+                    unit="pixel",
+                    disp="E14.7",
+                    array=ap_lc["row_cen_err"],
+                ),
+                # Measured position of target, in world coordinates.
+                fits.Column(
+                    name="RA",
+                    format="E",
+                    unit="deg",
+                    disp="E14.7",
+                    array=ap_lc["ra"],
+                ),
+                fits.Column(
+                    name="DEC",
+                    format="E",
+                    unit="deg",
+                    disp="E14.7",
+                    array=ap_lc["dec"],
+                ),
+                # Quality from _create_lc_quality()
+                fits.Column(
+                    name="AP_QUALITY",
+                    format="I",
+                    disp="B16.16",
+                    array=ap_lc["quality"],
+                ),
+                # Fraction of PRF model flux inside aperture.
+                fits.Column(
+                    name="FLUX_FRACTION",
+                    format="E",
+                    disp="E14.7",
+                    array=ap_lc["flux_fraction"],
+                ),
+                # Number of pixels inside aperture, excluding pixels flagged as
+                # `bad_bits` by the user.
+                fits.Column(
+                    name="NPIX",
+                    format="I",
+                    array=ap_lc["n_pixels"],
+                ),
+                # Standard deviation of background pixels.
+                fits.Column(
+                    name="BKG_STD",
+                    format="E",
+                    unit="e-/s",
+                    disp="E14.7",
+                    array=ap_lc["bg_std"],
+                ),
+                # Median absolute deviation of background pixels.
+                fits.Column(
+                    name="BKG_MAD",
+                    format="E",
+                    unit="e-/s",
+                    disp="E14.7",
+                    array=ap_lc["bg_mad"],
+                ),
+            ]
+
+            table_hdu_ap = fits.BinTableHDU.from_columns(cols_ap)
+            table_hdu_ap.header["EXTNAME"] = "LIGHTCURVE_AP{0}".format(
+                i if len(lc["aperture"]) > 1 else ""
+            )
+
+            # Add extra keywords to header
+            table_hdu_ap.header.set(
+                "AP_TYPE",
+                ap_lc["ap_method"],
+                comment="method used to create aperture",
+            )
+            table_hdu_ap.header.set(
+                "AP_NPIX",
+                np.nanmedian([np.nansum(mask) for mask in ap_lc["ap_mask"]]),
+                comment="average number of pixels in aperture",
+            )
+            table_hdu_ap.header.set(
+                "BAD_BITS",
+                ap_lc["bad_bits"],
+                comment="bits excluded during aperture photometry",
+            )
+            # Average measured TESS magnitude of target
+            # Catch warnings that arise if LC is nan at all times.
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message="All-NaN slice encountered",
+                    category=RuntimeWarning,
+                )
+                mag_header = round(np.nanmedian(ap_lc["TESSmag"]), 3)
+            table_hdu_ap.header.set(
+                "TESSMAG",
+                mag_header if ~np.isnan(mag_header) else "n/a",
+                comment="[mag] avg measured TESS magnitude",
+            )
+
+            # Add aperture to overall HDUList
+            table_hdu.append(table_hdu_ap)
+
+        # Create HDU for PSF photometry, if it exists.
+        if "psf" in lc:
+            cols_psf = [
+                # Average time in binning window, in TDB at SS barycenter
+                fits.Column(
+                    name="TIME",
+                    format="D",
+                    unit="BJD - 2457000, days",
+                    disp="D14.7",
+                    array=lc["psf"]["time"],
+                ),
+                # Upper and lower error on time (corresponds to limits of binning window)
+                fits.Column(
+                    name="TIME_UERR",
+                    format="E",
+                    unit="d",
+                    disp="E14.7",
+                    array=lc["psf"]["time_uerr"],
+                ),
+                fits.Column(
+                    name="TIME_LERR",
+                    format="E",
+                    unit="d",
+                    disp="E14.7",
+                    array=lc["psf"]["time_lerr"],
+                ),
+                # Average barycentric time correction in binning window
+                fits.Column(
+                    name="TIMECORR",
+                    format="E",
+                    unit="d",
+                    disp="E14.7",
+                    array=lc["psf"]["time_corr"],
+                ),
+                # Average cadence number, as defined by tesscube, in binning window
+                fits.Column(
+                    name="CADENCENO",
+                    format="I",
+                    array=lc["psf"]["cadenceno"],
+                ),
+                # Combined SPOC quality flag in the cadence binning window
+                fits.Column(
+                    name="QUALITY",
+                    format="J",
+                    disp="B16.16",
+                    array=lc["psf"]["spoc_quality"],
+                ),
+                # PSF flux and error
+                fits.Column(
+                    name="FLUX",
+                    format="E",
+                    unit="e-/s",
+                    disp="E14.7",
+                    array=lc["psf"]["flux"],
+                ),
+                fits.Column(
+                    name="FLUX_ERR",
+                    format="E",
+                    unit="e-/s",
+                    disp="E14.7",
+                    array=lc["psf"]["flux_err"],
+                ),
+                # TESS magnitude and error
+                fits.Column(
+                    name="TESSMAG",
+                    format="E",
+                    unit="mag",
+                    disp="E14.7",
+                    array=lc["psf"]["TESSmag"],
+                ),
+                fits.Column(
+                    name="TESSMAG_ERR",
+                    format="E",
+                    unit="mag",
+                    disp="E14.7",
+                    array=lc["psf"]["TESSmag_err"],
+                ),
+                # Model fit reduced chi-squared
+                fits.Column(
+                    name="RED_CHI2",
+                    format="E",
+                    disp="E14.7",
+                    array=lc["psf"]["red_chi2"],
+                ),
+                # Quality from _create_lc_quality()
+                fits.Column(
+                    name="PSF_QUALITY",
+                    format="I",
+                    disp="B16.16",
+                    array=lc["psf"]["quality"],
+                ),
+                # Average fraction of flux in PRF model that falls on good quality pixels (`self.pixel_quality` = 0).
+                fits.Column(
+                    name="QUALITY_FRACTION",
+                    format="E",
+                    disp="E14.7",
+                    array=lc["psf"]["quality_fraction"],
+                ),
+                # Number of cadences used for simultaneous PSF fit
+                fits.Column(
+                    name="N_CADENCES",
+                    format="I",
+                    array=lc["psf"]["n_cadences"],
+                ),
+                # Standard deviation of background pixels.
+                fits.Column(
+                    name="BKG_STD",
+                    format="E",
+                    unit="e-/s",
+                    disp="E14.7",
+                    array=lc["psf"]["bg_std"],
+                ),
+                # Median absolute deviation of background pixels.
+                fits.Column(
+                    name="BKG_MAD",
+                    format="E",
+                    unit="e-/s",
+                    disp="E14.7",
+                    array=lc["psf"]["bg_mad"],
+                ),
+            ]
+            # Create table HDU
+            table_hdu_psf = fits.BinTableHDU.from_columns(cols_psf)
+            table_hdu_psf.header["EXTNAME"] = "LIGHTCURVE_PSF"
+
+            # Add extra keywords to header
+            table_hdu_psf.header.set(
+                "TBINSIZE",
+                self.time_bin_size,
+                comment="[d] width of window for PSF fitting",
+            )
+            table_hdu_psf.header.set(
+                "BAD_SPOC",
+                ",".join([str(bit) for bit in lc["psf"]["bad_spoc_bits"]])
+                if isinstance(lc["psf"]["bad_spoc_bits"], list)
+                else lc["psf"]["bad_spoc_bits"],
+                comment="bad quality SPOC bits for PRF fitting",
+            )
+            # Average measured TESS magnitude of target
+            # Catch warnings that arise if LC is nan at all times.
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message="All-NaN slice encountered",
+                    category=RuntimeWarning,
+                )
+                warnings.filterwarnings(
+                    "ignore",
+                    message="Mean of empty slice",
+                    category=RuntimeWarning,
+                )
+
+                mag_header = round(np.nanmedian(lc["psf"]["TESSmag"]), 3)
+            table_hdu_psf.header.set(
+                "TESSMAG",
+                mag_header if ~np.isnan(mag_header) else "n/a",
+                comment="[mag] avg measured TESS magnitude",
+            )
+
+            # Add PSF to overall HDUList
+            table_hdu.append(table_hdu_psf)
+
+        # Define HDU for extra information
+        cols_extra = [
             # Times in TDB at SS barycenter.
             fits.Column(
                 name="TIME",
@@ -3410,177 +3784,6 @@ class MovingTPF:
             ),
             # Cadence number, as defined by tesscube.
             fits.Column(name="CADENCENO", format="I", array=self.cadence_number),
-            # SPOC quality flag
-            fits.Column(
-                name="QUALITY",
-                format="J",
-                disp="B16.16",
-                array=self.quality,
-            ),
-            # --------------
-            # Aperture photometry
-            # Sum of flux inside aperture and err
-            fits.Column(
-                name="FLUX",
-                format="E",
-                unit="e-/s",
-                disp="E14.7",
-                array=self.lc["aperture"]["flux"]
-                if "aperture" in self.lc
-                else np.full(len(self.time), np.nan),
-            ),
-            fits.Column(
-                name="FLUX_ERR",
-                format="E",
-                unit="e-/s",
-                disp="E14.7",
-                array=self.lc["aperture"]["flux_err"]
-                if "aperture" in self.lc
-                else np.full(len(self.time), np.nan),
-            ),
-            # TESS magnitude and error
-            fits.Column(
-                name="TESSMAG",
-                format="E",
-                unit="mag",
-                disp="E14.7",
-                array=self.lc["aperture"]["TESSmag"]
-                if "aperture" in self.lc
-                else np.full(len(self.time), np.nan),
-            ),
-            fits.Column(
-                name="TESSMAG_ERR",
-                format="E",
-                unit="mag",
-                disp="E14.7",
-                array=self.lc["aperture"]["TESSmag_err"]
-                if "aperture" in self.lc
-                else np.full(len(self.time), np.nan),
-            ),
-            # Sum of BG flux inside aperture and err
-            fits.Column(
-                name="FLUX_BKG",
-                format="E",
-                unit="e-/s",
-                disp="E14.7",
-                array=self.lc["aperture"]["bg"]
-                if "aperture" in self.lc
-                else np.full(len(self.time), np.nan),
-            ),
-            fits.Column(
-                name="FLUX_BKG_ERR",
-                format="E",
-                unit="e-/s",
-                disp="E14.7",
-                array=self.lc["aperture"]["bg_err"]
-                if "aperture" in self.lc
-                else np.full(len(self.time), np.nan),
-            ),
-            # Measured column centroid and err
-            fits.Column(
-                name="MOM_CENTR1",
-                format="E",
-                unit="pixel",
-                disp="E14.7",
-                array=self.lc["aperture"]["col_cen"]
-                if "aperture" in self.lc
-                else np.full(len(self.time), np.nan),
-            ),
-            fits.Column(
-                name="MOM_CENTR1_ERR",
-                format="E",
-                unit="pixel",
-                disp="E14.7",
-                array=self.lc["aperture"]["col_cen_err"]
-                if "aperture" in self.lc
-                else np.full(len(self.time), np.nan),
-            ),
-            # Measured row centroid and err
-            fits.Column(
-                name="MOM_CENTR2",
-                format="E",
-                unit="pixel",
-                disp="E14.7",
-                array=self.lc["aperture"]["row_cen"]
-                if "aperture" in self.lc
-                else np.full(len(self.time), np.nan),
-            ),
-            fits.Column(
-                name="MOM_CENTR2_ERR",
-                format="E",
-                unit="pixel",
-                disp="E14.7",
-                array=self.lc["aperture"]["row_cen_err"]
-                if "aperture" in self.lc
-                else np.full(len(self.time), np.nan),
-            ),
-            # Measured position of target, in world coordinates.
-            fits.Column(
-                name="RA",
-                format="E",
-                unit="deg",
-                disp="E14.7",
-                array=self.lc["aperture"]["ra"]
-                if "aperture" in self.lc
-                else np.full(len(self.time), np.nan),
-            ),
-            fits.Column(
-                name="DEC",
-                format="E",
-                unit="deg",
-                disp="E14.7",
-                array=self.lc["aperture"]["dec"]
-                if "aperture" in self.lc
-                else np.full(len(self.time), np.nan),
-            ),
-            # Quality from _create_lc_quality()
-            fits.Column(
-                name="AP_QUALITY",
-                format="I" if "aperture" in self.lc else "E",
-                disp="B16.16",
-                array=self.lc["aperture"]["quality"]
-                if "aperture" in self.lc
-                else np.full(len(self.time), np.nan),
-            ),
-            # Fraction of PRF model flux inside aperture.
-            fits.Column(
-                name="FLUX_FRACTION",
-                format="E",
-                disp="E14.7",
-                array=self.lc["aperture"]["flux_fraction"]
-                if "aperture" in self.lc
-                else np.full(len(self.time), np.nan),
-            ),
-            # Number of pixels inside aperture, excluding pixels flagged as
-            # `bad_bits` by the user.
-            fits.Column(
-                name="NPIX",
-                format="I",
-                array=self.lc["aperture"]["n_pixels"]
-                if "aperture" in self.lc
-                else np.full(len(self.time), np.nan),
-            ),
-            # Standard deviation of background pixels.
-            fits.Column(
-                name="BKG_STD",
-                format="E",
-                unit="e-/s",
-                disp="E14.7",
-                array=self.lc["aperture"]["bg_std"]
-                if "aperture" in self.lc
-                else np.full(len(self.time), np.nan),
-            ),
-            # Median absolute deviation of background pixels.
-            fits.Column(
-                name="BKG_MAD",
-                format="E",
-                unit="e-/s",
-                disp="E14.7",
-                array=self.lc["aperture"]["bg_mad"]
-                if "aperture" in self.lc
-                else np.full(len(self.time), np.nan),
-            ),
-            # --------------
             # Original FFI column of lower-left pixel in TPF.
             fits.Column(
                 name="CORNER1",
@@ -3629,206 +3832,14 @@ class MovingTPF:
         ]
 
         # Create table HDU
-        table_hdu_ap = fits.BinTableHDU.from_columns(cols_ap)
-        table_hdu_ap.header["EXTNAME"] = "LIGHTCURVE_AP"
+        table_hdu_extra = fits.BinTableHDU.from_columns(cols_extra)
+        table_hdu_extra.header["EXTNAME"] = "EXTRAS"
 
-        # Add extra keywords to header
-        if "aperture" in self.lc:
-            table_hdu_ap.header.set(
-                "AP_TYPE",
-                self.ap_method,
-                comment="method used to create aperture",
-            )
-            table_hdu_ap.header.set(
-                "AP_NPIX",
-                np.nanmedian([np.nansum(mask) for mask in self.aperture_mask]),
-                comment="average number of pixels in aperture",
-            )
-            table_hdu_ap.header.set(
-                "BAD_BITS",
-                f"{self.bad_bits}",
-                comment="bits excluded during aperture photometry",
-            )
-            # Average measured TESS magnitude of target
-            # Catch warnings that arise if LC is nan at all times.
-            with warnings.catch_warnings():
-                warnings.filterwarnings(
-                    "ignore",
-                    message="All-NaN slice encountered",
-                    category=RuntimeWarning,
-                )
-                mag_header = round(np.nanmedian(self.lc["aperture"]["TESSmag"]), 3)
-            table_hdu_ap.header.set(
-                "TESSMAG",
-                mag_header if ~np.isnan(mag_header) else "n/a",
-                comment="[mag] avg measured TESS magnitude",
-            )
-
-        # Create HDU for PSF photometry, if it exists.
-        if "psf" in self.lc:
-            cols_psf = [
-                # Average time in binning window, in TDB at SS barycenter
-                fits.Column(
-                    name="TIME",
-                    format="D",
-                    unit="BJD - 2457000, days",
-                    disp="D14.7",
-                    array=self.lc["psf"]["time"],
-                ),
-                # Upper and lower error on time (corresponds to limits of binning window)
-                fits.Column(
-                    name="TIME_UERR",
-                    format="E",
-                    unit="d",
-                    disp="E14.7",
-                    array=self.lc["psf"]["time_uerr"],
-                ),
-                fits.Column(
-                    name="TIME_LERR",
-                    format="E",
-                    unit="d",
-                    disp="E14.7",
-                    array=self.lc["psf"]["time_lerr"],
-                ),
-                # Average barycentric time correction in binning window
-                fits.Column(
-                    name="TIMECORR",
-                    format="E",
-                    unit="d",
-                    disp="E14.7",
-                    array=self.lc["psf"]["time_corr"],
-                ),
-                # Average cadence number, as defined by tesscube, in binning window
-                fits.Column(
-                    name="CADENCENO",
-                    format="I",
-                    array=self.lc["psf"]["cadenceno"],
-                ),
-                # Combined SPOC quality flag in the cadence binning window
-                fits.Column(
-                    name="QUALITY",
-                    format="J",
-                    disp="B16.16",
-                    array=self.lc["psf"]["spoc_quality"],
-                ),
-                # PSF flux and error
-                fits.Column(
-                    name="FLUX",
-                    format="E",
-                    unit="e-/s",
-                    disp="E14.7",
-                    array=self.lc["psf"]["flux"],
-                ),
-                fits.Column(
-                    name="FLUX_ERR",
-                    format="E",
-                    unit="e-/s",
-                    disp="E14.7",
-                    array=self.lc["psf"]["flux_err"],
-                ),
-                # TESS magnitude and error
-                fits.Column(
-                    name="TESSMAG",
-                    format="E",
-                    unit="mag",
-                    disp="E14.7",
-                    array=self.lc["psf"]["TESSmag"],
-                ),
-                fits.Column(
-                    name="TESSMAG_ERR",
-                    format="E",
-                    unit="mag",
-                    disp="E14.7",
-                    array=self.lc["psf"]["TESSmag_err"],
-                ),
-                # Model fit reduced chi-squared
-                fits.Column(
-                    name="RED_CHI2",
-                    format="E",
-                    disp="E14.7",
-                    array=self.lc["psf"]["red_chi2"],
-                ),
-                # Quality from _create_lc_quality()
-                fits.Column(
-                    name="PSF_QUALITY",
-                    format="I",
-                    disp="B16.16",
-                    array=self.lc["psf"]["quality"],
-                ),
-                # Average fraction of flux in PRF model that falls on good quality pixels (`self.pixel_quality` = 0).
-                fits.Column(
-                    name="QUALITY_FRACTION",
-                    format="E",
-                    disp="E14.7",
-                    array=self.lc["psf"]["quality_fraction"],
-                ),
-                # Number of cadences used for simultaneous PSF fit
-                fits.Column(
-                    name="N_CADENCES",
-                    format="I",
-                    array=self.lc["psf"]["n_cadences"],
-                ),
-                # Standard deviation of background pixels.
-                fits.Column(
-                    name="BKG_STD",
-                    format="E",
-                    unit="e-/s",
-                    disp="E14.7",
-                    array=self.lc["psf"]["bg_std"],
-                ),
-                # Median absolute deviation of background pixels.
-                fits.Column(
-                    name="BKG_MAD",
-                    format="E",
-                    unit="e-/s",
-                    disp="E14.7",
-                    array=self.lc["psf"]["bg_mad"],
-                ),
-            ]
-            # Create table HDU
-            table_hdu_psf = fits.BinTableHDU.from_columns(cols_psf)
-            table_hdu_psf.header["EXTNAME"] = "LIGHTCURVE_PSF"
-
-            # Add extra keywords to header
-            table_hdu_psf.header.set(
-                "TBINSIZE",
-                self.time_bin_size,
-                comment="[d] width of window for PSF fitting",
-            )
-            table_hdu_psf.header.set(
-                "BAD_SPOC",
-                ",".join([str(bit) for bit in self.lc["psf"]["bad_spoc_bits"]])
-                if isinstance(self.lc["psf"]["bad_spoc_bits"], list)
-                else self.lc["psf"]["bad_spoc_bits"],
-                comment="bad quality SPOC bits for PRF fitting",
-            )
-            # Average measured TESS magnitude of target
-            # Catch warnings that arise if LC is nan at all times.
-            with warnings.catch_warnings():
-                warnings.filterwarnings(
-                    "ignore",
-                    message="All-NaN slice encountered",
-                    category=RuntimeWarning,
-                )
-                warnings.filterwarnings(
-                    "ignore",
-                    message="Mean of empty slice",
-                    category=RuntimeWarning,
-                )
-
-                mag_header = round(np.nanmedian(self.lc["psf"]["TESSmag"]), 3)
-            table_hdu_psf.header.set(
-                "TESSMAG",
-                mag_header if ~np.isnan(mag_header) else "n/a",
-                comment="[mag] avg measured TESS magnitude",
-            )
-
-            return fits.HDUList(
-                [self._make_primary_hdu(file_type="lc"), table_hdu_ap, table_hdu_psf]
-            )
+        # Add extras to overall HDUList
+        table_hdu.append(table_hdu_extra)
 
         # Return hdulist
-        return fits.HDUList([self._make_primary_hdu(file_type="lc"), table_hdu_ap])
+        return fits.HDUList(table_hdu)
 
     def _make_primary_hdu(
         self, file_type: str, ap_masks: list = [], ap_methods: list = []
