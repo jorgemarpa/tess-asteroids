@@ -1713,11 +1713,13 @@ class MovingTPF:
         """
         # Get mask via chosen method
         if method == "threshold":
-            self.aperture_mask = self._create_threshold_aperture(**kwargs)
+            self.aperture_mask, self.ap_param = self._create_threshold_aperture(
+                **kwargs
+            )
         elif method == "prf":
-            self.aperture_mask = self._create_prf_aperture(**kwargs)
+            self.aperture_mask, self.ap_param = self._create_prf_aperture(**kwargs)
         elif method == "ellipse":
-            self.aperture_mask = self._create_ellipse_aperture(
+            self.aperture_mask, self.ap_param = self._create_ellipse_aperture(
                 return_params=False, **kwargs
             )
         else:
@@ -1762,6 +1764,8 @@ class MovingTPF:
         aperture_mask : ndarray
             Boolean numpy array containing `True` for pixels above the
             threshold. Shape is (ntimes, nrows, ncols)
+        threshold : float
+            Threshold value used to create aperture.
         """
         if (
             not hasattr(self, "all_flux")
@@ -1813,18 +1817,17 @@ class MovingTPF:
             # update mask with closest patch
             aperture_mask[nt] = labels == closest_label
 
-        return aperture_mask
+        return aperture_mask, threshold
 
-    def _create_prf_aperture(self, threshold: Union[str, float] = 0.01, **kwargs):
+    def _create_prf_aperture(self, threshold: float = 0.01, **kwargs):
         """
         Creates an aperture mask from the PRF model.
 
         Parameters
         ----------
-        threshold : float or 'optimal'
-            If float, must be in the range [0,1). Only pixels where the prf model >= `threshold`
+        threshold : float
+            Must be in the range [0,1). Only pixels where the prf model >= `threshold`
             will be included in the aperture.
-            If 'optimal', computes optimal value for threshold.
         **kwargs
             Keyword arguments to be passed to `_create_target_prf_model()`.
 
@@ -1833,6 +1836,8 @@ class MovingTPF:
         aperture_mask : ndarray
             Boolean numpy array, where pixels inside the aperture are 'True'.
             Shape is (ntimes, nrows, ncols).
+        threshold : float
+            Threshold used to create aperture.
         """
 
         # Create PRF model
@@ -1841,11 +1846,7 @@ class MovingTPF:
         )
 
         # Use PRF model to define aperture
-        if threshold == "optimal":
-            raise NotImplementedError(
-                "Computation of optimal PRF aperture not implemented yet."
-            )
-        elif isinstance(threshold, float) and threshold < 1 and threshold >= 0:
+        if isinstance(threshold, float) and threshold < 1 and threshold >= 0:
             aperture_mask = self.prf_model >= threshold  # type: ignore
             # No pixels above threshold
             if (~aperture_mask).all():
@@ -1854,10 +1855,10 @@ class MovingTPF:
                 )
         else:
             raise ValueError(
-                f"Threshold must be either 'optimal' or a float between 0 and 1. Not '{threshold}'"
+                f"Threshold must be a float between 0 and 1. Not '{threshold}'"
             )
 
-        return aperture_mask
+        return aperture_mask, threshold
 
     def _create_target_prf_model(
         self, time_step: Optional[float] = None, all_flux: bool = False, **kwargs
@@ -2081,12 +2082,14 @@ class MovingTPF:
         -------
         aperture_mask: ndarray
             Boolean 3D mask array with pixels within the ellipse.
+        R : float
+            R value used to create aperture.
         ellipse_parameters: ndarray
             If `return_params`, will return centroid and ellipse parameters
             [X_cent, Y_cent, A, B, theta_deg] with shape (5, n_times).
         """
         # create a threshold mask to select pixels to use for moments
-        threshold_mask = self._create_threshold_aperture(
+        threshold_mask, _ = self._create_threshold_aperture(
             threshold=3.0, reference_pixel="center"
         )
 
@@ -2212,11 +2215,15 @@ class MovingTPF:
                     R=R,
                 )
         if return_params:
-            return aperture_mask, np.array(
-                [self.corner[:, 1] + X, self.corner[:, 0] + Y, A, B, theta_deg]
-            ).T
+            return (
+                aperture_mask,
+                R,
+                np.array(
+                    [self.corner[:, 1] + X, self.corner[:, 0] + Y, A, B, theta_deg]
+                ).T,
+            )
         else:
-            return aperture_mask
+            return aperture_mask, R
 
     def create_pixel_quality(
         self, sat_level: float = 1e5, sat_buffer_rad: int = 1, **kwargs
@@ -2871,6 +2878,7 @@ class MovingTPF:
             "dec": [coord.dec.value for coord in measured_coords],
             "ap_mask": self.aperture_mask,
             "ap_method": self.ap_method,
+            "ap_param": self.ap_param,
             "bad_bits": ",".join([str(bit) for bit in bad_bits]),
         }
 
@@ -2884,6 +2892,7 @@ class MovingTPF:
     ):
         """
         Creates quality mask for lightcurve. This is defined independently of SPOC quality flags.
+        This function is called internally by `_aperture_photometry()` and `_psf_photometry()`.
 
         If you are creating LC quality for aperture photometry:
 
@@ -3110,7 +3119,9 @@ class MovingTPF:
                 )
 
             self.tpf_hdulist = self._make_tpf_hdulist(
-                ap_masks=[self.aperture_mask], ap_methods=[self.ap_method]
+                ap_masks=[self.aperture_mask],
+                ap_methods=[self.ap_method],
+                ap_params=[self.ap_param],
             )
         elif file_type == "lc":
             if not hasattr(self, "lc"):
@@ -3133,7 +3144,7 @@ class MovingTPF:
                 file_name=file_name,
             )
 
-    def _make_tpf_hdulist(self, ap_masks: list, ap_methods: list):
+    def _make_tpf_hdulist(self, ap_masks: list, ap_methods: list, ap_params: list):
         """
         Make HDUList for moving TPF, using similar format to SPOC.
 
@@ -3155,6 +3166,16 @@ class MovingTPF:
             raise AttributeError(
                 "Must run `get_data()`, `reshape_data()`, `background_correction()`, `create_pixel_quality()` and `create_aperture()` before creating TPF HDUList."
             )
+
+        # Initialize HDUList
+        tpf_hdulist = [
+            self._make_primary_hdu(
+                file_type="tpf",
+                ap_masks=ap_masks,
+                ap_methods=ap_methods,
+                ap_params=ap_params,
+            )
+        ]
 
         # Compute WCS header
         wcs_header = make_wcs_header(self.shape)
@@ -3265,20 +3286,22 @@ class MovingTPF:
             ),
         )
         table_hdu_spoc.header["EXTNAME"] = "PIXELS"
+        tpf_hdulist.append(table_hdu_spoc)
 
-        # Create image HDU containing average aperture.
+        # Create image HDU containing average aperture(s).
         # Aperture has values 0 and 2, where 0/2 indicates the pixel is outside/inside the aperture.
         # This format is used to be consistent with the aperture HDU from SPOC.
-        aperture_hdu_average = fits.ImageHDU(
-            data=[
-                np.nanmedian(ap_mask, axis=0).astype("int32") * 2
-                for ap_mask in ap_masks
-            ],
-            header=fits.Header(
-                [*self.cube.output_secondary_header.cards, *wcs_header.cards]
-            ),
-        )
-        aperture_hdu_average.header["EXTNAME"] = "APERTURE"
+        for i, ap_mask in enumerate(ap_masks):
+            aperture_hdu_average = fits.ImageHDU(
+                data=np.nanmedian(ap_mask, axis=0).astype("int32") * 2,
+                header=fits.Header(
+                    [*self.cube.output_secondary_header.cards, *wcs_header.cards]
+                ),
+            )
+            aperture_hdu_average.header["EXTNAME"] = "APERTURE{0}".format(
+                i if len(ap_masks) > 1 else ""
+            )
+            tpf_hdulist.append(aperture_hdu_average)
 
         # Define extra FITS columns
         cols = [
@@ -3339,8 +3362,8 @@ class MovingTPF:
             ),
         ]
 
+        # Add aperture(s) as a function of time.
         for i, ap_mask in enumerate(ap_masks):
-            # Aperture as a function of time.
             # Aperture has values 0 and 2, where 0/2 indicates the pixel is outside/inside the aperture.
             # This format is used to be consistent with the aperture HDU from SPOC.
             cols.append(
@@ -3355,22 +3378,14 @@ class MovingTPF:
         # Create table HDU for extra columns
         table_hdu_extra = fits.BinTableHDU.from_columns(cols)
         table_hdu_extra.header["EXTNAME"] = "EXTRAS"
+        tpf_hdulist.append(table_hdu_extra)
 
         # Return hdulist
-        return fits.HDUList(
-            [
-                self._make_primary_hdu(
-                    file_type="tpf", ap_masks=ap_masks, ap_methods=ap_methods
-                ),
-                table_hdu_spoc,
-                aperture_hdu_average,
-                table_hdu_extra,
-            ]
-        )
+        return fits.HDUList(tpf_hdulist)
 
     def _make_lc_hdulist(self, lc: dict):
         """
-        Make HDUList for lightcurve file. This includes a separate HDU for aperture and PSF photometry.
+        Make HDUList for lightcurve file. This includes separate HDUs for aperture and PSF photometry.
 
         Parameters
         ----------
@@ -3385,16 +3400,16 @@ class MovingTPF:
         if len(lc) == 0:
             raise AttributeError("Must have at least one lightcurve in `lc`.")
 
-        # Initialize overall HDUList
-        table_hdu = [self._make_primary_hdu(file_type="lc")]
+        # Initialize HDUList
+        lc_hdulist = [self._make_primary_hdu(file_type="lc")]
 
-        # Ensure aperture is at least 1D
+        # Ensure lc["aperture"] is at least 1D
         if "aperture" in lc:
             lc["aperture"] = np.atleast_1d(lc["aperture"])
         else:
             lc["aperture"] = []
 
-        # Create HDU for each aperature
+        # Create HDU for each aperture
         for i, ap_lc in enumerate(lc["aperture"]):
             cols_ap = [
                 # Times in TDB at SS barycenter.
@@ -3557,6 +3572,15 @@ class MovingTPF:
                 comment="method used to create aperture",
             )
             table_hdu_ap.header.set(
+                "AP_PAR",
+                ap_lc["ap_param"],
+                comment="{0} used to create aperture".format(
+                    "threshold"
+                    if ap_lc["ap_method"] in ["prf", "threshold"]
+                    else "R value"
+                ),
+            )
+            table_hdu_ap.header.set(
                 "AP_NPIX",
                 np.nanmedian([np.nansum(mask) for mask in ap_lc["ap_mask"]]),
                 comment="average number of pixels in aperture",
@@ -3582,9 +3606,9 @@ class MovingTPF:
             )
 
             # Add aperture to overall HDUList
-            table_hdu.append(table_hdu_ap)
+            lc_hdulist.append(table_hdu_ap)
 
-        # Create HDU for PSF photometry, if it exists.
+        # Create HDU for PSF photometry.
         if "psf" in lc:
             cols_psf = [
                 # Average time in binning window, in TDB at SS barycenter
@@ -3744,9 +3768,9 @@ class MovingTPF:
             )
 
             # Add PSF to overall HDUList
-            table_hdu.append(table_hdu_psf)
+            lc_hdulist.append(table_hdu_psf)
 
-        # Define HDU for extra information
+        # Define table HDU for extra columns.
         cols_extra = [
             # Times in TDB at SS barycenter.
             fits.Column(
@@ -3836,13 +3860,17 @@ class MovingTPF:
         table_hdu_extra.header["EXTNAME"] = "EXTRAS"
 
         # Add extras to overall HDUList
-        table_hdu.append(table_hdu_extra)
+        lc_hdulist.append(table_hdu_extra)
 
         # Return hdulist
-        return fits.HDUList(table_hdu)
+        return fits.HDUList(lc_hdulist)
 
     def _make_primary_hdu(
-        self, file_type: str, ap_masks: list = [], ap_methods: list = []
+        self,
+        file_type: str,
+        ap_masks: list = [],
+        ap_methods: list = [],
+        ap_params: list = [],
     ):
         """
         Make primary header for moving TPF and LCF. Initialises using tesscube
@@ -3962,10 +3990,20 @@ class MovingTPF:
                     after="SL_CORR" if i == 0 else "AP{0}_NPIX".format(i - 1),
                 )
                 hdu.header.set(
+                    "AP{0}_PAR".format(i if len(ap_masks) > 1 else ""),
+                    ap_params[i],
+                    comment="{0} used to create aperture".format(
+                        "threshold"
+                        if ap_methods[i] in ["prf", "threshold"]
+                        else "R value"
+                    ),
+                    after="AP{0}_TYPE".format(i if len(ap_masks) > 1 else ""),
+                )
+                hdu.header.set(
                     "AP{0}_NPIX".format(i if len(ap_masks) > 1 else ""),
                     np.nanmedian([np.nansum(mask) for mask in ap_masks[i]]),
                     comment="average number of pixels in aperture",
-                    after="AP{0}_TYPE".format(i if len(ap_masks) > 1 else ""),
+                    after="AP{0}_PAR".format(i if len(ap_masks) > 1 else ""),
                 )
 
         # Add keywords for object properties
