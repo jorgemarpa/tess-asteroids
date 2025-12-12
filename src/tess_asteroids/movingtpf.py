@@ -2376,16 +2376,6 @@ class MovingTPF:
                 f"Method must be one of: ['aperture', 'psf']. Not '{method}'"
             )
 
-        # Convert measured flux to TESS magnitude.
-        # Flux fraction is always one:
-        # - If PSF photometry was used, the fitted amplitude is 100% of the target's flux.
-        # - If aperture photometry was used, the flux has already been corrected with `flux_fraction`.
-        self.lc[method]["TESSmag"], self.lc[method]["TESSmag_err"] = calculate_TESSmag(
-            self.lc[method]["flux"],
-            self.lc[method]["flux_err"],
-            np.ones_like(self.lc[method]["flux"]),
-        )
-
     def _psf_photometry(
         self,
         time_bin_size: Optional[float] = None,
@@ -2484,6 +2474,8 @@ class MovingTPF:
                 "cadenceno": np.array([]),
                 "flux": np.array([]),
                 "flux_err": np.array([]),
+                "TESSmag": np.array([]),
+                "TESSmag_err": np.array([]),
                 "red_chi2": np.array([]),
                 "spoc_quality": np.array([]),
                 "quality": np.array([]),
@@ -2689,6 +2681,10 @@ class MovingTPF:
             bg_mad,
         ) = np.asarray(psf_phot).T
 
+        # Convert measured flux to TESS magnitude.
+        # Flux fraction is one - the fitted amplitude is 100% of the target's flux.
+        mag, mag_err = calculate_TESSmag(flux, flux_err, np.ones_like(flux))
+
         return {
             "time": time,
             "time_uerr": time_uerr,
@@ -2697,6 +2693,8 @@ class MovingTPF:
             "cadenceno": cadenceno,
             "flux": flux,
             "flux_err": flux_err,
+            "TESSmag": mag,
+            "TESSmag_err": mag_err,
             "red_chi2": red_chi2,
             "spoc_quality": spoc_quality.astype(int),
             "quality": self._create_lc_quality(
@@ -2854,10 +2852,18 @@ class MovingTPF:
             ]
         )
 
+        # Convert measured flux to TESS magnitude.
+        # Flux fraction is always one - the flux has already been corrected with `flux_fraction`.
+        mag, mag_err = calculate_TESSmag(
+            np.asarray(ap_flux), np.asarray(ap_flux_err), np.ones_like(ap_flux)
+        )
+
         return {
             "time": self.time,
             "flux": np.asarray(ap_flux),
             "flux_err": np.asarray(ap_flux_err),
+            "TESSmag": mag,
+            "TESSmag_err": mag_err,
             "bg": np.asarray(ap_bg),
             "bg_err": np.asarray(ap_bg_err),
             "col_cen": col_cen,
