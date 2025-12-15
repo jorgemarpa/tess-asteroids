@@ -2418,6 +2418,7 @@ class MovingTPF:
             - `time_corr` is the average barycentric time correction in the binning window.
             - `cadenceno` is the average cadence number, as defined by `tesscube`, in the binning window.
             - `flux` and `flux_err` from the PRF fitting.
+            - `TESSmag`, `TESSmag_err`: flux and error converted to magnitude in the TESS bandpass.
             - `red_chi2` is the reduced chi-squared of the fitted PRF model.
             - `spoc_quality` is the combined SPOC quality flag in the binning window.
             - `quality`: cadence quality flag from `_create_lc_quality()`.
@@ -2425,11 +2426,13 @@ class MovingTPF:
             - `qual_frac` is the average fraction of flux in the PRF model that falls on good quality pixels (`self.pixel_quality` = 0).
             - `bg_std` is the standad deviation of the background pixels (where PRF model < 0.1%) in each binning window.
             - `bg_mad` is the median absolute deviation of background pixels (where PRF model < 0.1%) in each binning window.
+            - `time_bin_size` is the width of window used for binning.
             - `bad_spoc_bits` is the SPOC bits used to define bad quality data.
 
             Note: if `time_bin_size = None` then `time`, `time_corr`, `cadenceno` and `spoc_quality` are equal to
             `self.time`, `self.timecorr`, `self.cadence_number` and `self.quality`, respectively.
-            Note: all values are ndarrays with the same length, except `bad_spoc_bits` which is a list or str.
+            Note: all values are ndarrays with the same length, except `time_bin_size` which is a float and
+            `bad_spoc_bits` which is a list or str.
         """
         if (
             not hasattr(self, "all_flux")
@@ -2443,9 +2446,6 @@ class MovingTPF:
 
         # Define good quality cadences using user-defined SPOC quality flags.
         spoc_quality_mask, bad_spoc_bits = self._create_spoc_quality_mask(bad_spoc_bits)
-
-        # Save `time_bin_size` for LCF header
-        self.time_bin_size = time_bin_size
 
         # Apply quality mask to data
         time = self.time[spoc_quality_mask]
@@ -2483,6 +2483,7 @@ class MovingTPF:
                 "quality_fraction": np.array([]),
                 "bg_std": np.array([]),
                 "bg_mad": np.array([]),
+                "time_bin_size": time_bin_size,
                 "bad_spoc_bits": bad_spoc_bits,
             }
 
@@ -2707,6 +2708,7 @@ class MovingTPF:
             "quality_fraction": qual_frac,
             "bg_std": bg_std,
             "bg_mad": bg_mad,
+            "time_bin_size": time_bin_size,
             "bad_spoc_bits": bad_spoc_bits,
         }
 
@@ -2729,6 +2731,7 @@ class MovingTPF:
 
             - `time`: equal to `self.time`.
             - `flux`, `flux_err`: sum of flux inside aperture and error.
+            - `TESSmag`, `TESSmag_err`: flux and error converted to magnitude in the TESS bandpass.
             - `bg`, `bg_err`: sum of background flux inside aperture and error.
             - `col_cen`, `col_cen_err`, `row_cen`, `row_cen_err`: flux-weighted centroids inside aperture and errors.
             - `quality`: cadence quality flag from `_create_lc_quality()`.
@@ -2737,6 +2740,10 @@ class MovingTPF:
             - `bg_std`: standad deviation of background pixels (where PRF model < 0.1%).
             - `bg_mad`: median absolute deviation of background pixels (where PRF model < 0.1%).
             - `ra`, `dec`: flux-weighted centroids converted to world coordinates using WCS.
+            - `ap_mask`: aperture mask used to create the lightcurve.
+            - `ap_method`: method used to create the aperture. One of [`threshold`, `prf`, `ellipse`].
+            - `ap_param`: threshold (`threshold` or `prf` method) or R value (`ellipse` method) used to create aperture.
+            - `bad_bits`: bits masked during computation of photometry, as defined by user.
 
             Note: The row and column centroids are one-indexed and correspond to the position in the full FFI, where the
             lower left pixel has the value (1,1).
@@ -2957,16 +2964,6 @@ class MovingTPF:
             Lightcurve quality mask with length [ntimes].
         """
 
-        if (
-            not hasattr(self, "all_flux")
-            or not hasattr(self, "flux")
-            or not hasattr(self, "corr_flux")
-            or not hasattr(self, "pixel_quality")
-        ):
-            raise AttributeError(
-                "Must run `get_data()`, `reshape_data()`, `background_correction()` and `create_pixel_quality()` before creating lightcurve quality."
-            )
-
         if (bad_bit_value is not None and psf_flux is not None) or (
             bad_bit_value is None and psf_flux is None
         ):
@@ -3119,23 +3116,9 @@ class MovingTPF:
 
         # Make HDUList
         if file_type == "tpf":
-            if not hasattr(self, "aperture_mask"):
-                raise AttributeError(
-                    "Must run `create_aperture()` before creating TPF HDUList."
-                )
-
-            self.tpf_hdulist = self._make_tpf_hdulist(
-                ap_masks=[self.aperture_mask],
-                ap_methods=[self.ap_method],
-                ap_params=[self.ap_param],
-            )
+            self.tpf_hdulist = self._make_tpf_hdulist()
         elif file_type == "lc":
-            if not hasattr(self, "lc"):
-                raise AttributeError(
-                    "Must run `to_lightcurve()` before creating LCF HDUList."
-                )
-
-            self.lc_hdulist = self._make_lc_hdulist(lc=deepcopy(self.lc))
+            self.lc_hdulist = self._make_lc_hdulist()
         else:
             raise ValueError(
                 f"`file_type` must be one of: ['tpf', 'lc']. Not '{file_type}'"
@@ -3150,7 +3133,9 @@ class MovingTPF:
                 file_name=file_name,
             )
 
-    def _make_tpf_hdulist(self, ap_masks: list, ap_methods: list, ap_params: list):
+    def _make_tpf_hdulist(
+        self, ap_masks: list = [], ap_methods: list = [], ap_params: list = []
+    ):
         """
         Make HDUList for moving TPF, using similar format to SPOC.
 
@@ -3162,15 +3147,36 @@ class MovingTPF:
         hdulist : astropy.io.fits.HDUList
             HDUList for moving TPF.
         """
+
+        # Attribute checks
         if (
             not hasattr(self, "all_flux")
             or not hasattr(self, "flux")
             or not hasattr(self, "corr_flux")
-            or not hasattr(self, "aperture_mask")
             or not hasattr(self, "pixel_quality")
         ):
             raise AttributeError(
-                "Must run `get_data()`, `reshape_data()`, `background_correction()`, `create_pixel_quality()` and `create_aperture()` before creating TPF HDUList."
+                "Must run `get_data()`, `reshape_data()`, `background_correction()` and `create_pixel_quality()` before creating TPF HDUList."
+            )
+
+        # Assign default values to `ap_masks`, `ap_methods` and `ap_params` if none are provided by user:
+        if len(ap_masks) == 0 and len(ap_methods) == 0 and len(ap_params) == 0:
+            if not hasattr(self, "aperture_mask"):
+                raise AttributeError(
+                    "Must run `create_aperture()` before creating TPF HDUList if you have not provided `ap_masks`, `ap_methods` and `ap_params`."
+                )
+            ap_masks = [self.aperture_mask]
+            ap_methods = [self.ap_method]
+            ap_params = [self.ap_param]
+
+        # Logic check
+        if (
+            len(ap_masks) != len(ap_methods)
+            or len(ap_masks) != len(ap_params)
+            or len(ap_params) != len(ap_methods)
+        ):
+            raise ValueError(
+                "`ap_masks`, `ap_methods` and `ap_params` must have the same length."
             )
 
         # Initialize HDUList
@@ -3389,12 +3395,13 @@ class MovingTPF:
         # Return hdulist
         return fits.HDUList(tpf_hdulist)
 
-    def _make_lc_hdulist(self, lc: dict):
+    def _make_lc_hdulist(self, lc: Optional[dict] = None):
         """
         Make HDUList for lightcurve file. This includes separate HDUs for aperture and PSF photometry.
 
         Parameters
         ----------
+        lc : dict
 
         Returns
         -------
@@ -3403,8 +3410,23 @@ class MovingTPF:
         """
 
         # Attribute checks
+        if not hasattr(self, "time"):
+            raise AttributeError("Must run `get_data()` before creating LCF HDUList.")
+
+        # Assign default value to `lc` if none is provided by user:
+        if lc is None:
+            if not hasattr(self, "lc"):
+                raise AttributeError(
+                    "Must run `to_lightcurve()` before creating LCF HDUList if you have not provided `lc`."
+                )
+            lc = self.lc
+
+        # Make a copy of dictionary
+        lc = deepcopy(lc)
+
+        # Logic checks
         if len(lc) == 0:
-            raise AttributeError("Must have at least one lightcurve in `lc`.")
+            raise ValueError("Must have at least one lightcurve in `lc`.")
 
         # Initialize HDUList
         lc_hdulist = [self._make_primary_hdu(file_type="lc")]
@@ -3742,7 +3764,7 @@ class MovingTPF:
             # Add extra keywords to header
             table_hdu_psf.header.set(
                 "TBINSIZE",
-                self.time_bin_size,
+                lc["psf"]["time_bin_size"],
                 comment="[d] width of window for PSF fitting",
             )
             table_hdu_psf.header.set(
@@ -3904,6 +3926,16 @@ class MovingTPF:
         else:
             raise ValueError(
                 f"`file_type` must be one of: ['tpf', 'lc']. Not '{file_type}'"
+            )
+
+        # Logic check
+        if (
+            len(ap_masks) != len(ap_methods)
+            or len(ap_masks) != len(ap_params)
+            or len(ap_params) != len(ap_methods)
+        ):
+            raise ValueError(
+                "`ap_masks`, `ap_methods` and `ap_params` must have the same length."
             )
 
         # Get primary hdu from tesscube
