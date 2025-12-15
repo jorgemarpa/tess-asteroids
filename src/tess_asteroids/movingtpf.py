@@ -3141,6 +3141,15 @@ class MovingTPF:
 
         Parameters
         ----------
+        ap_masks : list
+            A list of 3D aperture masks.
+            If empty, `self.aperture_mask` will be used.
+        ap_methods : list
+            A list of the methods (`threshold`, `prf` or `ellipse`) used to create the aperture masks.
+            If empty, `self.ap_method` will be used.
+        ap_params : list
+            A list of the parameters used to create the aperture masks.
+            If empty, `self.ap_param` will be used.
 
         Returns
         -------
@@ -3402,6 +3411,8 @@ class MovingTPF:
         Parameters
         ----------
         lc : dict
+            A dictionary containing aperture and PSF photometry. This must have the same structure as that
+            produced by `self.to_lightcurve`. If None, `self.lc` will be used by default.
 
         Returns
         -------
@@ -3908,10 +3919,19 @@ class MovingTPF:
         ----------
         file_type : str
             Type of file to create a primary HDU for. One of ['tpf', 'lc'].
+        ap_masks : list
+            A list of 3D aperture masks. This is only necessary if `file_type=tpf`.
+            If empty, `self.aperture_mask` will be used.
+        ap_methods : list
+            A list of the methods (`threshold`, `prf` or `ellipse`) used to create the aperture masks.
+            This is only necessary if `file_type=tpf`. If empty, `self.ap_method` will be used.
+        ap_params : list
+            A list of the parameters used to create the aperture masks. This is only necessary if `file_type=tpf`.
+            If empty, `self.ap_param` will be used.
 
         Returns
         -------
-        hdulist : astropy.io.fits.PrimaryHDU
+        hdu : astropy.io.fits.PrimaryHDU
             Primary HDU to use in moving TPF or lightcurve file.
         """
 
@@ -3927,6 +3947,21 @@ class MovingTPF:
             raise ValueError(
                 f"`file_type` must be one of: ['tpf', 'lc']. Not '{file_type}'"
             )
+
+        # For TPF, assign default values to `ap_masks`, `ap_methods` and `ap_params` if none are provided by user:
+        if (
+            file_type == "tpf"
+            and len(ap_masks) == 0
+            and len(ap_methods) == 0
+            and len(ap_params) == 0
+        ):
+            if not hasattr(self, "aperture_mask"):
+                raise AttributeError(
+                    "Must run `create_aperture()` before creating primary HDU for TPF if you have not provided `ap_masks`, `ap_methods` and `ap_params`."
+                )
+            ap_masks = [self.aperture_mask]
+            ap_methods = [self.ap_method]
+            ap_params = [self.ap_param]
 
         # Logic check
         if (
