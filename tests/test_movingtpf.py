@@ -161,11 +161,12 @@ def test_create_threshold_aperture():
     target.reshape_data()
     target.background_correction(method="rolling")
 
-    aperture_mask = target._create_threshold_aperture(
+    aperture_mask, ap_param = target._create_threshold_aperture(
         threshold=3.0, reference_pixel="center"
     )
 
     assert aperture_mask.shape == target.flux.shape
+    assert ap_param == 3.0
     assert (
         np.median(aperture_mask.reshape((target.time.shape[0], -1)).sum(axis=1)) == 7.0
     )
@@ -183,11 +184,14 @@ def test_create_prf_aperture():
     target.get_data(shape=(11, 11))
 
     # Make aperture from PRF model
-    aperture_mask = target._create_prf_aperture()
+    aperture_mask, ap_param = target._create_prf_aperture()
 
     # Check shape of the PRF model and aperture
     assert target.prf_model.shape == (len(target.time), *target.shape)
     assert aperture_mask.shape == (len(target.time), *target.shape)
+
+    # Check default value of threhsold
+    assert ap_param == 0.01
 
     # Check that each frame of the PRF model sums to one
     # Note: rounding errors result in some values being very close, but not equal,
@@ -219,12 +223,14 @@ def test_create_ellipse_aperture():
     target.reshape_data()
     target.background_correction(method="rolling")
 
-    ellip_mask, params = target._create_ellipse_aperture(return_params=True)
+    ellip_mask, R, params = target._create_ellipse_aperture(return_params=True)
 
     # aperture mask
     # for the test source the median number of pixels across all frames is 10
     assert ellip_mask.shape == target.flux.shape
     assert np.median(ellip_mask.reshape((target.time.shape[0], -1)).sum(axis=1)) == 10
+    # check default R value
+    assert R == 3.0
     # ellipse parameters
     # for the test source the centroid values should be within 0.2 pixels
     # from the asteroid ephemeris
@@ -560,22 +566,25 @@ def test_make_lc():
 
         # Check columns in lightcurve HDU
         assert "TIME" in hdul[1].columns.names
-        assert "TIMECORR" in hdul[1].columns.names
-        assert "ORIGINAL_TIME" in hdul[1].columns.names
-        assert "ORIGINAL_TIMECORR" in hdul[1].columns.names
         assert "FLUX" in hdul[1].columns.names
         assert "FLUX_ERR" in hdul[1].columns.names
         assert "TESSMAG" in hdul[1].columns.names
         assert "TESSMAG_ERR" in hdul[1].columns.names
         assert "MOM_CENTR1" in hdul[1].columns.names
         assert "RA" in hdul[1].columns.names
-        assert "RA_PRED" in hdul[1].columns.names
-        assert "EPHEM1" in hdul[1].columns.names
         assert "NPIX" in hdul[1].columns.names
         assert "BKG_STD" in hdul[1].columns.names
 
+        # Check columns in extras HDU
+        assert "TIME" in hdul[2].columns.names
+        assert "TIMECORR" in hdul[2].columns.names
+        assert "ORIGINAL_TIME" in hdul[2].columns.names
+        assert "ORIGINAL_TIMECORR" in hdul[2].columns.names
+        assert "RA_PRED" in hdul[2].columns.names
+        assert "EPHEM1" in hdul[2].columns.names
+
         # Check the barycentric time correction has been applied.
-        assert (hdul[1].data["TIME"] != hdul[1].data["ORIGINAL_TIME"]).all()
+        assert (hdul[2].data["TIME"] != hdul[2].data["ORIGINAL_TIME"]).all()
 
         # 1998 YT6 is a main-belt asteroid, ensure the orbital elements are physical:
         assert hdul[0].header["ORBECC"] >= 0 and hdul[0].header["ORBECC"] < 1
