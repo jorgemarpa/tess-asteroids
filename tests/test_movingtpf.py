@@ -614,6 +614,117 @@ def test_make_lc():
     os.remove("tests/tess-1998YT6-s0006-1-1-shape11x11_lc.fits")
 
 
+def test_multiple_apertures():
+    # Initialise MovingTPF for 1980 VR1
+    target = MovingTPF.from_name("1980 VR1", sector=1, camera=1, ccd=1)
+
+    # Get data, do background correction and compute pixel quality mask
+    target.get_data()
+    target.reshape_data()
+    target.background_correction()
+    target.create_pixel_quality()
+
+    # Create three PRF apertures and extract a light curve for each
+    lc = {"aperture": []}
+    for thresh in [0.01, 0.05, 0.1]:
+        target.create_aperture(method="prf", threshold=thresh)
+        lc["aperture"].append(target._aperture_photometry())
+
+    # PSF photometry with no bad quality masking
+    lc["psf"] = target._psf_photometry(bad_spoc_bits="none")
+
+    # Create HDUList for TPF and LCF
+    target.tpf_hdulist = target._make_tpf_hdulist(
+        ap_masks=[lc["aperture"][i]["ap_mask"] for i in range(len(lc["aperture"]))],
+        ap_methods=[lc["aperture"][i]["ap_method"] for i in range(len(lc["aperture"]))],
+        ap_params=[lc["aperture"][i]["ap_param"] for i in range(len(lc["aperture"]))],
+    )
+    target.lc_hdulist = target._make_lc_hdulist(lc=lc)
+
+    # Save TPF and LCF
+    target._save_hdulist(file_type="tpf", outdir="tests")
+    target._save_hdulist(file_type="lc", outdir="tests")
+
+    # Check the files exist
+    assert os.path.exists("tests/tess-1980VR1-s0001-1-1-shape11x11-moving_tp.fits")
+    assert os.path.exists("tests/tess-1980VR1-s0001-1-1-shape11x11_lc.fits")
+
+    # Open the TPF with astropy and check properties
+    with fits.open("tests/tess-1980VR1-s0001-1-1-shape11x11-moving_tp.fits") as hdul:
+        assert hdul[1].name == "PIXELS"
+        assert hdul[2].name == "APERTURE0"
+        assert hdul[3].name == "APERTURE1"
+        assert hdul[4].name == "APERTURE2"
+        assert hdul[5].name == "EXTRAS"
+
+        # Check all aperture HDUs have the expected shape
+        assert (
+            hdul[2].data.shape
+            == hdul[3].data.shape
+            == hdul[4].data.shape
+            == target.shape
+        )
+
+        # Check the aperture methods and parameters in the primary header.
+        assert (
+            hdul[0].header["AP0_TYPE"]
+            == hdul[0].header["AP1_TYPE"]
+            == hdul[0].header["AP2_TYPE"]
+            == "prf"
+        )
+        assert hdul[0].header["AP0_PAR"] == 0.01
+        assert hdul[0].header["AP1_PAR"] == 0.05
+        assert hdul[0].header["AP2_PAR"] == 0.1
+
+    # Open the LCF with astropy and check properties
+    with fits.open("tests/tess-1980VR1-s0001-1-1-shape11x11_lc.fits") as hdul:
+        assert hdul[1].name == "LIGHTCURVE_AP0"
+        assert hdul[2].name == "LIGHTCURVE_AP1"
+        assert hdul[3].name == "LIGHTCURVE_AP2"
+        assert hdul[4].name == "LIGHTCURVE_PSF"
+        assert hdul[5].name == "EXTRAS"
+
+        # All HDUs should have the same length
+        # This is only true because we did not use data masking or binning when creating the PSF LC.
+        assert (
+            len(hdul[1].data)
+            == len(hdul[2].data)
+            == len(hdul[3].data)
+            == len(hdul[4].data)
+            == len(hdul[5].data)
+        )
+
+        # Time should be shared between all extensions.
+        # This is only true because we did not use data masking or binning when creating the PSF LC.
+        assert all(
+            (a == hdul[1].data["TIME"]).all()
+            for a in [
+                hdul[2].data["TIME"],
+                hdul[3].data["TIME"],
+                hdul[4].data["TIME"],
+                hdul[5].data["TIME"],
+            ]
+        )
+
+        # All aperture LCs should have the same columns
+        assert hdul[1].columns.names == hdul[2].columns.names == hdul[3].columns.names
+
+        # Check the aperture methods and parameters in the aperture photometry HDUs.
+        assert (
+            hdul[1].header["AP_TYPE"]
+            == hdul[2].header["AP_TYPE"]
+            == hdul[3].header["AP_TYPE"]
+            == "prf"
+        )
+        assert hdul[1].header["AP_PAR"] == 0.01
+        assert hdul[2].header["AP_PAR"] == 0.05
+        assert hdul[3].header["AP_PAR"] == 0.1
+
+    # Delete the files
+    os.remove("tests/tess-1980VR1-s0001-1-1-shape11x11-moving_tp.fits")
+    os.remove("tests/tess-1980VR1-s0001-1-1-shape11x11_lc.fits")
+
+
 def test_comet():
     """
     Check that tess_asteriods runs successfully for an example comet.
