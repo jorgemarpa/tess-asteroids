@@ -2590,6 +2590,29 @@ class MovingTPF:
             else:
                 te_u, te_l = np.nanmax(t) - t_mean, t_mean - np.nanmin(t)
 
+            # If there are no pixels to fit, return nan for flux, flux_err and red_chi2.
+            if not j.any():
+                psf_phot.append(
+                    [
+                        t_mean,
+                        te_u,
+                        te_l,
+                        tc.mean(),
+                        np.median(cn),
+                        np.nan,
+                        np.nan,
+                        np.nan,
+                        qual,
+                        len(bdx),
+                        qual_frac,
+                        pn.any(),
+                        bg_std,
+                        bg_mad,
+                    ]
+                )
+                nfails += 1
+                continue
+
             # Create DM from PRF model
             X = p.ravel()[:, None]
 
