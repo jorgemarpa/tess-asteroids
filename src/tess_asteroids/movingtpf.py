@@ -65,11 +65,12 @@ class MovingTPF:
             products: for FFIs subtract header keyword 'BARYCORR' from 'TSTART'/'TSTOP' and for TPFs/LCFs subtract the
             'TIMECORR' column from the 'TIME' column.
     metadata : dict
-        A dictionary with optional keys {'eccentricity': float, 'inclination': float, 'perihelion': float}.
+        A dictionary with optional keys {'eccentricity': float, 'inclination': float, 'perihelion': float, 'ephem_date': str}.
 
         - 'eccentricity' : Target's orbital eccentricity. This is saved in the TPF/LCF headers.
         - 'inclination' : Target's orbital inclination, in degrees. This is saved in the TPF/LCF headers.
         - 'perihelion' : Target's perihelion distance, in AU. This is saved in the TPF/LCF headers.
+        - 'ephem_date' : Date the ephemeris was generated. Format must be YYYY-MM-DD. This is saved in the TPF/LCF headers.
     """
 
     def __init__(
@@ -135,6 +136,12 @@ class MovingTPF:
                         self.peri
                     )
                 )
+
+        # Save ephemeris date
+        if "ephem_date" in metadata:
+            self.ephem_date = str(metadata["ephem_date"])
+        else:
+            self.ephem_date = None
 
         # Initialise tesscube
         self.cube = TESSCube(sector=self.sector, camera=self.camera, ccd=self.ccd)
@@ -4003,7 +4010,7 @@ class MovingTPF:
         hdu.header.remove("TESSMAG")
 
         # Update existing keywords
-        hdu.header.set("DATE", datetime.now().strftime("%Y-%m-%d"))
+        hdu.header.set("DATE", datetime.now().strftime("%Y-%m-%d"), comment="file creation date")
         hdu.header.set(
             "TSTART",
             self.time[0],
@@ -4038,6 +4045,14 @@ class MovingTPF:
             comment="SPOC version that processed FFI data",
             after="SPOCDATE",
         )
+
+        # Add ephemeris date
+        hdu.header.set(
+            "EPHDATE",
+            self.ephem_date,
+            comment="ephemeris date",
+            after="DATE",
+        )        
 
         # Add keywords to describe how file was created
         hdu.header.set(
@@ -4450,7 +4465,7 @@ class MovingTPF:
 
         # Get target ephemeris and orbital elements using tess-ephem
         logger.info("Retrieving ephemeris for target {0}.".format(target))
-        df_ephem, orbital_elements = ephem(
+        df_ephem, metadata = ephem(
             target, sector=sector, time_step=time_step, orbital_elements=True
         )
 
@@ -4493,10 +4508,13 @@ class MovingTPF:
             ]
         ].reset_index(drop=True)
 
-        # Rename keys in orbital_elements dictionary
-        orbital_elements["inclination"] = orbital_elements.pop("orbital_inclination")
-        orbital_elements["perihelion"] = orbital_elements.pop("perihelion_distance")
+        # Rename keys in metadata dictionary
+        metadata["inclination"] = metadata.pop("orbital_inclination")
+        metadata["perihelion"] = metadata.pop("perihelion_distance")
+
+        # Add date of query to metadata dictionary
+        metadata["ephem_date"] = datetime.now().strftime("%Y-%m-%d")
 
         return MovingTPF(
-            target=target, ephem=df_ephem, barycentric=False, metadata=orbital_elements
+            target=target, ephem=df_ephem, barycentric=False, metadata=metadata
         )
