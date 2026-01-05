@@ -4300,7 +4300,7 @@ class MovingTPF:
             raise ValueError(
                 f"`file_type` must be one of: ['tpf', 'lc']. Not '{file_type}'"
             )
-        hdulist.writeto(outdir + file_name, overwrite=overwrite)
+        hdulist.writeto(outdir + file_name, overwrite=overwrite, checksum=True)
         logger.info("Created file: {0}".format(outdir + file_name))
 
     def animate_tpf(
