@@ -4160,7 +4160,7 @@ class MovingTPF:
                 3,
             )
             if "vmag" in self.ephem
-            else 0.0,
+            else None,
             comment="[mag] predicted V magnitude",
             after="EQUINOX",
         )
@@ -4189,25 +4189,25 @@ class MovingTPF:
                 3,
             )
             if "hmag" in self.ephem and ~np.isnan(self.ephem["hmag"]).all()
-            else 0.0,
-            comment="[mag] H absolute magnitude",
+            else None,
+            comment="[mag] predicted H absolute magnitude",
             after="VMAG",
         )
         hdu.header.set(
             "PERIHEL",
-            round(self.peri, 3) if hasattr(self, "peri") else 0.0,
+            round(self.peri, 3) if hasattr(self, "peri") else None,
             comment="[AU] perihelion distance",
             after="HMAG",
         )
         hdu.header.set(
             "ORBECC",
-            round(self.ecc, 3) if hasattr(self, "ecc") else 0.0,
+            round(self.ecc, 3) if hasattr(self, "ecc") else None,
             comment="orbit eccentricity",
             after="PERIHEL",
         )
         hdu.header.set(
             "ORBINC",
-            round(self.inc, 3) if hasattr(self, "inc") else 0.0,
+            round(self.inc, 3) if hasattr(self, "inc") else None,
             comment="[deg] orbit inclination",
             after="ORBECC",
         )
