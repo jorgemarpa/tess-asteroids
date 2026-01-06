@@ -3332,27 +3332,18 @@ class MovingTPF:
             table_hdu_spoc.header.remove(keyword)
 
         # Update existing keywords
+        for keyword in ["TSTART", "TSTOP", "DATE-OBS", "DATE-END", "OBJECT"]:
+            table_hdu_spoc.header.set(
+                keyword,
+                tpf_hdulist[0].header[keyword],
+                comment=tpf_hdulist[0].header.comments[keyword],
+            )
         table_hdu_spoc.header.set(
-            "TSTART",
-            self.time[0],
-            comment="observation start time in BTJD of first frame",
+            "TELAPSE", table_hdu_spoc.header["TSTOP"] - table_hdu_spoc.header["TSTART"]
         )
-        table_hdu_spoc.header.set(
-            "TSTOP",
-            self.time[-1],
-            comment="observation start time in BTJD of last frame",
-        )
-        table_hdu_spoc.header.set("TELAPSE", self.time[-1] - self.time[0])
-        table_hdu_spoc.header.set(
-            "DATE-OBS", Time(self.time[0] + 2457000, scale="tdb", format="jd").utc.isot
-        )
-        table_hdu_spoc.header.set(
-            "DATE-END", Time(self.time[-1] + 2457000, scale="tdb", format="jd").utc.isot
-        )
-        table_hdu_spoc.header.set("OBJECT", self.target, comment="object name")
         table_hdu_spoc.header.set(
             "LIVETIME",
-            (self.time[-1] - self.time[0]) * table_hdu_spoc.header["DEADC"],
+            table_hdu_spoc.header["TELAPSE"] * table_hdu_spoc.header["DEADC"],
             comment="[d] TELAPSE multiplied by DEADC",
         )
 
@@ -3364,7 +3355,8 @@ class MovingTPF:
         # This format is used to be consistent with the aperture HDU from SPOC.
         for i, ap_mask in enumerate(ap_masks):
             aperture_hdu_average = fits.ImageHDU(
-                data=np.nanmedian(ap_mask, axis=0).astype("int32") * 2,
+                data=np.nanmedian(ap_mask, axis=0).astype("int32")
+                * 2,  # (np.nansum(ap_mask, axis=0) > 0).astype("int32") * 2
                 header=fits.Header(
                     [*self.cube.output_secondary_header.cards, *wcs_header.cards]
                 ),
