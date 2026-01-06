@@ -3337,6 +3337,29 @@ class MovingTPF:
             ),
         )
         table_hdu_spoc.header["EXTNAME"] = "PIXELS"
+        # Remove irrelevent keywords
+        for keyword in ["TICID","RA_OBJ","DEC_OBJ"]:
+            table_hdu_spoc.header.remove(keyword)
+        # Update existing keywords
+        table_hdu_spoc.header.set(
+            "TSTART",
+            self.time[0],
+            comment="observation start time in BTJD of first frame",
+        )
+        table_hdu_spoc.header.set(
+            "TSTOP",
+            self.time[-1],
+            comment="observation start time in BTJD of last frame",
+        )
+        table_hdu_spoc.header.set("TELAPSE",self.time[-1]-self.time[0])        
+        table_hdu_spoc.header.set(
+            "DATE-OBS", Time(self.time[0] + 2457000, scale="tdb", format="jd").utc.isot
+        )
+        table_hdu_spoc.header.set(
+            "DATE-END", Time(self.time[-1] + 2457000, scale="tdb", format="jd").utc.isot
+        )
+        table_hdu_spoc.header.set("OBJECT", self.target, comment="object name")
+        table_hdu_spoc.header.set("LIVETIME", (self.time[-1]-self.time[0])*table_hdu_spoc.header["DEADC"], comment="[d] TELAPSE multiplied by DEADC")
         tpf_hdulist.append(table_hdu_spoc)
 
         # Create image HDU containing average aperture(s).
