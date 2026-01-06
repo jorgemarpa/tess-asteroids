@@ -328,6 +328,10 @@ def make_wcs_header(shape: Tuple[int, int]):
     # Turn WCS into header
     wcs_header = wcs.to_header(relax=True)
 
+    # Remove keywords that we do not want in TPF
+    for keyword in ["RADESYS", "MJDREF", "LONPOLE", "LATPOLE"]:
+        wcs_header.remove(keyword)
+
     # Add the physical WCS keywords
     wcs_header.set("CRVAL1P", corner[1], "value at reference CCD column")
     wcs_header.set("CRVAL2P", corner[0], "value at reference CCD row")

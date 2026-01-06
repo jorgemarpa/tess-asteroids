@@ -3320,7 +3320,9 @@ class MovingTPF:
 
         # Add WCS cards for relevant columns and insert after TDIMn keyword
         for ext in [4, 5, 6, 7]:
-            for card in reversed(list(get_wcs_header_by_extension(wcs_header, ext=ext).cards)):
+            for card in reversed(
+                list(get_wcs_header_by_extension(wcs_header, ext=ext).cards)
+            ):
                 table_hdu_spoc.header.insert(f"TDIM{ext}", card, after=True)
 
         table_hdu_spoc.header["EXTNAME"] = "PIXELS"
@@ -3370,6 +3372,15 @@ class MovingTPF:
             aperture_hdu_average.header["EXTNAME"] = "APERTURE{0}".format(
                 i if len(ap_masks) > 1 else ""
             )
+            aperture_hdu_average.header.set(
+                "OBJECT", self.target, comment="object name"
+            )
+
+            # Remove irrelevent keywords
+            for keyword in ["TICID", "RA_OBJ", "DEC_OBJ"]:
+                aperture_hdu_average.header.remove(keyword)
+
+            # Save to TPF HDUList
             tpf_hdulist.append(aperture_hdu_average)
 
         # Define extra FITS columns
