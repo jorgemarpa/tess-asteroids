@@ -3259,15 +3259,6 @@ class MovingTPF:
             ),
             # Cadence number, as defined by tesscube.
             fits.Column(name="CADENCENO", format="I", array=self.cadence_number),
-            # RAW_CNTS is included to give the files the same structure as the SPOC files
-            fits.Column(
-                name="RAW_CNTS",
-                format=tform.replace("E", "I"),
-                dim=dims,
-                unit="ADU",
-                disp="I8",
-                array=np.zeros_like(self.corr_flux),
-            ),
             fits.Column(
                 name="FLUX",
                 format=tform,
