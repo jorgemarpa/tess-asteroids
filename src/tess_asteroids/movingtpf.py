@@ -4006,11 +4006,28 @@ class MovingTPF:
         # Get primary hdu from tesscube
         hdu = self.cube.output_primary_ext.copy()
 
-        # Remove TESSMAG keyword
-        hdu.header.remove("TESSMAG")
+        # Remove irrelevent keywords
+        for keyword in [
+            "TESSMAG",
+            "TICID",
+            "PXTABLE",
+            "RA_OBJ",
+            "DEC_OBJ",
+            "PMRA",
+            "PMDEC",
+            "PMTOTAL",
+            "TEFF",
+            "LOGG",
+            "MH",
+            "RADIUS",
+            "TICVER",
+        ]:
+            hdu.header.remove(keyword)
 
         # Update existing keywords
-        hdu.header.set("DATE", datetime.now().strftime("%Y-%m-%d"), comment="file creation date")
+        hdu.header.set(
+            "DATE", datetime.now().strftime("%Y-%m-%d"), comment="file creation date"
+        )
         hdu.header.set(
             "TSTART",
             self.time[0],
@@ -4052,7 +4069,7 @@ class MovingTPF:
             self.ephem_date,
             comment="ephemeris date",
             after="DATE",
-        )        
+        )
 
         # Add keywords to describe how file was created
         hdu.header.set(
@@ -4145,7 +4162,7 @@ class MovingTPF:
             if "vmag" in self.ephem
             else 0.0,
             comment="[mag] predicted V magnitude",
-            after="TICVER",
+            after="EQUINOX",
         )
         hdu.header.set(
             "HMAG",
