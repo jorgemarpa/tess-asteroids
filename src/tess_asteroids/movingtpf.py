@@ -3323,7 +3323,6 @@ class MovingTPF:
                     *get_wcs_header_by_extension(wcs_header, ext=5).cards,
                     *get_wcs_header_by_extension(wcs_header, ext=6).cards,
                     *get_wcs_header_by_extension(wcs_header, ext=7).cards,
-                    *get_wcs_header_by_extension(wcs_header, ext=8).cards,
                 ]
             ),
         )
