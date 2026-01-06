@@ -3315,21 +3315,20 @@ class MovingTPF:
 
         # Create SPOC-like table HDU
         table_hdu_spoc = fits.BinTableHDU.from_columns(
-            cols,
-            header=fits.Header(
-                [
-                    *self.cube.output_first_header.cards,
-                    *get_wcs_header_by_extension(wcs_header, ext=4).cards,
-                    *get_wcs_header_by_extension(wcs_header, ext=5).cards,
-                    *get_wcs_header_by_extension(wcs_header, ext=6).cards,
-                    *get_wcs_header_by_extension(wcs_header, ext=7).cards,
-                ]
-            ),
+            cols, header=fits.Header([*self.cube.output_first_header.cards])
         )
+
+        # Add WCS cards for relevant columns and insert after TDIMn keyword
+        for ext in [4, 5, 6, 7]:
+            for card in list(get_wcs_header_by_extension(wcs_header, ext=ext).cards):
+                table_hdu_spoc.header.insert(f"TDIM{ext}", card, after=True)
+
         table_hdu_spoc.header["EXTNAME"] = "PIXELS"
+
         # Remove irrelevent keywords
-        for keyword in ["TICID","RA_OBJ","DEC_OBJ"]:
+        for keyword in ["TICID", "RA_OBJ", "DEC_OBJ"]:
             table_hdu_spoc.header.remove(keyword)
+
         # Update existing keywords
         table_hdu_spoc.header.set(
             "TSTART",
@@ -3341,7 +3340,7 @@ class MovingTPF:
             self.time[-1],
             comment="observation start time in BTJD of last frame",
         )
-        table_hdu_spoc.header.set("TELAPSE",self.time[-1]-self.time[0])        
+        table_hdu_spoc.header.set("TELAPSE", self.time[-1] - self.time[0])
         table_hdu_spoc.header.set(
             "DATE-OBS", Time(self.time[0] + 2457000, scale="tdb", format="jd").utc.isot
         )
@@ -3349,7 +3348,13 @@ class MovingTPF:
             "DATE-END", Time(self.time[-1] + 2457000, scale="tdb", format="jd").utc.isot
         )
         table_hdu_spoc.header.set("OBJECT", self.target, comment="object name")
-        table_hdu_spoc.header.set("LIVETIME", (self.time[-1]-self.time[0])*table_hdu_spoc.header["DEADC"], comment="[d] TELAPSE multiplied by DEADC")
+        table_hdu_spoc.header.set(
+            "LIVETIME",
+            (self.time[-1] - self.time[0]) * table_hdu_spoc.header["DEADC"],
+            comment="[d] TELAPSE multiplied by DEADC",
+        )
+
+        # Save to TPF HDUList
         tpf_hdulist.append(table_hdu_spoc)
 
         # Create image HDU containing average aperture(s).
