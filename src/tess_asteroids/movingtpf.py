@@ -2387,6 +2387,7 @@ class MovingTPF:
         self,
         time_bin_size: Optional[float] = None,
         bad_spoc_bits: Union[list, str] = "default",
+        progress_bar: bool = True,
         **kwargs,
     ):
         """
@@ -2412,6 +2413,8 @@ class MovingTPF:
             as bad quality, there will be no lightcurve data for that window.
             More information about the SPOC quality flags can be found in Section 9 of the TESS Science Data Products
             Description Document.
+        progress_bar : bool
+            If `True`, a progress bar will be displayed for the computation of the PSF photometry.
 
         Returns:
         --------
@@ -2542,7 +2545,7 @@ class MovingTPF:
         nfails = 0
 
         # Iterate over each binning window to compute PSF photometry
-        for bdx in tqdm(bin_index, total=len(bin_index)):
+        for bdx in tqdm(bin_index, total=len(bin_index), disable=not progress_bar):
             # Assign variables inside the loop
             bdx = np.atleast_1d(bdx)
             t = time[bdx]
