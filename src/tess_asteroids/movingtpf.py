@@ -141,7 +141,7 @@ class MovingTPF:
         if "ephem_date" in metadata:
             self.ephem_date = str(metadata["ephem_date"])
         else:
-            self.ephem_date = None
+            self.ephem_date = None  # type: ignore
 
         # Initialise tesscube
         self.cube = TESSCube(sector=self.sector, camera=self.camera, ccd=self.ccd)

@@ -745,7 +745,7 @@ def test_comet():
     with fits.open("tests/tess-C2016N6-s0007-2-1-shape20x20-moving_tp.fits") as hdul:
         # Check primary header
         assert hdul[0].header["OBJECT"].strip() == "C/2016 N6"
-        assert hdul[0].header["HMAG"] == 0
+        assert hdul[0].header["HMAG"] is None
 
     # Delete the files
     os.remove("tests/tess-C2016N6-s0007-2-1-shape20x20-moving_tp.fits")
