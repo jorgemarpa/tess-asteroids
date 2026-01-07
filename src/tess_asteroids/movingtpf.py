@@ -151,7 +151,11 @@ class MovingTPF:
             async_get_primary_hdu, object_key=self.cube.object_key
         ).header
 
-        logger.info("Initialised MovingTPF for target {0}.".format(self.target))
+        logger.info(
+            "Initialised MovingTPF for target {0} in sector {1}, camera {2}, ccd {3}.".format(
+                self.target, self.sector, self.camera, self.ccd
+            )
+        )
 
     def make_tpf(
         self,
@@ -4505,7 +4509,11 @@ class MovingTPF:
         """
 
         # Get target ephemeris and orbital elements using tess-ephem
-        logger.info("Retrieving ephemeris for target {0}.".format(target))
+        logger.info(
+            "Retrieving ephemeris for target {0} in sector {1}, camera {2}, ccd {3}.".format(
+                target, sector, camera, ccd
+            )
+        )
         df_ephem, metadata = ephem(
             target, sector=sector, time_step=time_step, orbital_elements=True
         )
