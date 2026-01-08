@@ -813,6 +813,7 @@ class MovingTPF:
         sigma: float = 5,
         niter_clip: int = 3,
         diagnostic_plot: bool = False,
+        outdir: str = "",
         **kwargs,
     ):
         """
@@ -850,6 +851,8 @@ class MovingTPF:
             - To clip until no outliers remain, set `niter_clip` to `np.inf`.
         diagnostic_plot : bool
             If True, shows two diagnostic plots to check the scattered light model.
+        outdir : str
+            If `diagnostic_plot`, this is the directory into which the plot will be saved.
         kwargs : dict
             Keywords arguments passed to `self._create_pca_source_mask`, e.g `target_threshold`, `star_flux_threshold`.
 
@@ -1077,6 +1080,20 @@ class MovingTPF:
 
         if diagnostic_plot:
             logger.info("Making diagnostic plots for scattered light model...")
+
+            # Check format of outdir
+            if len(outdir) > 0 and not outdir.endswith("/"):
+                outdir += "/"
+
+            # Create file name prefix
+            file_name = "tess-{0}-s{1:04}-{2}-{3}-shape{4}x{5}".format(
+                str(self.target).replace(" ", "").replace("/", ""),
+                self.sector,
+                self.camera,
+                self.ccd,
+                *self.shape,
+            )
+
             # Plot one: SL model on 2D pixel grid in all_flux region for selection of frames.
             # Origin is minimum row/column (not a pair) and shape is entire all_flux region.
             origin = tuple(self.pixels.min(axis=0).astype(int))
@@ -1120,8 +1137,9 @@ class MovingTPF:
                     ax[i].set(ylabel="Row Pixel")
                 cbar = fig.colorbar(im, ax=ax[i], location="right")
                 cbar.set_label("Flux [$e^-/s$]")
-            plt.show()
+            plt.savefig(outdir + file_name + "-sl_2d.png")
             plt.close(fig)
+            logger.info("Created file: {0}".format(outdir + file_name + "-sl_2d.png"))
 
             # Plot two: time-series of SL model for each pixel.
             # Note: setting aspect="auto" means pixels are not square in these visualisations.
@@ -1135,8 +1153,9 @@ class MovingTPF:
             # Add colorbar
             cbar = fig.colorbar(im, ax=ax, location="right")
             cbar.set_label("Flux [$e^-/s$]")
-            plt.show()
+            plt.savefig(outdir + file_name + "-sl_time.png")
             plt.close(fig)
+            logger.info("Created file: {0}".format(outdir + file_name + "-sl_time.png"))
 
         return np.asarray(sl_model), np.asarray(sl_model_err)
 
@@ -1219,6 +1238,7 @@ class MovingTPF:
         reshape: bool = True,
         progress_bar: bool = True,
         diagnostic_plot: bool = False,
+        outdir: str = "",
         **kwargs,
     ):
         """
@@ -1285,6 +1305,8 @@ class MovingTPF:
             If `True`, a progress bar will be displayed for the computation of the star model.
         diagnostic_plot : bool
             If True, shows diagnostic plots to check the scattered light model and star model.
+        outdir : str
+            If `diagnostic_plot`, this is the directory into which the plot will be saved.
         kwargs : dict
             Keywords arguments passed to `_create_scattered_light_model` (e.g. `niter`, `ncomponents`)
             and `_create_pca_source_mask` (e.g `target_threshold`, `star_flux_threshold`).
@@ -1337,6 +1359,7 @@ class MovingTPF:
                 data_chunks=data_chunks,
                 spoc_quality_mask=spoc_quality_mask,
                 diagnostic_plot=diagnostic_plot,
+                outdir=outdir,
                 **kwargs,
             )
         else:
@@ -1595,6 +1618,20 @@ class MovingTPF:
 
         if diagnostic_plot:
             logger.info("Making diagnostic plots for background model...")
+
+            # Check format of outdir
+            if len(outdir) > 0 and not outdir.endswith("/"):
+                outdir += "/"
+
+            # Create file name
+            file_name = "tess-{0}-s{1:04}-{2}-{3}-shape{4}x{5}-bg_model.png".format(
+                str(self.target).replace(" ", "").replace("/", ""),
+                self.sector,
+                self.camera,
+                self.ccd,
+                *self.shape,
+            )
+
             fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 10))
 
             vmin = np.nanpercentile(self.all_flux, 1)
@@ -1649,8 +1686,9 @@ class MovingTPF:
             cbar.set_label("Flux [$e^-/s$]")
 
             fig.tight_layout()
-            plt.show()
+            plt.savefig(outdir + file_name)
             plt.close(fig)
+            logger.info("Created file: {0}".format(outdir + file_name))
 
         # Reshape arrays to match `self.flux`
         if reshape:
