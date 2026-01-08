@@ -1778,7 +1778,13 @@ class MovingTPF:
 
         self.ap_method = method
 
-        logger.info("Created aperture using method {0}.".format(self.ap_method))
+        logger.info(
+            "Created aperture using method {0} with {1} = {2}.".format(
+                self.ap_method,
+                "threshold" if self.ap_method in ["prf", "threshold"] else "R value",
+                self.ap_param,
+            )
+        )
 
     def _create_threshold_aperture(
         self,
