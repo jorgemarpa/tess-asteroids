@@ -3405,25 +3405,25 @@ class MovingTPF:
         # Aperture has values 0 and 2, where 0/2 indicates the pixel is outside/inside the aperture.
         # This format is used to be consistent with the aperture HDU from SPOC.
         for i, ap_mask in enumerate(ap_masks):
-            aperture_hdu_average = fits.ImageHDU(
+            aperture_hdu = fits.ImageHDU(
                 data=(np.nansum(ap_mask, axis=0) > 0).astype("int32") * 2,
                 header=fits.Header(
                     [*self.cube.output_secondary_header.cards, *wcs_header.cards]
                 ),
             )
-            aperture_hdu_average.header["EXTNAME"] = "APERTURE{0}".format(
+            aperture_hdu.header["EXTNAME"] = "APERTURE{0}".format(
                 i if len(ap_masks) > 1 else ""
             )
-            aperture_hdu_average.header.set(
+            aperture_hdu.header.set(
                 "OBJECT", self.target, comment="object name"
             )
 
             # Remove irrelevent keywords
             for keyword in ["TICID", "RA_OBJ", "DEC_OBJ"]:
-                aperture_hdu_average.header.remove(keyword)
+                aperture_hdu.header.remove(keyword)
 
             # Save to TPF HDUList
-            tpf_hdulist.append(aperture_hdu_average)
+            tpf_hdulist.append(aperture_hdu)
 
         # Define extra FITS columns
         cols = [
