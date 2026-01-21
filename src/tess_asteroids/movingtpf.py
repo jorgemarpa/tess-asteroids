@@ -3401,13 +3401,12 @@ class MovingTPF:
         # Save to TPF HDUList
         tpf_hdulist.append(table_hdu_spoc)
 
-        # Create image HDU containing average aperture(s).
+        # Create image HDU containing flattened aperture(s).
         # Aperture has values 0 and 2, where 0/2 indicates the pixel is outside/inside the aperture.
         # This format is used to be consistent with the aperture HDU from SPOC.
         for i, ap_mask in enumerate(ap_masks):
             aperture_hdu_average = fits.ImageHDU(
-                data=np.nanmedian(ap_mask, axis=0).astype("int32")
-                * 2,  # (np.nansum(ap_mask, axis=0) > 0).astype("int32") * 2
+                data=(np.nansum(ap_mask, axis=0) > 0).astype("int32") * 2,
                 header=fits.Header(
                     [*self.cube.output_secondary_header.cards, *wcs_header.cards]
                 ),
