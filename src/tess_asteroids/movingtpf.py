@@ -3414,9 +3414,7 @@ class MovingTPF:
             aperture_hdu.header["EXTNAME"] = "APERTURE{0}".format(
                 i if len(ap_masks) > 1 else ""
             )
-            aperture_hdu.header.set(
-                "OBJECT", self.target, comment="object name"
-            )
+            aperture_hdu.header.set("OBJECT", self.target, comment="object name")
 
             # Remove irrelevent keywords
             for keyword in ["TICID", "RA_OBJ", "DEC_OBJ"]:
