@@ -1328,9 +1328,17 @@ class MovingTPF:
                 diagnostic_plot=diagnostic_plot,
                 **kwargs,
             )
+        elif sl_method == "spoc":
+            if not hasattr(self, "sl_model"):
+                raise AttributeError(
+                    "Must run `get_data_tpfs(use_spoc_bg=True)` before computing background with `sl_method='spoc'`."
+                )
+            logger.info("Using SPOC SL model.")
+            sl_model = self.sl_model
+            sl_model_err = self.sl_model_err
         else:
             raise ValueError(
-                "`sl_method` must be one of: [`pca`]. Not `{0}`".format(sl_method)
+                "`sl_method` must be one of: [`pca`, `spoc`]. Not `{0}`".format(sl_method)
             )
 
         # Remove scattered light from flux
