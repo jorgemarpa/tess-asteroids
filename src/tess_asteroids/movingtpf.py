@@ -4077,6 +4077,7 @@ class MovingTPF:
 
         # Get primary hdu from tesscube
         hdu = self.cube.output_primary_ext.copy()
+        hdu.header["EXTNAME"] = "PRIMARY"
 
         # Remove irrelevent keywords
         for keyword in [
