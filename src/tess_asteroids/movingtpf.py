@@ -65,11 +65,12 @@ class MovingTPF:
             products: for FFIs subtract header keyword 'BARYCORR' from 'TSTART'/'TSTOP' and for TPFs/LCFs subtract the
             'TIMECORR' column from the 'TIME' column.
     metadata : dict
-        A dictionary with optional keys {'eccentricity': float, 'inclination': float, 'perihelion': float}.
+        A dictionary with optional keys {'eccentricity': float, 'inclination': float, 'perihelion': float, 'ephem_date': str}.
 
         - 'eccentricity' : Target's orbital eccentricity. This is saved in the TPF/LCF headers.
         - 'inclination' : Target's orbital inclination, in degrees. This is saved in the TPF/LCF headers.
         - 'perihelion' : Target's perihelion distance, in AU. This is saved in the TPF/LCF headers.
+        - 'ephem_date' : Date the ephemeris was generated. Format must be YYYY-MM-DD. This is saved in the TPF/LCF headers.
     """
 
     def __init__(
@@ -136,6 +137,12 @@ class MovingTPF:
                     )
                 )
 
+        # Save ephemeris date
+        if "ephem_date" in metadata:
+            self.ephem_date = str(metadata["ephem_date"])
+        else:
+            self.ephem_date = None  # type: ignore
+
         # Initialise tesscube
         self.cube = TESSCube(sector=self.sector, camera=self.camera, ccd=self.ccd)
 
@@ -144,7 +151,11 @@ class MovingTPF:
             async_get_primary_hdu, object_key=self.cube.object_key
         ).header
 
-        logger.info("Initialised MovingTPF for target {0}.".format(self.target))
+        logger.info(
+            "Initialised MovingTPF for target {0} in sector {1}, camera {2}, ccd {3}.".format(
+                self.target, self.sector, self.camera, self.ccd
+            )
+        )
 
     def make_tpf(
         self,
@@ -802,6 +813,7 @@ class MovingTPF:
         sigma: float = 5,
         niter_clip: int = 3,
         diagnostic_plot: bool = False,
+        outdir: str = "",
         **kwargs,
     ):
         """
@@ -839,6 +851,8 @@ class MovingTPF:
             - To clip until no outliers remain, set `niter_clip` to `np.inf`.
         diagnostic_plot : bool
             If True, shows two diagnostic plots to check the scattered light model.
+        outdir : str
+            If `diagnostic_plot`, this is the directory into which the plot will be saved.
         kwargs : dict
             Keywords arguments passed to `self._create_pca_source_mask`, e.g `target_threshold`, `star_flux_threshold`.
 
@@ -1066,6 +1080,20 @@ class MovingTPF:
 
         if diagnostic_plot:
             logger.info("Making diagnostic plots for scattered light model...")
+
+            # Check format of outdir
+            if len(outdir) > 0 and not outdir.endswith("/"):
+                outdir += "/"
+
+            # Create file name prefix
+            file_name = "tess-{0}-s{1:04}-{2}-{3}-shape{4}x{5}".format(
+                str(self.target).replace(" ", "").replace("/", ""),
+                self.sector,
+                self.camera,
+                self.ccd,
+                *self.shape,
+            )
+
             # Plot one: SL model on 2D pixel grid in all_flux region for selection of frames.
             # Origin is minimum row/column (not a pair) and shape is entire all_flux region.
             origin = tuple(self.pixels.min(axis=0).astype(int))
@@ -1109,8 +1137,9 @@ class MovingTPF:
                     ax[i].set(ylabel="Row Pixel")
                 cbar = fig.colorbar(im, ax=ax[i], location="right")
                 cbar.set_label("Flux [$e^-/s$]")
-            plt.show()
+            plt.savefig(outdir + file_name + "-sl_2d.png")
             plt.close(fig)
+            logger.info("Created file: {0}".format(outdir + file_name + "-sl_2d.png"))
 
             # Plot two: time-series of SL model for each pixel.
             # Note: setting aspect="auto" means pixels are not square in these visualisations.
@@ -1124,8 +1153,9 @@ class MovingTPF:
             # Add colorbar
             cbar = fig.colorbar(im, ax=ax, location="right")
             cbar.set_label("Flux [$e^-/s$]")
-            plt.show()
+            plt.savefig(outdir + file_name + "-sl_time.png")
             plt.close(fig)
+            logger.info("Created file: {0}".format(outdir + file_name + "-sl_time.png"))
 
         return np.asarray(sl_model), np.asarray(sl_model_err)
 
@@ -1208,6 +1238,7 @@ class MovingTPF:
         reshape: bool = True,
         progress_bar: bool = True,
         diagnostic_plot: bool = False,
+        outdir: str = "",
         **kwargs,
     ):
         """
@@ -1274,6 +1305,8 @@ class MovingTPF:
             If `True`, a progress bar will be displayed for the computation of the star model.
         diagnostic_plot : bool
             If True, shows diagnostic plots to check the scattered light model and star model.
+        outdir : str
+            If `diagnostic_plot`, this is the directory into which the plot will be saved.
         kwargs : dict
             Keywords arguments passed to `_create_scattered_light_model` (e.g. `niter`, `ncomponents`)
             and `_create_pca_source_mask` (e.g `target_threshold`, `star_flux_threshold`).
@@ -1326,6 +1359,7 @@ class MovingTPF:
                 data_chunks=data_chunks,
                 spoc_quality_mask=spoc_quality_mask,
                 diagnostic_plot=diagnostic_plot,
+                outdir=outdir,
                 **kwargs,
             )
         elif sl_method == "spoc":
@@ -1592,6 +1626,20 @@ class MovingTPF:
 
         if diagnostic_plot:
             logger.info("Making diagnostic plots for background model...")
+
+            # Check format of outdir
+            if len(outdir) > 0 and not outdir.endswith("/"):
+                outdir += "/"
+
+            # Create file name
+            file_name = "tess-{0}-s{1:04}-{2}-{3}-shape{4}x{5}-bg_model.png".format(
+                str(self.target).replace(" ", "").replace("/", ""),
+                self.sector,
+                self.camera,
+                self.ccd,
+                *self.shape,
+            )
+
             fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 10))
 
             vmin = np.nanpercentile(self.all_flux, 1)
@@ -1646,8 +1694,9 @@ class MovingTPF:
             cbar.set_label("Flux [$e^-/s$]")
 
             fig.tight_layout()
-            plt.show()
+            plt.savefig(outdir + file_name)
             plt.close(fig)
+            logger.info("Created file: {0}".format(outdir + file_name))
 
         # Reshape arrays to match `self.flux`
         if reshape:
@@ -1737,7 +1786,13 @@ class MovingTPF:
 
         self.ap_method = method
 
-        logger.info("Created aperture using method {0}.".format(self.ap_method))
+        logger.info(
+            "Created aperture using method {0} with {1} = {2}.".format(
+                self.ap_method,
+                "threshold" if self.ap_method in ["prf", "threshold"] else "R value",
+                self.ap_param,
+            )
+        )
 
     def _create_threshold_aperture(
         self,
@@ -2388,6 +2443,7 @@ class MovingTPF:
         self,
         time_bin_size: Optional[float] = None,
         bad_spoc_bits: Union[list, str] = "default",
+        progress_bar: bool = True,
         **kwargs,
     ):
         """
@@ -2413,6 +2469,8 @@ class MovingTPF:
             as bad quality, there will be no lightcurve data for that window.
             More information about the SPOC quality flags can be found in Section 9 of the TESS Science Data Products
             Description Document.
+        progress_bar : bool
+            If `True`, a progress bar will be displayed for the computation of the PSF photometry.
 
         Returns:
         --------
@@ -2543,7 +2601,7 @@ class MovingTPF:
         nfails = 0
 
         # Iterate over each binning window to compute PSF photometry
-        for bdx in tqdm(bin_index, total=len(bin_index)):
+        for bdx in tqdm(bin_index, total=len(bin_index), disable=not progress_bar):
             # Assign variables inside the loop
             bdx = np.atleast_1d(bdx)
             t = time[bdx]
@@ -3260,15 +3318,6 @@ class MovingTPF:
             ),
             # Cadence number, as defined by tesscube.
             fits.Column(name="CADENCENO", format="I", array=self.cadence_number),
-            # RAW_CNTS is included to give the files the same structure as the SPOC files
-            fits.Column(
-                name="RAW_CNTS",
-                format=tform.replace("E", "I"),
-                dim=dims,
-                unit="ADU",
-                disp="I8",
-                array=np.zeros_like(self.corr_flux),
-            ),
             fits.Column(
                 name="FLUX",
                 format=tform,
@@ -3325,35 +3374,62 @@ class MovingTPF:
 
         # Create SPOC-like table HDU
         table_hdu_spoc = fits.BinTableHDU.from_columns(
-            cols,
-            header=fits.Header(
-                [
-                    *self.cube.output_first_header.cards,
-                    *get_wcs_header_by_extension(wcs_header, ext=4).cards,
-                    *get_wcs_header_by_extension(wcs_header, ext=5).cards,
-                    *get_wcs_header_by_extension(wcs_header, ext=6).cards,
-                    *get_wcs_header_by_extension(wcs_header, ext=7).cards,
-                    *get_wcs_header_by_extension(wcs_header, ext=8).cards,
-                ]
-            ),
+            cols, header=fits.Header([*self.cube.output_first_header.cards])
         )
+
+        # Add WCS cards for relevant columns and insert after TDIMn keyword
+        for ext in [4, 5, 6, 7]:
+            for card in reversed(
+                list(get_wcs_header_by_extension(wcs_header, ext=ext).cards)
+            ):
+                table_hdu_spoc.header.insert(f"TDIM{ext}", card, after=True)
+
         table_hdu_spoc.header["EXTNAME"] = "PIXELS"
+
+        # Remove irrelevent keywords
+        for keyword in ["TICID", "RA_OBJ", "DEC_OBJ"]:
+            table_hdu_spoc.header.remove(keyword)
+
+        # Update existing keywords
+        for keyword in ["TSTART", "TSTOP", "DATE-OBS", "DATE-END", "OBJECT"]:
+            table_hdu_spoc.header.set(
+                keyword,
+                tpf_hdulist[0].header[keyword],
+                comment=tpf_hdulist[0].header.comments[keyword],
+            )
+        table_hdu_spoc.header.set(
+            "TELAPSE", table_hdu_spoc.header["TSTOP"] - table_hdu_spoc.header["TSTART"]
+        )
+        table_hdu_spoc.header.set(
+            "LIVETIME",
+            table_hdu_spoc.header["TELAPSE"] * table_hdu_spoc.header["DEADC"],
+            comment="[d] TELAPSE multiplied by DEADC",
+        )
+
+        # Save to TPF HDUList
         tpf_hdulist.append(table_hdu_spoc)
 
-        # Create image HDU containing average aperture(s).
+        # Create image HDU containing flattened aperture(s).
         # Aperture has values 0 and 2, where 0/2 indicates the pixel is outside/inside the aperture.
         # This format is used to be consistent with the aperture HDU from SPOC.
         for i, ap_mask in enumerate(ap_masks):
-            aperture_hdu_average = fits.ImageHDU(
-                data=np.nanmedian(ap_mask, axis=0).astype("int32") * 2,
+            aperture_hdu = fits.ImageHDU(
+                data=(np.nansum(ap_mask, axis=0) > 0).astype("int32") * 2,
                 header=fits.Header(
                     [*self.cube.output_secondary_header.cards, *wcs_header.cards]
                 ),
             )
-            aperture_hdu_average.header["EXTNAME"] = "APERTURE{0}".format(
+            aperture_hdu.header["EXTNAME"] = "APERTURE{0}".format(
                 i if len(ap_masks) > 1 else ""
             )
-            tpf_hdulist.append(aperture_hdu_average)
+            aperture_hdu.header.set("OBJECT", self.target, comment="object name")
+
+            # Remove irrelevent keywords
+            for keyword in ["TICID", "RA_OBJ", "DEC_OBJ"]:
+                aperture_hdu.header.remove(keyword)
+
+            # Save to TPF HDUList
+            tpf_hdulist.append(aperture_hdu)
 
         # Define extra FITS columns
         cols = [
@@ -4006,12 +4082,30 @@ class MovingTPF:
 
         # Get primary hdu from tesscube
         hdu = self.cube.output_primary_ext.copy()
+        hdu.header["EXTNAME"] = "PRIMARY"
 
-        # Remove TESSMAG keyword
-        hdu.header.remove("TESSMAG")
+        # Remove irrelevent keywords
+        for keyword in [
+            "TESSMAG",
+            "TICID",
+            "PXTABLE",
+            "RA_OBJ",
+            "DEC_OBJ",
+            "PMRA",
+            "PMDEC",
+            "PMTOTAL",
+            "TEFF",
+            "LOGG",
+            "MH",
+            "RADIUS",
+            "TICVER",
+        ]:
+            hdu.header.remove(keyword)
 
         # Update existing keywords
-        hdu.header.set("DATE", datetime.now().strftime("%Y-%m-%d"))
+        hdu.header.set(
+            "DATE", datetime.now().strftime("%Y-%m-%d"), comment="file creation date"
+        )
         hdu.header.set(
             "TSTART",
             self.time[0],
@@ -4045,6 +4139,14 @@ class MovingTPF:
             self.primary_hdu["PROCVER"],
             comment="SPOC version that processed FFI data",
             after="SPOCDATE",
+        )
+
+        # Add ephemeris date
+        hdu.header.set(
+            "EPHDATE",
+            self.ephem_date,
+            comment="ephemeris date",
+            after="DATE",
         )
 
         # Add keywords to describe how file was created
@@ -4136,9 +4238,9 @@ class MovingTPF:
                 3,
             )
             if "vmag" in self.ephem
-            else 0.0,
+            else None,
             comment="[mag] predicted V magnitude",
-            after="TICVER",
+            after="EQUINOX",
         )
         hdu.header.set(
             "HMAG",
@@ -4165,25 +4267,25 @@ class MovingTPF:
                 3,
             )
             if "hmag" in self.ephem and ~np.isnan(self.ephem["hmag"]).all()
-            else 0.0,
-            comment="[mag] H absolute magnitude",
+            else None,
+            comment="[mag] predicted H absolute magnitude",
             after="VMAG",
         )
         hdu.header.set(
             "PERIHEL",
-            round(self.peri, 3) if hasattr(self, "peri") else 0.0,
+            round(self.peri, 3) if hasattr(self, "peri") else None,
             comment="[AU] perihelion distance",
             after="HMAG",
         )
         hdu.header.set(
             "ORBECC",
-            round(self.ecc, 3) if hasattr(self, "ecc") else 0.0,
+            round(self.ecc, 3) if hasattr(self, "ecc") else None,
             comment="orbit eccentricity",
             after="PERIHEL",
         )
         hdu.header.set(
             "ORBINC",
-            round(self.inc, 3) if hasattr(self, "inc") else 0.0,
+            round(self.inc, 3) if hasattr(self, "inc") else None,
             comment="[deg] orbit inclination",
             after="ORBECC",
         )
@@ -4308,7 +4410,7 @@ class MovingTPF:
             raise ValueError(
                 f"`file_type` must be one of: ['tpf', 'lc']. Not '{file_type}'"
             )
-        hdulist.writeto(outdir + file_name, overwrite=overwrite)
+        hdulist.writeto(outdir + file_name, overwrite=overwrite, checksum=True)
         logger.info("Created file: {0}".format(outdir + file_name))
 
     def animate_tpf(
@@ -4457,8 +4559,12 @@ class MovingTPF:
         """
 
         # Get target ephemeris and orbital elements using tess-ephem
-        logger.info("Retrieving ephemeris for target {0}.".format(target))
-        df_ephem, orbital_elements = ephem(
+        logger.info(
+            "Retrieving ephemeris for target {0} in sector {1}, camera {2}, ccd {3}.".format(
+                target, sector, camera, ccd
+            )
+        )
+        df_ephem, metadata = ephem(
             target, sector=sector, time_step=time_step, orbital_elements=True
         )
 
@@ -4501,10 +4607,13 @@ class MovingTPF:
             ]
         ].reset_index(drop=True)
 
-        # Rename keys in orbital_elements dictionary
-        orbital_elements["inclination"] = orbital_elements.pop("orbital_inclination")
-        orbital_elements["perihelion"] = orbital_elements.pop("perihelion_distance")
+        # Rename keys in metadata dictionary
+        metadata["inclination"] = metadata.pop("orbital_inclination")
+        metadata["perihelion"] = metadata.pop("perihelion_distance")
+
+        # Add date of query to metadata dictionary
+        metadata["ephem_date"] = datetime.now().strftime("%Y-%m-%d")
 
         return MovingTPF(
-            target=target, ephem=df_ephem, barycentric=False, metadata=orbital_elements
+            target=target, ephem=df_ephem, barycentric=False, metadata=metadata
         )
