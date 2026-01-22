@@ -499,7 +499,7 @@ class MovingTPF:
         self.flux = np.asarray(self.flux)
         self.flux_err = np.asarray(self.flux_err)
 
-    def background_correction(self, method: str = "linear_model", **kwargs):
+    def background_correction(self, method: str = "linear_model", target_mask: Optional[np.ndarray] = None, **kwargs):
         """
         Apply background correction to reshaped flux data.
 
@@ -538,8 +538,8 @@ class MovingTPF:
             self.bg, self.bg_err = self._bg_rolling_median(**kwargs)
 
         elif method == "linear_model":
-            self.bg, self.bg_err, _, _, _, _ = self._bg_linear_model(
-                reshape=True, **kwargs
+            self.bg, self.bg_err, self.sl_model, _, self.star_model, _ = (
+                self._bg_linear_model(reshape=True, target_mask=target_mask, **kwargs)
             )
 
         else:
@@ -1239,6 +1239,7 @@ class MovingTPF:
         progress_bar: bool = True,
         diagnostic_plot: bool = False,
         outdir: str = "",
+        target_mask: Optional[np.ndarray] = None,
         **kwargs,
     ):
         """
@@ -1391,8 +1392,13 @@ class MovingTPF:
         # Identify nans in SL corrected flux (e.g. SL model failed).
         nan_mask = np.isnan(sl_corr_flux)
 
-        # Create mask for moving target.
-        source_mask = self._create_source_mask(include_stars=False, **kwargs)
+        if target_mask is None:
+            # Create mask for moving target.
+            source_mask = self._create_source_mask(include_stars=False, **kwargs)
+        else:
+            # Use user-defined target mask.
+            print("Using user-defined target mask for star model.")
+            source_mask = target_mask
 
         # Define equally spaced knots between bounds, with spacing approximately equal to `knot_width`.
         # It is important to include an extra knot at the lower bound - this gives proper behaviour of spline.
