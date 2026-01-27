@@ -195,7 +195,7 @@ class MovingTPF:
 
     def make_lc(
         self,
-        method: str = "aperture",
+        method: str = "all",
         save: bool = False,
         file_name: Optional[str] = None,
         outdir: str = "",
