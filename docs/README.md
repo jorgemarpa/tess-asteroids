@@ -13,9 +13,16 @@ See the full documentation, including tutorials, [here](https://altuson.github.i
 
 ## Installation
 
-The easiest way to install `tess-asteroids` and all of its dependencies is to run the following command in a terminal window:
+The easiest way to install `tess-asteroids` and all of its dependencies is to use `pip`. We recommend you do this installation in a new [virtual environment](https://docs.conda.io/projects/conda/en/latest/user-guide/tasks/manage-environments.html) by running the following commands in a terminal window:
 
 ```bash
+# Create new environment called tess-asteroids with Python 3.10
+conda create -n tess-asteroids python=3.10
+
+# Activate environment
+conda activate tess-asteroids
+
+# Install tess-asteroids (latest stable version)
 pip install tess-asteroids
 ```
 
