@@ -83,7 +83,8 @@ def target_observability(
 ):
     """
     Determine if a target has been observed by TESS and, if so, during which sector/camera/CCD. This function will also
-    give an estimate of the length of time, in days, for which the target was observed on each sector/camera/CCD.
+    give an estimate of the length of time, in days, for which the target was observed on each sector/camera/CCD and its
+    predicted average visual magnitude.
 
     Parameters
     ----------
@@ -103,6 +104,7 @@ def target_observability(
 
         - 'sector', 'camera', 'ccd': sector/camera/CCD target was observed in.
         - 'dur': approximate duration for which target was observed in this sector/camera/CCD, in days.
+        - 'vmag': average predicted visual magnitude of the target.
     df_ephem : DataFrame
         If `return_ephem` = True, the ephemeris will also be returned. This includes the pixel 'row' and 'column'
         of the target over time.
@@ -110,14 +112,14 @@ def target_observability(
 
     df_ephem = ephem(target, sector=sector)
 
-    obs = {"sector": [], "camera": [], "ccd": [], "dur": []}  # type: dict
+    obs = {"sector": [], "camera": [], "ccd": [], "dur": [], "vmag": []}  # type: dict
     if len(df_ephem) != 0:
         unique_combinations = df_ephem[["sector", "camera", "ccd"]].drop_duplicates()
         for _, combo in unique_combinations.iterrows():
             obs["sector"].append(combo["sector"])
             obs["camera"].append(combo["camera"])
             obs["ccd"].append(combo["ccd"])
-            time = df_ephem[
+            df_combo = df_ephem[
                 np.logical_and(
                     df_ephem["sector"] == obs["sector"][-1],
                     np.logical_and(
@@ -125,8 +127,9 @@ def target_observability(
                         df_ephem["ccd"] == obs["ccd"][-1],
                     ),
                 )
-            ].index
-            obs["dur"].append((np.nanmax(time) - np.nanmin(time)).value)
+            ]
+            obs["dur"].append((np.nanmax(df_combo.index) - np.nanmin(df_combo.index)).value)
+            obs["vmag"].append(np.nanmean(df_combo["vmag"]))
 
     if return_ephem:
         return pd.DataFrame(obs), df_ephem
