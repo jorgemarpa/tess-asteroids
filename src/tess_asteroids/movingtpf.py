@@ -2532,7 +2532,7 @@ class MovingTPF:
         cadno = self.cadence_number[spoc_quality_mask]
         pixel_quality = self.pixel_quality[spoc_quality_mask]
 
-        # If all data has been masked, raise warning and return nan.
+        # If all data has been masked, raise warning and return empty arrays.
         if len(time) == 0:
             logger.warning(
                 "During PSF photometry, all times were masked and no PSF light curve was derived."
@@ -2674,11 +2674,6 @@ class MovingTPF:
             try:
                 # If there are no pixels to fit, raise a LinAlgError.
                 if (~j).all():
-                    logger.warning(
-                        "During PSF photometry, all pixels were masked in the bin centered at time {0:.04f} BTJD. The PSF flux is NaN.".format(
-                            t_mean
-                        )
-                    )
                     raise np.linalg.LinAlgError()
 
                 # Compute flux
@@ -2739,7 +2734,7 @@ class MovingTPF:
 
         if nfails > 0:
             logger.warning(
-                f"During PRF fitting, {nfails} cadences did not solve. These cadences will be replaced by `NaN`."
+                f"During PSF photometry, {nfails} cadences did not solve. These cadences will be replaced by `NaN`."
             )
 
         (
