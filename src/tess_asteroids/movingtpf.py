@@ -2619,15 +2619,13 @@ class MovingTPF:
             pmu = flux_prior[bdx]
             pixel_qualities.append(pixel_quality[bdx])
 
-            # Find finite values and pixels with PRF value > 0.001%.
+            # Use pixels with PRF value > 0.001% for fitting.
             # This value is small to include all pixels where the PRF has contribution.
-            pixel_masks.append(
-                np.logical_and(
-                    p > 0.00001,
-                    np.logical_and(np.isfinite(f), np.isfinite(fe)),
-                )
-            )
-            j = pixel_masks[-1].ravel()
+            pixel_masks.append(p > 0.00001)
+            # Exclude nan values from mask:
+            j = np.logical_and(
+                pixel_masks[-1], np.logical_and(np.isfinite(f), np.isfinite(fe))
+            ).ravel()
 
             # Compute standard deviation and MAD for BG pixels (PRF model < 0.1%).
             bg_mask = np.logical_and(
@@ -2959,8 +2957,8 @@ class MovingTPF:
         9  - at least one pixel inside mask had no star model (value is nan).
              Only relevant if `linear_model` background correction was used.
         10 - at least one pixel inside mask had negative value BEFORE background correction was applied.
-        11 - PSF fit failed due to singular matrix (see np.linalg.LinAlgError) or because there were no 
-             pixels to fit in the binning window. Only relevant if `method=psf`.
+        11 - PSF fit failed due to singular matrix (see np.linalg.LinAlgError) or because all pixels
+             used to fit the PRF model had NaN flux values. Only relevant if `method=psf`.
         12 - at least one pixel inside mask had a poor fitting background star model.
              Only relevant if `linear_model` background correction was used.
 
