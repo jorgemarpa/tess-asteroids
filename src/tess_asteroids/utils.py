@@ -128,7 +128,9 @@ def target_observability(
                     ),
                 )
             ]
-            obs["dur"].append((np.nanmax(df_combo.index) - np.nanmin(df_combo.index)).value)
+            obs["dur"].append(
+                (np.nanmax(df_combo.index) - np.nanmin(df_combo.index)).value
+            )
             obs["vmag"].append(np.nanmean(df_combo["vmag"]))
 
     if return_ephem:

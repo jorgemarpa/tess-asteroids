@@ -2674,6 +2674,15 @@ class MovingTPF:
 
             # Solve linear model
             try:
+                # If there are no pixels to fit, raise a LinAlgError.
+                if (~j).all():
+                    logger.warning(
+                        "During PSF photometry, all pixels were masked in the bin centered at time {0:.04f} BTJD. The PSF flux is NaN.".format(
+                            t_mean
+                        )
+                    )
+                    raise np.linalg.LinAlgError()
+
                 # Compute flux
                 amp = np.linalg.solve(
                     sigma_w_inv,
@@ -2950,8 +2959,8 @@ class MovingTPF:
         9  - at least one pixel inside mask had no star model (value is nan).
              Only relevant if `linear_model` background correction was used.
         10 - at least one pixel inside mask had negative value BEFORE background correction was applied.
-        11 - PSF fit failed due to singular matrix (see np.linalg.LinAlgError).
-             Only relevant if `method=psf`.
+        11 - PSF fit failed due to singular matrix (see np.linalg.LinAlgError) or because there were no 
+             pixels to fit in the binning window. Only relevant if `method=psf`.
         12 - at least one pixel inside mask had a poor fitting background star model.
              Only relevant if `linear_model` background correction was used.
 
