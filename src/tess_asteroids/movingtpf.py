@@ -740,14 +740,20 @@ class MovingTPF:
                 sector_downlinks = downlinks[downlinks["Sector"] == self.sector]
 
                 # Check for expected number of chunks.
-                if self.sector <= 55 and len(sector_downlinks) != 2:
-                    raise RuntimeError(
+                if self.sector in [97,98] and len(sector_downlinks) != 8:
+                    logger.warning(
+                        "For sector {0} there should be 8 data chunks, but there are actually {1} data chunks. Investigate or define your own `data_chunks`.".format(
+                            self.sector, len(sector_downlinks)
+                        )
+                    )
+                elif self.sector <= 55 and len(sector_downlinks) != 2:
+                    logger.warning(
                         "For sector {0} there should be 2 data chunks, but there are actually {1} data chunks. Investigate or define your own `data_chunks`.".format(
                             self.sector, len(sector_downlinks)
                         )
                     )
                 elif self.sector > 55 and len(sector_downlinks) != 4:
-                    raise RuntimeError(
+                    logger.warning(
                         "For sector {0} there should be 4 data chunks, but there are actually {1} data chunks. Investigate or define your own `data_chunks`.".format(
                             self.sector, len(sector_downlinks)
                         )
