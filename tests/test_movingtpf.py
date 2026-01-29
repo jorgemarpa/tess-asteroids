@@ -615,11 +615,13 @@ def test_comet():
     target.make_tpf(shape=(20, 20), bg_method="rolling", save=True, outdir="tests")
     target.make_lc(save=True, outdir="tests")
     target.animate_tpf(save=True, outdir="tests")
+    target.plot_lc(save=True, outdir="tests")
 
     # Check the files exist
     assert os.path.exists("tests/tess-C2016N6-s0007-2-1-shape20x20-moving_tp.fits")
     assert os.path.exists("tests/tess-C2016N6-s0007-2-1-shape20x20-moving_tp.gif")
     assert os.path.exists("tests/tess-C2016N6-s0007-2-1-shape20x20_lc.fits")
+    assert os.path.exists("tests/tess-C2016N6-s0007-2-1-shape20x20_lc.png")
 
     # Open the TPF with astropy and check header attributes
     with fits.open("tests/tess-C2016N6-s0007-2-1-shape20x20-moving_tp.fits") as hdul:
@@ -631,3 +633,4 @@ def test_comet():
     os.remove("tests/tess-C2016N6-s0007-2-1-shape20x20-moving_tp.fits")
     os.remove("tests/tess-C2016N6-s0007-2-1-shape20x20-moving_tp.gif")
     os.remove("tests/tess-C2016N6-s0007-2-1-shape20x20_lc.fits")
+    os.remove("tests/tess-C2016N6-s0007-2-1-shape20x20_lc.png")
