@@ -612,7 +612,9 @@ def animate_cube(
     return ani
 
 
-def create_bad_bitmask(bad_bits: Union[list[int], str], default_bad_bits: list[int] = []):
+def create_bad_bitmask(
+    bad_bits: Union[list[int], str], default_bad_bits: list[int] = []
+):
     """
     Convert a list of bits into an integer bitmask.
 
