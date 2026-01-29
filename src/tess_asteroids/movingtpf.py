@@ -30,8 +30,8 @@ from tqdm import tqdm
 from . import (
     TESSmag_zero_point,
     __version__,
-    default_bad_spoc_bits,
     default_bad_lc_bits,
+    default_bad_spoc_bits,
     downlinks,
     logger,
     straps,
@@ -1150,14 +1150,14 @@ class MovingTPF:
         bad_spoc_bits: Union[list[int], str] = "default",
     ):
         """
-        Creates a quality mask using SPOC quality flags.
+        Creates a boolean mask using SPOC quality flags.
 
         In all cases except `bad_spoc_bits="none"`, non-science data in sector 3 is also masked.
 
         Parameters
         ----------
         spoc_quality : ndarray
-            Array of SPOC quality flags to turn into a quality mask. 
+            Array of SPOC quality flags to turn into a quality mask.
             If None, `self.quality` will be used.
         bad_spoc_bits : list or str
             Defines SPOC bits corresponding to bad quality data. Can be one of:
@@ -1172,7 +1172,7 @@ class MovingTPF:
         Returns
         -------
         spoc_quality_mask : ndarray
-            A boolean mask, with the same length as `spoc_quality`. 
+            A boolean mask, with the same length as `spoc_quality`.
             Good quality data is `True` and bad quality data is `False`.
         bad_spoc_bits : list or str
             The SPOC bits used to define bad quality data.
@@ -2236,18 +2236,21 @@ class MovingTPF:
         self, sat_level: float = 1e5, sat_buffer_rad: int = 1, **kwargs
     ):
         """
-        Create a 3D pixel quality mask. The mask is a bit-wise combination of
-        the following flags (Bit - Description):
+        Create 3D pixel quality flags. This is stored in the `self.pixel_quality` attribute.
 
-        - 1 - pixel is outside of science array
-        - 2 - pixel is in a strap column
-        - 3 - pixel is saturated
-        - 4 - pixel is within `sat_buffer_rad` pixels of a saturated pixel
-        - 5 - pixel has no scattered light correction. Only relevant if `linear_model` background correction was used.
-        - 6 - pixel had no background star model, value is nan. Only relevant if `linear_model` background correction was used.
-        - 7 - pixel had negative flux value BEFORE background correction was applied.
+        Each flag is a bit-wise combination of the following bits:
+
+        Bit - Description
+        ----------------
+        1 - pixel is outside of science array
+        2 - pixel is in a strap column
+        3 - pixel is saturated
+        4 - pixel is within `sat_buffer_rad` pixels of a saturated pixel
+        5 - pixel has no scattered light correction. Only relevant if `linear_model` background correction was used.
+        6 - pixel had no background star model, value is nan. Only relevant if `linear_model` background correction was used.
+        7 - pixel had negative flux value BEFORE background correction was applied.
             This can happen near bleed columns from saturated stars (e.g. see Sector 6, Camera 1, CCD 4).
-        - 8 - pixel has a poor fitting background star model. Only relevant if `linear_model` background correction was used.
+        8 - pixel has a poor fitting background star model. Only relevant if `linear_model` background correction was used.
 
         Parameters
         ----------
@@ -2265,7 +2268,7 @@ class MovingTPF:
             or not hasattr(self, "corr_flux")
         ):
             raise AttributeError(
-                "Must run `get_data()`, `reshape_data()` and `background_correction()` before creating pixel quality mask."
+                "Must run `get_data()`, `reshape_data()` and `background_correction()` before creating pixel quality flags."
             )
 
         # Pixel mask that identifies non-science pixels
@@ -2286,7 +2289,7 @@ class MovingTPF:
 
         # >>>>> ADD A MASK FOR OTHER SATURATION FEATURES? <<<<<
 
-        # Combine masks
+        # Define bits
         pixel_quality = []
         for t in range(len(self.time)):
             # Define dictionary containing each mask and corresponding binary digit.
@@ -2337,7 +2340,7 @@ class MovingTPF:
                     ),
                 },
             }
-            # Compute bit-wise mask
+            # Compute bit-wise flags
             pixel_quality.append(
                 np.sum(
                     [
@@ -2946,13 +2949,13 @@ class MovingTPF:
 
     def _create_lc_quality(self, method: str = "aperture"):
         """
-        Called internally to create quality mask for lightcurve. This is defined independently of
+        Called internally to create quality flags for lightcurve. This is defined independently of
         SPOC quality flags.
 
         For `aperture` method, pixels inside the aperture mask are used to define LC quality.
         For `psf` method, pixels that were used to fit the PRF model are used to define LC quality.
 
-        The mask is a bit-wise combination of the following flags:
+        The flag is a bit-wise combination of the following bits:
 
         Bit - Description
         ----------------
@@ -2981,7 +2984,7 @@ class MovingTPF:
         Returns
         -------
         lc_quality : ndarray
-            Lightcurve quality mask with length [ntimes].
+            Array of lightcurve quality flags with length [ntimes].
         """
 
         if (
@@ -3022,7 +3025,7 @@ class MovingTPF:
                 f"Method must be one of: ['aperture', 'psf']. Not '{method}'"
             )
 
-        # Define masks
+        # Define bits
         masks = {
             # No pixels in mask
             "no_pixel_mask": {
@@ -3120,7 +3123,7 @@ class MovingTPF:
             # Add flag for negative pixels (after BG correction) in aperture?
         }
 
-        # Compute bit-wise mask
+        # Compute bit-wise flags
         lc_quality = np.sum(
             [
                 (2 ** (masks[mask]["bit"] - 1)) * np.asarray(masks[mask]["value"])
@@ -3642,7 +3645,7 @@ class MovingTPF:
                 unit="pixel",
                 array=self.corner[:, 0],
             ),
-            # 3D pixel quality mask
+            # 3D pixel quality flags
             fits.Column(
                 name="PIXEL_QUALITY",
                 format=tform.replace("E", "I"),
@@ -4334,7 +4337,7 @@ class MovingTPF:
     ):
         """
         Combines SPOC quality flags and tess_asteroids lightcurve quality flags to
-        create a boolean quality mask that can be applied to the aperture or PSF 
+        create a boolean quality mask that can be applied to the aperture or PSF
         lightcurve.
 
         Parameters
@@ -4342,7 +4345,7 @@ class MovingTPF:
         spoc_quality : ndarray
             Array of SPOC quality flags.
         lc_quality : ndarray
-            Array of tess_asteroids lightcurve quality flags, as defined by `_create_lc_quality()`. 
+            Array of tess_asteroids lightcurve quality flags, as defined by `_create_lc_quality()`.
             This must have the same length as `spoc_quality`.
         bad_spoc_bits : list or str
             Defines SPOC bits corresponding to bad quality data. Can be one of:
@@ -4493,7 +4496,7 @@ class MovingTPF:
             if key == "aperture":
                 # Run through each available aperture lightcurve
                 for i, lc_ap in enumerate(lc[key]):
-                    # Define aperture quality mask.
+                    # Define aperture lightcurve quality mask.
                     quality_mask = self.create_lc_quality_mask(
                         spoc_quality=self.quality,
                         lc_quality=lc_ap["quality"],
@@ -4533,7 +4536,7 @@ class MovingTPF:
                     )
 
             elif key == "psf":
-                # Define PSF quality mask.
+                # Define PSF lightcurve quality mask.
                 quality_mask = self.create_lc_quality_mask(
                     spoc_quality=lc[key]["spoc_quality"],
                     lc_quality=lc[key]["quality"],

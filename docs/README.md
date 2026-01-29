@@ -161,7 +161,7 @@ target.make_tpf(save=True)
 target.make_lc(save=True)
 ```
 
-The `make_lc()` function extracts the lightcurve, creates a quality mask and optionally saves the LCF. There are a few optional parameters in the `make_lc()` function. This includes:
+The `make_lc()` function extracts the lightcurve, creates quality flags and optionally saves the LCF. There are a few optional parameters in the `make_lc()` function. This includes:
 
 - `method` defines the method used to perform photometry. Default: `all` (creates aperture and PSF lightcurve).
 - `save` determines whether or not the LCF will be saved as a FITS file. Default: `False`.
@@ -232,7 +232,7 @@ The TPF has four HDUs:
 - "PRIMARY" - a primary HDU containing only a header.
 - "PIXELS" - a table with the same columns as a SPOC TPF. Note that "POS_CORR1" and "POS_CORR2" are defined as the offset between the center of the TPF and the expected position of the moving object given the input ephemeris. 
 - "APERTURE" - an image HDU containing the average aperture across all times.
-- "EXTRAS" - a table HDU containing columns not found in a SPOC TPF. This includes "RA_PRED"/"DEC_PRED" (expected position of target in world coordinates), "CORNER1"/"CORNER2" (original FFI column/row of the lower-left pixel in the TPF), "PIXEL_QUALITY" (3D pixel quality mask identifying e.g. strap columns, non-science pixels and saturation), "APERTURE" (aperture as a function of time) and "ORIGINAL_TIME"/"ORIGINAL_TIMECORR" (time and barycentric correction derived by SPOC).
+- "EXTRAS" - a table HDU containing columns not found in a SPOC TPF. This includes "RA_PRED"/"DEC_PRED" (expected position of target in world coordinates), "CORNER1"/"CORNER2" (original FFI column/row of the lower-left pixel in the TPF), "PIXEL_QUALITY" (3D pixel quality flags identifying e.g. strap columns, non-science pixels and saturation), "APERTURE" (aperture as a function of time) and "ORIGINAL_TIME"/"ORIGINAL_TIMECORR" (time and barycentric correction derived by SPOC).
 
 The LCF has two or three HDUs (depending upon which lightcurves you created): 
 

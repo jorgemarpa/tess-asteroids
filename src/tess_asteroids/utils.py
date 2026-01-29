@@ -616,8 +616,8 @@ def create_bad_value(bad_bits: Union[list[int], str], default_bad_bits: list[int
     """
     Convert a list of bits into an integer bitmask.
 
-    This function translates 1-indexed bit positions into a single bitwise 
-    value. This value can be used with a bitwise AND operator to identify 
+    This function translates 1-indexed bit positions into a single bitwise
+    value. This value can be used with a bitwise AND operator to identify
     data points containing specific quality flags.
 
     Parameters
@@ -630,7 +630,7 @@ def create_bad_value(bad_bits: Union[list[int], str], default_bad_bits: list[int
             - "none" - mask no data.
             - list - mask custom bits provided in list.
     default_bad_bits : list
-        A list of 1-indexed bit positions used if `bad_bits` is 
+        A list of 1-indexed bit positions used if `bad_bits` is
         set to 'default'.
 
     Returns

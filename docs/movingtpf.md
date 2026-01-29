@@ -15,6 +15,7 @@
         - create_pixel_quality
         - to_lightcurve
         - _create_lc_quality
+        - create_lc_quality_mask
         - to_fits
         - animate_tpf
         - plot_lc
