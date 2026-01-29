@@ -14,5 +14,7 @@
         - create_aperture
         - create_pixel_quality
         - to_lightcurve
+        - _create_lc_quality
         - to_fits
         - animate_tpf
+        - plot_lc

@@ -2938,7 +2938,8 @@ class MovingTPF:
 
     def _create_lc_quality(self, method: str = "aperture"):
         """
-        Creates quality mask for lightcurve. This is defined independently of SPOC quality flags.
+        Called internally to create quality mask for lightcurve. This is defined independently of 
+        SPOC quality flags.
 
         For `aperture` method, pixels inside the aperture mask are used to define LC quality.
         For `psf` method, pixels that were used to fit the PRF model are used to define LC quality.
