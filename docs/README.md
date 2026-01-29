@@ -48,9 +48,9 @@ target.make_lc(save=True)
 ```
 
 <p align="center">
-  <img alt="Example TPF" src="https://github.com/altuson/tess-asteroids/blob/1ede5236f1023a91c5489fb17aed09d52032bdae/docs/tess-1980VR1-s0001-1-1-shape11x11-moving_tp.gif?raw=true" width="43%">
+  <img alt="Example TPF" src="https://github.com/altuson/tess-asteroids/blob/1ede5236f1023a91c5489fb17aed09d52032bdae/docs/tess-1980VR1-s0001-1-1-shape11x11-moving_tp.gif?raw=true" width="35%">
 &nbsp; &nbsp; &nbsp; &nbsp;
-  <img alt="Example LC" src="https://github.com/altuson/tess-asteroids/blob/1ede5236f1023a91c5489fb17aed09d52032bdae/docs/tess-1980VR1-s0001-1-1-shape11x11_lc.png?raw=true" width="52%">
+  <img alt="Example LC" src="https://github.com/altuson/tess-asteroids/blob/1ede5236f1023a91c5489fb17aed09d52032bdae/docs/tess-1980VR1-s0001-1-1-shape11x11_lc.png?raw=true" width="62%">
 </p>
 
 ## Tutorial
