@@ -140,9 +140,13 @@ target.make_tpf()
 target.animate_tpf(save=True)
 ```
 
+<p align="center">
+  <img alt="Example TPF" src="https://github.com/altuson/tess-asteroids/blob/main/docs/tess-1998YT6-s0006-1-1-shape11x11-moving_tp.gif?raw=true" width="60%">
+</p>
+
 ### Making a LC
 
-You can extract a LC from the TPF using aperture photometry and/or PSF photometry. For example:
+You can extract a LC from the TPF using aperture and/or PSF photometry. For example:
 
 ```python
 from tess_asteroids import MovingTPF
@@ -159,10 +163,34 @@ target.make_lc(save=True)
 
 The `make_lc()` function extracts the lightcurve, creates a quality mask and optionally saves the LCF. There are a few optional parameters in the `make_lc()` function. This includes:
 
-- `method` defines the method used to perform photometry. Default: `aperture`.
+- `method` defines the method used to perform photometry. Default: `all` (creates aperture and PSF lightcurve).
 - `save` determines whether or not the LCF will be saved as a FITS file. Default: `False`.
 - `outdir` is the directory where the LCF will be saved. Note, the directory is not automatically created.
 - `file_name` is the name the LCF will be saved with. If one is not given, a default name will be generated.
+
+### Plotting the LC
+
+`plot_lc()` is a built-in helper function to plot the lightcurve:
+
+```python
+from tess_asteroids import MovingTPF
+
+# Initialise MovingTPF for asteroid 1998 YT6 in TESS sector 6
+target = MovingTPF.from_name("1998 YT6", sector=6)
+
+# Make TPF, but do not save to file
+target.make_tpf()
+
+# Make LC, but do not save to file
+target.make_lc()
+
+# Plot the LC and save to file (tess-1998YT6-s0006-1-1-shape11x11_lc.png)
+target.plot_lc(ylim=(20,80), plot_err=True, save=True)
+```
+
+<p align="center">
+  <img alt="Example LC" src="https://github.com/altuson/tess-asteroids/blob/main/docs/tess-1998YT6-s0006-1-1-shape11x11_lc.png?raw=true" width="60%">
+</p>
 
 ### Compatibility with `lightkurve`
 
