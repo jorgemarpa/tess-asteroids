@@ -48,9 +48,9 @@ target.make_lc(save=True)
 ```
 
 <p align="center">
-  <img alt="Example TPF" src="https://github.com/altuson/tess-asteroids/blob/1ede5236f1023a91c5489fb17aed09d52032bdae/docs/tess-1980VR1-s0001-1-1-shape11x11-moving_tp.gif?raw=true" width="35%">
+  <img alt="Example TPF" src="https://github.com/altuson/tess-asteroids/blob/main/docs/tess-1980VR1-s0001-1-1-shape11x11-moving_tp.gif?raw=true" width="35%">
 &nbsp; &nbsp; &nbsp; &nbsp;
-  <img alt="Example LC" src="https://github.com/altuson/tess-asteroids/blob/1ede5236f1023a91c5489fb17aed09d52032bdae/docs/tess-1980VR1-s0001-1-1-shape11x11_lc.png?raw=true" width="55%">
+  <img alt="Example LC" src="https://github.com/altuson/tess-asteroids/blob/main/docs/tess-1980VR1-s0001-1-1-shape11x11_lc.png?raw=true" width="55%">
 </p>
 
 ## Tutorial
@@ -141,7 +141,7 @@ target.animate_tpf(save=True)
 ```
 
 <p align="center">
-  <img alt="Example TPF" src="https://github.com/altuson/tess-asteroids/blob/1ede5236f1023a91c5489fb17aed09d52032bdae/docs/tess-1998YT6-s0006-1-1-shape11x11-moving_tp.gif?raw=true" width="60%">
+  <img alt="Example TPF" src="https://github.com/altuson/tess-asteroids/blob/main/docs/tess-1998YT6-s0006-1-1-shape11x11-moving_tp.gif?raw=true" width="60%">
 </p>
 
 ### Making a LC
@@ -189,7 +189,7 @@ target.plot_lc(ylim=(20,80), plot_err=True, save=True)
 ```
 
 <p align="center">
-  <img alt="Example LC" src="https://github.com/altuson/tess-asteroids/blob/1ede5236f1023a91c5489fb17aed09d52032bdae/docs/tess-1998YT6-s0006-1-1-shape11x11_lc.png?raw=true" width="60%">
+  <img alt="Example LC" src="https://github.com/altuson/tess-asteroids/blob/main/docs/tess-1998YT6-s0006-1-1-shape11x11_lc.png?raw=true" width="60%">
 </p>
 
 ### Compatibility with `lightkurve`
