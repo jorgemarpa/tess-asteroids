@@ -27,11 +27,20 @@ from tesscube.query import async_get_primary_hdu
 from tesscube.utils import _sync_call, convert_coordinates_to_runs
 from tqdm import tqdm
 
-from . import TESSmag_zero_point, __version__, downlinks, logger, straps
+from . import (
+    TESSmag_zero_point,
+    __version__,
+    default_bad_spoc_bits,
+    default_bad_lc_bits,
+    downlinks,
+    logger,
+    straps,
+)
 from .utils import (
     animate_cube,
     calculate_TESSmag,
     compute_moments,
+    create_bad_value,
     inside_ellipse,
     make_wcs_header,
 )
@@ -1136,7 +1145,9 @@ class MovingTPF:
         return np.asarray(sl_model), np.asarray(sl_model_err)
 
     def _create_spoc_quality_mask(
-        self, bad_spoc_bits: Union[list[int], str] = "default"
+        self,
+        spoc_quality: Optional[np.ndarray] = None,
+        bad_spoc_bits: Union[list[int], str] = "default",
     ):
         """
         Creates a quality mask using SPOC quality flags.
@@ -1145,10 +1156,13 @@ class MovingTPF:
 
         Parameters
         ----------
+        spoc_quality : ndarray
+            Array of SPOC quality flags to turn into a quality mask. 
+            If None, `self.quality` will be used.
         bad_spoc_bits : list or str
             Defines SPOC bits corresponding to bad quality data. Can be one of:
 
-            - "default" - mask bits [1, 2, 3, 4, 5, 6, 8, 10, 13, 15], as suggested in the TESS Archive Manual.
+            - "default" - mask bits defined by `default_bad_spoc_bits`.
             - "all" - mask all data with a SPOC quality flag.
             - "none" - mask no data.
             - list - mask custom bits provided in list.
@@ -1158,36 +1172,30 @@ class MovingTPF:
         Returns
         -------
         spoc_quality_mask : ndarray
-            A boolean mask, with the same length as `self.time`. Good quality data is `True` and bad quality data is `False`.
+            A boolean mask, with the same length as `spoc_quality`. 
+            Good quality data is `True` and bad quality data is `False`.
         bad_spoc_bits : list or str
             The SPOC bits used to define bad quality data.
         """
 
-        if not hasattr(self, "quality"):
-            raise AttributeError(
-                "Must run `get_data()` before computing SPOC quality mask."
-            )
+        # Assign default value to `spoc_quality` if none is provided by user:
+        if spoc_quality is None:
+            if not hasattr(self, "quality"):
+                raise AttributeError(
+                    "Must run `get_data()` before computing SPOC quality mask, if you have not provided `spoc_quality`."
+                )
+            spoc_quality = self.quality
 
-        # Define bad quality SPOC bits.
-        if bad_spoc_bits == "default":
-            # Mask bits suggested in TESS archive manual (https://outerspace.stsci.edu/display/TESS/2.0+-+Data+Product+Overview)
-            bad_spoc_bits = [1, 2, 3, 4, 5, 6, 8, 10, 13, 15]
-        elif bad_spoc_bits == "none":
-            # No masking
-            return np.ones(len(self.time), dtype=bool), bad_spoc_bits
-        elif not isinstance(bad_spoc_bits, list) and bad_spoc_bits != "all":
-            raise ValueError(
-                "`bad_spoc_bits` must be either one of ['default', 'all', 'none'] or a custom list of bad quality SPOC bits."
-            )
+        # Define bitmask for user-defined bad SPOC quality bits.
+        bad_spoc_bit_value = create_bad_value(
+            bad_bits=bad_spoc_bits, default_bad_bits=default_bad_spoc_bits
+        )
 
         # Define SPOC quality mask.
-        if bad_spoc_bits == "all":
-            spoc_quality_mask = self.quality == 0
+        if bad_spoc_bit_value == "all":
+            spoc_quality_mask = spoc_quality == 0
         else:
-            bad_spoc_bit_value = 0
-            for bit in bad_spoc_bits:
-                bad_spoc_bit_value += 2 ** (bit - 1)  # type: ignore
-            spoc_quality_mask = self.quality & bad_spoc_bit_value == 0
+            spoc_quality_mask = spoc_quality & bad_spoc_bit_value == 0
 
         # Add non-science data in sector 3 to quality mask, as defined in data release notes.
         if self.sector == 3:
@@ -1237,7 +1245,7 @@ class MovingTPF:
         bad_spoc_bits : list or str
             Defines SPOC bits corresponding to bad quality data. Can be one of:
 
-            - "default" - mask bits [1, 2, 3, 4, 5, 6, 8, 10, 13, 15], as suggested in the TESS Archive Manual.
+            - "default" - mask bits defined by `default_bad_spoc_bits`.
             - "all" - mask all data with a SPOC quality flag.
             - "none" - mask no data.
             - list - mask custom bits provided in list.
@@ -1317,7 +1325,7 @@ class MovingTPF:
 
         # Define good quality data using user-defined SPOC bits.
         spoc_quality_mask, self.bad_spoc_bits = self._create_spoc_quality_mask(
-            bad_spoc_bits
+            bad_spoc_bits=bad_spoc_bits
         )
 
         # Create and/or check data chunks.
@@ -2475,7 +2483,7 @@ class MovingTPF:
         bad_spoc_bits : list or str
             Defines SPOC bits corresponding to bad quality data. Can be one of:
 
-            - "default" - mask bits [1, 2, 3, 4, 5, 6, 8, 10, 13, 15], as suggested in the TESS Archive Manual.
+            - "default" - mask bits defined by `default_bad_spoc_bits`.
             - "all" - mask all data with a SPOC quality flag.
             - "none" - mask no data.
             - list - mask custom bits provided in list.
@@ -2520,7 +2528,9 @@ class MovingTPF:
             )
 
         # Define good quality cadences using user-defined SPOC quality flags.
-        spoc_quality_mask, bad_spoc_bits = self._create_spoc_quality_mask(bad_spoc_bits)
+        spoc_quality_mask, bad_spoc_bits = self._create_spoc_quality_mask(
+            bad_spoc_bits=bad_spoc_bits
+        )
 
         # Save `time_bin_size` for LCF header
         self.time_bin_size = time_bin_size
@@ -2826,9 +2836,7 @@ class MovingTPF:
             self.prf_model, self.ap_prf_nan_mask = self._create_target_prf_model()
 
         # Compute `value` to mask bad bits.
-        self.bad_bit_value = 0
-        for bit in bad_bits:
-            self.bad_bit_value += 2 ** (bit - 1)
+        self.bad_bit_value = create_bad_value(bad_bits)
         self.bad_bits = ",".join([str(bit) for bit in bad_bits])
 
         mask = []
@@ -4317,6 +4325,68 @@ class MovingTPF:
                 "ipython needs to be installed for animate() to work (e.g., `pip install ipython`)"
             )
 
+    def create_lc_quality_mask(
+        self,
+        spoc_quality: np.ndarray,
+        lc_quality: np.ndarray,
+        bad_spoc_bits: Union[list[int], str] = "default",
+        bad_lc_bits: Union[list[int], str] = "default",
+    ):
+        """
+        Combines SPOC quality flags and tess_asteroids lightcurve quality flags to
+        create a boolean quality mask that can be applied to the aperture or PSF 
+        lightcurve.
+
+        Parameters
+        ----------
+        spoc_quality : ndarray
+            Array of SPOC quality flags.
+        lc_quality : ndarray
+            Array of tess_asteroids lightcurve quality flags, as defined by `_create_lc_quality()`. 
+            This must have the same length as `spoc_quality`.
+        bad_spoc_bits : list or str
+            Defines SPOC bits corresponding to bad quality data. Can be one of:
+
+                - "default" - mask bits defined by `default_bad_spoc_bits`.
+                - "all" - mask all data with a SPOC quality flag.
+                - "none" - mask no data.
+                - list - mask custom bits provided in list.
+                More information about the SPOC quality flags can be found in Section 9 of the TESS Science
+                Data Products Description Document.
+        bad_lc_bits : list or str
+            Defines bits corresponding to bad quality data from `_create_lc_quality()`.
+            Can be one of:
+
+            - "default" - mask bits defined by `default_bad_lc_bits`.
+            - "all" - mask all data with a quality flag.
+            - "none" - mask no data.
+            - list - mask custom bits provided in list.
+
+        Returns
+        -------
+        quality_mask : ndarray
+            A boolean mask with the same length as `spoc_quality` and `lc_quality`.
+            `True` indicates a good quality cadence and `False` indicates a bad quality cadence.
+        """
+
+        # Create SPOC quality mask using user-defined bad bits.
+        spoc_quality_mask, _ = self._create_spoc_quality_mask(
+            spoc_quality=spoc_quality, bad_spoc_bits=bad_spoc_bits
+        )
+
+        # Define bitmask for user-defined tess_asteroids lightcurve quality bits.
+        bad_lc_value = create_bad_value(
+            bad_bits=bad_lc_bits, default_bad_bits=default_bad_lc_bits
+        )
+
+        # Define lightcurve quality mask.
+        if bad_lc_value == "all":
+            quality_mask = lc_quality == 0
+        else:
+            quality_mask = lc_quality & bad_lc_value == 0
+
+        return np.logical_and(quality_mask, spoc_quality_mask)
+
     def plot_lc(
         self,
         lc: Optional[dict] = None,
@@ -4345,7 +4415,7 @@ class MovingTPF:
         bad_spoc_bits : list or str
             Defines SPOC bits corresponding to bad quality data. Can be one of:
 
-            - "default" - mask bits [1, 2, 3, 4, 5, 6, 8, 10, 13, 15], as suggested in the TESS Archive Manual.
+            - "default" - mask bits defined by `default_bad_spoc_bits`.
             - "all" - mask all data with a SPOC quality flag.
             - "none" - mask no data.
             - list - mask custom bits provided in list.
@@ -4355,7 +4425,7 @@ class MovingTPF:
             Defines bits corresponding to bad quality data for `aperture`/`psf` photometry, as defined by `_create_lc_quality()`.
             Can be one of:
 
-            - "default" - mask bits [2, 4, 10].
+            - "default" - mask bits defined by `default_bad_lc_bits`.
             - "all" - mask all data with a quality flag.
             - "none" - mask no data.
             - list - mask custom bits provided in list.
@@ -4405,37 +4475,6 @@ class MovingTPF:
         if "aperture" in lc:
             lc["aperture"] = np.atleast_1d(lc["aperture"])  # type: ignore
 
-        # Internal function to calculate bad bit value
-        def _create_bad_value(
-            bad_bits: Union[list[int], str], default_bad_bits: list[int]
-        ) -> Union[int, str]:
-            if bad_bits == "default":
-                bad_bits = default_bad_bits
-            elif bad_bits == "none":
-                bad_bits = []
-            elif not isinstance(bad_bits, list) and bad_bits != "all":
-                raise ValueError(
-                    "`bad_bits` must be either one of ['default', 'all', 'none'] or a custom list of bad quality bits."
-                )
-            if bad_bits != "all":
-                bad_value = 0
-                for bit in bad_bits:
-                    bad_value += 2 ** (bit - 1)  # type: ignore
-                return bad_value
-            else:
-                return bad_bits  # type: ignore
-
-        # Define bad binary digits for SPOC quality:
-        # Default bits as suggested in TESS archive manual (https://outerspace.stsci.edu/display/TESS/2.0+-+Data+Product+Overview)
-        bad_spoc_value = _create_bad_value(
-            bad_spoc_bits, default_bad_bits=[1, 2, 3, 4, 5, 6, 8, 10, 13, 15]
-        )
-
-        # Define bad binary digits for aperture/psf photometry from tess_asteroids:
-        # Default: non-science pixel, saturated pixel or pixel with negative flux value BEFORE background correction
-        bad_ap_value = _create_bad_value(bad_ap_bits, default_bad_bits=[2, 4, 10])
-        bad_psf_value = _create_bad_value(bad_psf_bits, default_bad_bits=[2, 4, 10])
-
         # Initialise figure
         n_axes = (len(lc["aperture"]) if "aperture" in lc else 0) + (
             1 if "psf" in lc else 0
@@ -4455,15 +4494,11 @@ class MovingTPF:
                 # Run through each available aperture lightcurve
                 for i, lc_ap in enumerate(lc[key]):
                     # Define aperture quality mask.
-                    if bad_ap_value == "all":
-                        quality_mask = lc_ap["quality"] == 0
-                    else:
-                        quality_mask = lc_ap["quality"] & bad_ap_value == 0
-                    quality_mask = np.logical_and(
-                        quality_mask,
-                        (self.quality & bad_spoc_value == 0)
-                        if bad_spoc_value != "all"
-                        else (self.quality == 0),
+                    quality_mask = self.create_lc_quality_mask(
+                        spoc_quality=self.quality,
+                        lc_quality=lc_ap["quality"],
+                        bad_spoc_bits=bad_spoc_bits,
+                        bad_lc_bits=bad_ap_bits,
                     )
 
                     ax[i].errorbar(
@@ -4499,15 +4534,11 @@ class MovingTPF:
 
             elif key == "psf":
                 # Define PSF quality mask.
-                if bad_psf_value == "all":
-                    quality_mask = lc[key]["quality"] == 0
-                else:
-                    quality_mask = lc[key]["quality"] & bad_psf_value == 0
-                quality_mask = np.logical_and(
-                    quality_mask,
-                    (lc[key]["spoc_quality"] & bad_spoc_value == 0)
-                    if bad_spoc_value != "all"
-                    else (lc[key]["spoc_quality"] == 0),
+                quality_mask = self.create_lc_quality_mask(
+                    spoc_quality=lc[key]["spoc_quality"],
+                    lc_quality=lc[key]["quality"],
+                    bad_spoc_bits=bad_spoc_bits,
+                    bad_lc_bits=bad_psf_bits,
                 )
 
                 ax[-1].errorbar(
