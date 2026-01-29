@@ -612,7 +612,7 @@ def animate_cube(
     return ani
 
 
-def create_bad_value(bad_bits: Union[list[int], str], default_bad_bits: list[int] = []):
+def create_bad_bitmask(bad_bits: Union[list[int], str], default_bad_bits: list[int] = []):
     """
     Convert a list of bits into an integer bitmask.
 
@@ -635,7 +635,7 @@ def create_bad_value(bad_bits: Union[list[int], str], default_bad_bits: list[int
 
     Returns
     -------
-    bad_value : int or str
+    bad_bitmask : int or str
         The computed integer bitmask or the string "all".
     """
     if bad_bits == "default":
@@ -647,9 +647,9 @@ def create_bad_value(bad_bits: Union[list[int], str], default_bad_bits: list[int
             "`bad_bits` must be either one of ['default', 'all', 'none'] or a custom list of bad quality bits."
         )
     if bad_bits != "all":
-        bad_value = 0
+        bad_bitmask = 0
         for bit in bad_bits:
-            bad_value += 2 ** (bit - 1)  # type: ignore
-        return bad_value
+            bad_bitmask += 2 ** (bit - 1)  # type: ignore
+        return bad_bitmask
     else:
         return bad_bits  # type: ignore

@@ -40,7 +40,7 @@ from .utils import (
     animate_cube,
     calculate_TESSmag,
     compute_moments,
-    create_bad_value,
+    create_bad_bitmask,
     inside_ellipse,
     make_wcs_header,
 )
@@ -1187,7 +1187,7 @@ class MovingTPF:
             spoc_quality = self.quality
 
         # Define bitmask for user-defined bad SPOC quality bits.
-        bad_spoc_bit_value = create_bad_value(
+        bad_spoc_bit_value = create_bad_bitmask(
             bad_bits=bad_spoc_bits, default_bad_bits=default_bad_spoc_bits
         )
 
@@ -2839,7 +2839,7 @@ class MovingTPF:
             self.prf_model, self.ap_prf_nan_mask = self._create_target_prf_model()
 
         # Compute `value` to mask bad bits.
-        self.bad_bit_value = create_bad_value(bad_bits)
+        self.bad_bit_value = create_bad_bitmask(bad_bits)
         self.bad_bits = ",".join([str(bit) for bit in bad_bits])
 
         mask = []
@@ -4378,7 +4378,7 @@ class MovingTPF:
         )
 
         # Define bitmask for user-defined tess_asteroids lightcurve quality bits.
-        bad_lc_value = create_bad_value(
+        bad_lc_value = create_bad_bitmask(
             bad_bits=bad_lc_bits, default_bad_bits=default_bad_lc_bits
         )
 
