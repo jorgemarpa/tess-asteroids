@@ -238,7 +238,7 @@ def test_create_ellipse_aperture():
 
 def test_pixel_quality():
     """
-    Test 3D pixel quality mask. Checks that the shape of the mask is the same as self.flux
+    Test 3D pixel quality flags. Checks that the shape of the array is the same as `self.flux`
     and that the values are as expected from a manual inspection.
     """
 
@@ -263,10 +263,10 @@ def test_pixel_quality():
     target.background_correction(method="rolling")
     target.create_pixel_quality(sat_buffer_rad=1)
 
-    # Check that pixel quality mask has expected shape.
+    # Check that pixel quality has expected shape.
     assert np.shape(target.pixel_quality) == (len(target.time), *shape)
 
-    # Check that pixel quality mask has expected values.
+    # Check that pixel quality has expected values.
     # The expected values were determined manually using the first frame of the TPF and the strap table.
     pixels = np.zeros_like(target.flux[0])
 
@@ -368,7 +368,7 @@ def test_to_lightcurve_aperture():
     Test the to_lightcurve() function with the method `aperture`.  This internally calls
     _aperture_photometry() and _create_lc_quality(). The tests check the expected length
     of the lightcurve, the expected value of the centroid and the expected values of the
-    quality mask.
+    quality flags.
     """
 
     # Make TPF for asteroid 1998 YT6.
@@ -397,7 +397,7 @@ def test_to_lightcurve_aperture():
         & (np.nanmean(target.lc["aperture"]["col_cen"] - target.corner[:, 1]) < 5.5)
     ).all()
 
-    # Check the pixel quality has been correctly accounted for in quality mask.
+    # Check the pixel quality has been correctly accounted for in quality flag.
     for t in range(len(target.time)):
         if target.pixel_quality[t][target.aperture_mask[t]].any() != 0:
             assert target.lc["aperture"]["quality"][t] > 0
