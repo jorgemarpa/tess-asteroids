@@ -2868,7 +2868,7 @@ class MovingTPF:
             self.prf_model, self.ap_prf_nan_mask = self._create_target_prf_model()
 
         # Compute `value` to mask bad bits.
-        self.bad_bit_value = create_bad_bitmask(bad_bits)
+        bad_bit_value = create_bad_bitmask(bad_bits)
         self.bad_bits = ",".join([str(bit) for bit in bad_bits])
 
         mask = []
