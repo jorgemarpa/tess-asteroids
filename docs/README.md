@@ -13,9 +13,16 @@ See the full documentation, including tutorials, [here](https://altuson.github.i
 
 ## Installation
 
-The easiest way to install `tess-asteroids` and all of its dependencies is to run the following command in a terminal window:
+The easiest way to install `tess-asteroids` and all of its dependencies is to use `pip`. We recommend you do this installation in a new [virtual environment](https://docs.conda.io/projects/conda/en/latest/user-guide/tasks/manage-environments.html) by running the following commands in a terminal window:
 
 ```bash
+# Create new environment called tess-asteroids with Python 3.10
+conda create -n tess-asteroids python=3.10
+
+# Activate environment
+conda activate tess-asteroids
+
+# Install tess-asteroids (latest stable version)
 pip install tess-asteroids
 ```
 
@@ -41,9 +48,9 @@ target.make_lc(save=True)
 ```
 
 <p align="center">
-  <img alt="Example TPF" src="https://github.com/altuson/tess-asteroids/blob/main/docs/tess-1980VR1-s0001-1-1-shape11x11-moving_tp.gif?raw=true" width="43%">
+  <img alt="Example TPF" src="https://github.com/altuson/tess-asteroids/blob/main/docs/tess-1980VR1-s0001-1-1-shape11x11-moving_tp.gif?raw=true" width="35%">
 &nbsp; &nbsp; &nbsp; &nbsp;
-  <img alt="Example LC" src="https://github.com/altuson/tess-asteroids/blob/main/docs/tess-1980VR1-s0001-1-1-shape11x11_lc.png?raw=true" width="52%">
+  <img alt="Example LC" src="https://github.com/altuson/tess-asteroids/blob/main/docs/tess-1980VR1-s0001-1-1-shape11x11_lc.png?raw=true" width="55%">
 </p>
 
 ## Tutorial
@@ -133,9 +140,13 @@ target.make_tpf()
 target.animate_tpf(save=True)
 ```
 
+<p align="center">
+  <img alt="Example TPF" src="https://github.com/altuson/tess-asteroids/blob/main/docs/tess-1998YT6-s0006-1-1-shape11x11-moving_tp.gif?raw=true" width="60%">
+</p>
+
 ### Making a LC
 
-You can extract a LC from the TPF using aperture photometry and/or PSF photometry. For example:
+You can extract a LC from the TPF using aperture and/or PSF photometry. For example:
 
 ```python
 from tess_asteroids import MovingTPF
@@ -150,12 +161,36 @@ target.make_tpf(save=True)
 target.make_lc(save=True)
 ```
 
-The `make_lc()` function extracts the lightcurve, creates a quality mask and optionally saves the LCF. There are a few optional parameters in the `make_lc()` function. This includes:
+The `make_lc()` function extracts the lightcurve, creates quality flags and optionally saves the LCF. There are a few optional parameters in the `make_lc()` function. This includes:
 
-- `method` defines the method used to perform photometry. Default: `aperture`.
+- `method` defines the method used to perform photometry. Default: `all` (creates aperture and PSF lightcurve).
 - `save` determines whether or not the LCF will be saved as a FITS file. Default: `False`.
 - `outdir` is the directory where the LCF will be saved. Note, the directory is not automatically created.
 - `file_name` is the name the LCF will be saved with. If one is not given, a default name will be generated.
+
+### Plotting the LC
+
+`plot_lc()` is a built-in helper function to plot the lightcurve:
+
+```python
+from tess_asteroids import MovingTPF
+
+# Initialise MovingTPF for asteroid 1998 YT6 in TESS sector 6
+target = MovingTPF.from_name("1998 YT6", sector=6)
+
+# Make TPF, but do not save to file
+target.make_tpf()
+
+# Make LC, but do not save to file
+target.make_lc()
+
+# Plot the LC and save to file (tess-1998YT6-s0006-1-1-shape11x11_lc.png)
+target.plot_lc(ylim=(20,80), plot_err=True, save=True)
+```
+
+<p align="center">
+  <img alt="Example LC" src="https://github.com/altuson/tess-asteroids/blob/main/docs/tess-1998YT6-s0006-1-1-shape11x11_lc.png?raw=true" width="60%">
+</p>
 
 ### Compatibility with `lightkurve`
 
@@ -197,7 +232,7 @@ The TPF has four HDUs:
 - "PRIMARY" - a primary HDU containing only a header.
 - "PIXELS" - a table with the same columns as a SPOC TPF. Note that "POS_CORR1" and "POS_CORR2" are defined as the offset between the center of the TPF and the expected position of the moving object given the input ephemeris. 
 - "APERTURE" - an image HDU containing the average aperture across all times.
-- "EXTRAS" - a table HDU containing columns not found in a SPOC TPF. This includes "RA_PRED"/"DEC_PRED" (expected position of target in world coordinates), "CORNER1"/"CORNER2" (original FFI column/row of the lower-left pixel in the TPF), "PIXEL_QUALITY" (3D pixel quality mask identifying e.g. strap columns, non-science pixels and saturation), "APERTURE" (aperture as a function of time) and "ORIGINAL_TIME"/"ORIGINAL_TIMECORR" (time and barycentric correction derived by SPOC).
+- "EXTRAS" - a table HDU containing columns not found in a SPOC TPF. This includes "RA_PRED"/"DEC_PRED" (expected position of target in world coordinates), "CORNER1"/"CORNER2" (original FFI column/row of the lower-left pixel in the TPF), "PIXEL_QUALITY" (3D pixel quality flags identifying e.g. strap columns, non-science pixels and saturation), "APERTURE" (aperture as a function of time) and "ORIGINAL_TIME"/"ORIGINAL_TIMECORR" (time and barycentric correction derived by SPOC).
 
 The LCF has two or three HDUs (depending upon which lightcurves you created): 
 
