@@ -545,7 +545,7 @@ def test_make_lc():
     # Make TPF for asteroid 1998 YT6
     target = MovingTPF.from_name("1998 YT6", sector=6)
     target.make_tpf(bg_method="rolling")
-    target.make_lc(save=True, outdir="tests")
+    target.make_lc(method="aperture", save=True, outdir="tests")
 
     # Check the file exists
     assert os.path.exists("tests/tess-1998YT6-s0006-1-1-shape11x11_lc.fits")
