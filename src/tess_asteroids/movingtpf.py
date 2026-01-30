@@ -27,11 +27,20 @@ from tesscube.query import async_get_primary_hdu
 from tesscube.utils import _sync_call, convert_coordinates_to_runs
 from tqdm import tqdm
 
-from . import TESSmag_zero_point, __version__, downlinks, logger, straps
+from . import (
+    TESSmag_zero_point,
+    __version__,
+    default_bad_lc_bits,
+    default_bad_spoc_bits,
+    downlinks,
+    logger,
+    straps,
+)
 from .utils import (
     animate_cube,
     calculate_TESSmag,
     compute_moments,
+    create_bad_bitmask,
     inside_ellipse,
     make_wcs_header,
 )
@@ -207,7 +216,7 @@ class MovingTPF:
 
     def make_lc(
         self,
-        method: str = "aperture",
+        method: str = "all",
         save: bool = False,
         file_name: Optional[str] = None,
         outdir: str = "",
@@ -752,14 +761,20 @@ class MovingTPF:
                 sector_downlinks = downlinks[downlinks["Sector"] == self.sector]
 
                 # Check for expected number of chunks.
-                if self.sector <= 55 and len(sector_downlinks) != 2:
-                    raise RuntimeError(
+                if self.sector in [97, 98] and len(sector_downlinks) != 8:
+                    logger.warning(
+                        "For sector {0} there should be 8 data chunks, but there are actually {1} data chunks. Investigate or define your own `data_chunks`.".format(
+                            self.sector, len(sector_downlinks)
+                        )
+                    )
+                elif self.sector <= 55 and len(sector_downlinks) != 2:
+                    logger.warning(
                         "For sector {0} there should be 2 data chunks, but there are actually {1} data chunks. Investigate or define your own `data_chunks`.".format(
                             self.sector, len(sector_downlinks)
                         )
                     )
                 elif self.sector > 55 and len(sector_downlinks) != 4:
-                    raise RuntimeError(
+                    logger.warning(
                         "For sector {0} there should be 4 data chunks, but there are actually {1} data chunks. Investigate or define your own `data_chunks`.".format(
                             self.sector, len(sector_downlinks)
                         )
@@ -1160,19 +1175,24 @@ class MovingTPF:
         return np.asarray(sl_model), np.asarray(sl_model_err)
 
     def _create_spoc_quality_mask(
-        self, bad_spoc_bits: Union[list[int], str] = "default"
+        self,
+        spoc_quality: Optional[np.ndarray] = None,
+        bad_spoc_bits: Union[list[int], str] = "default",
     ):
         """
-        Creates a quality mask using SPOC quality flags.
+        Creates a boolean mask using SPOC quality flags.
 
         In all cases except `bad_spoc_bits="none"`, non-science data in sector 3 is also masked.
 
         Parameters
         ----------
+        spoc_quality : ndarray
+            Array of SPOC quality flags to turn into a quality mask.
+            If None, `self.quality` will be used.
         bad_spoc_bits : list or str
             Defines SPOC bits corresponding to bad quality data. Can be one of:
 
-            - "default" - mask bits [1,2,3,4,5,6,8,10,13,15], as suggested in the TESS Archive Manual.
+            - "default" - mask bits defined by `default_bad_spoc_bits`.
             - "all" - mask all data with a SPOC quality flag.
             - "none" - mask no data.
             - list - mask custom bits provided in list.
@@ -1182,36 +1202,30 @@ class MovingTPF:
         Returns
         -------
         spoc_quality_mask : ndarray
-            A boolean mask, with the same length as `self.time`. Good quality data is `True` and bad quality data is `False`.
+            A boolean mask, with the same length as `spoc_quality`.
+            Good quality data is `True` and bad quality data is `False`.
         bad_spoc_bits : list or str
             The SPOC bits used to define bad quality data.
         """
 
-        if not hasattr(self, "quality"):
-            raise AttributeError(
-                "Must run `get_data()` before computing SPOC quality mask."
-            )
+        # Assign default value to `spoc_quality` if none is provided by user:
+        if spoc_quality is None:
+            if not hasattr(self, "quality"):
+                raise AttributeError(
+                    "Must run `get_data()` before computing SPOC quality mask, if you have not provided `spoc_quality`."
+                )
+            spoc_quality = self.quality
 
-        # Define bad quality SPOC bits.
-        if bad_spoc_bits == "default":
-            # Mask bits suggested in TESS archive manual (https://outerspace.stsci.edu/display/TESS/2.0+-+Data+Product+Overview)
-            bad_spoc_bits = [1, 2, 3, 4, 5, 6, 8, 10, 13, 15]
-        elif bad_spoc_bits == "none":
-            # No masking
-            return np.ones(len(self.time), dtype=bool), bad_spoc_bits
-        elif not isinstance(bad_spoc_bits, list) and bad_spoc_bits != "all":
-            raise ValueError(
-                "`bad_spoc_bits` must be either one of ['default', 'all', 'none'] or a custom list of bad quality SPOC bits."
-            )
+        # Define bitmask for user-defined bad SPOC quality bits.
+        bad_spoc_bit_value = create_bad_bitmask(
+            bad_bits=bad_spoc_bits, default_bad_bits=default_bad_spoc_bits
+        )
 
         # Define SPOC quality mask.
-        if bad_spoc_bits == "all":
-            spoc_quality_mask = self.quality == 0
+        if bad_spoc_bit_value == "all":
+            spoc_quality_mask = spoc_quality == 0
         else:
-            bad_spoc_bit_value = 0
-            for bit in bad_spoc_bits:
-                bad_spoc_bit_value += 2 ** (bit - 1)  # type: ignore
-            spoc_quality_mask = self.quality & bad_spoc_bit_value == 0
+            spoc_quality_mask = spoc_quality & bad_spoc_bit_value == 0
 
         # Add non-science data in sector 3 to quality mask, as defined in data release notes.
         if self.sector == 3:
@@ -1262,7 +1276,7 @@ class MovingTPF:
         bad_spoc_bits : list or str
             Defines SPOC bits corresponding to bad quality data. Can be one of:
 
-            - "default" - mask bits [1,2,3,4,5,6,8,10,13,15], as suggested in the TESS Archive Manual.
+            - "default" - mask bits defined by `default_bad_spoc_bits`.
             - "all" - mask all data with a SPOC quality flag.
             - "none" - mask no data.
             - list - mask custom bits provided in list.
@@ -1344,7 +1358,7 @@ class MovingTPF:
 
         # Define good quality data using user-defined SPOC bits.
         spoc_quality_mask, self.bad_spoc_bits = self._create_spoc_quality_mask(
-            bad_spoc_bits
+            bad_spoc_bits=bad_spoc_bits
         )
 
         # Create and/or check data chunks.
@@ -2284,18 +2298,21 @@ class MovingTPF:
         self, sat_level: float = 1e5, sat_buffer_rad: int = 1, **kwargs
     ):
         """
-        Create a 3D pixel quality mask. The mask is a bit-wise combination of
-        the following flags (Bit - Description):
+        Create 3D pixel quality flags. This is stored in the `self.pixel_quality` attribute.
 
-        - 1 - pixel is outside of science array
-        - 2 - pixel is in a strap column
-        - 3 - pixel is saturated
-        - 4 - pixel is within `sat_buffer_rad` pixels of a saturated pixel
-        - 5 - pixel has no scattered light correction. Only relevant if `linear_model` background correction was used.
-        - 6 - pixel had no background star model, value is nan. Only relevant if `linear_model` background correction was used.
-        - 7 - pixel had negative flux value BEFORE background correction was applied.
+        Each flag is a bit-wise combination of the following bits:
+
+        Bit - Description
+        ----------------
+        1 - pixel is outside of science array
+        2 - pixel is in a strap column
+        3 - pixel is saturated
+        4 - pixel is within `sat_buffer_rad` pixels of a saturated pixel
+        5 - pixel has no scattered light correction. Only relevant if `linear_model` background correction was used.
+        6 - pixel had no background star model, value is nan. Only relevant if `linear_model` background correction was used.
+        7 - pixel had negative flux value BEFORE background correction was applied.
             This can happen near bleed columns from saturated stars (e.g. see Sector 6, Camera 1, CCD 4).
-        - 8 - pixel has a poor fitting background star model. Only relevant if `linear_model` background correction was used.
+        8 - pixel has a poor fitting background star model. Only relevant if `linear_model` background correction was used.
 
         Parameters
         ----------
@@ -2313,7 +2330,7 @@ class MovingTPF:
             or not hasattr(self, "corr_flux")
         ):
             raise AttributeError(
-                "Must run `get_data()`, `reshape_data()` and `background_correction()` before creating pixel quality mask."
+                "Must run `get_data()`, `reshape_data()` and `background_correction()` before creating pixel quality flags."
             )
 
         # Pixel mask that identifies non-science pixels
@@ -2334,7 +2351,7 @@ class MovingTPF:
 
         # >>>>> ADD A MASK FOR OTHER SATURATION FEATURES? <<<<<
 
-        # Combine masks
+        # Define bits
         pixel_quality = []
         for t in range(len(self.time)):
             # Define dictionary containing each mask and corresponding binary digit.
@@ -2385,7 +2402,7 @@ class MovingTPF:
                     ),
                 },
             }
-            # Compute bit-wise mask
+            # Compute bit-wise flags
             pixel_quality.append(
                 np.sum(
                     [
@@ -2453,7 +2470,7 @@ class MovingTPF:
         bad_spoc_bits : list or str
             Defines SPOC bits corresponding to bad quality data. Can be one of:
 
-            - "default" - mask bits [1,2,3,4,5,6,8,10,13,15], as suggested in the TESS Archive Manual.
+            - "default" - mask bits defined by `default_bad_spoc_bits`.
             - "all" - mask all data with a SPOC quality flag.
             - "none" - mask no data.
             - list - mask custom bits provided in list.
@@ -2503,7 +2520,9 @@ class MovingTPF:
             )
 
         # Define good quality cadences using user-defined SPOC quality flags.
-        spoc_quality_mask, bad_spoc_bits = self._create_spoc_quality_mask(bad_spoc_bits)
+        spoc_quality_mask, bad_spoc_bits = self._create_spoc_quality_mask(
+            bad_spoc_bits=bad_spoc_bits
+        )
 
         # Apply quality mask to data
         time = self.time[spoc_quality_mask]
@@ -2519,7 +2538,7 @@ class MovingTPF:
         cadno = self.cadence_number[spoc_quality_mask]
         pixel_quality = self.pixel_quality[spoc_quality_mask]
 
-        # If all data has been masked, raise warning and return nan.
+        # If all data has been masked, raise warning and return empty arrays.
         if len(time) == 0:
             logger.warning(
                 "During PSF photometry, all times were masked and no PSF light curve was derived."
@@ -2607,15 +2626,13 @@ class MovingTPF:
             pmu = flux_prior[bdx]
             pixel_qualities.append(pixel_quality[bdx])
 
-            # Find finite values and pixels with PRF value > 0.001%.
+            # Use pixels with PRF value > 0.001% for fitting.
             # This value is small to include all pixels where the PRF has contribution.
-            pixel_masks.append(
-                np.logical_and(
-                    p > 0.00001,
-                    np.logical_and(np.isfinite(f), np.isfinite(fe)),
-                )
-            )
-            j = pixel_masks[-1].ravel()
+            pixel_masks.append(p > 0.00001)
+            # Exclude nan values from mask:
+            j = np.logical_and(
+                pixel_masks[-1], np.logical_and(np.isfinite(f), np.isfinite(fe))
+            ).ravel()
 
             # Compute standard deviation and MAD for BG pixels (PRF model < 0.1%).
             bg_mask = np.logical_and(
@@ -2685,6 +2702,10 @@ class MovingTPF:
 
             # Solve linear model
             try:
+                # If there are no pixels to fit, raise a LinAlgError.
+                if (~j).all():
+                    raise np.linalg.LinAlgError()
+
                 # Compute flux
                 amp = np.linalg.solve(
                     sigma_w_inv,
@@ -2743,7 +2764,7 @@ class MovingTPF:
 
         if nfails > 0:
             logger.warning(
-                f"During PRF fitting, {nfails} cadences did not solve. These cadences will be replaced by `NaN`."
+                f"During PSF photometry, {nfails} cadences did not solve. These cadences will be replaced by `NaN`."
             )
 
         (
@@ -2847,9 +2868,8 @@ class MovingTPF:
             self.prf_model, self.ap_prf_nan_mask = self._create_target_prf_model()
 
         # Compute `value` to mask bad bits.
-        bad_bit_value = 0
-        for bit in bad_bits:
-            bad_bit_value += 2 ** (bit - 1)
+        self.bad_bit_value = create_bad_bitmask(bad_bits)
+        self.bad_bits = ",".join([str(bit) for bit in bad_bits])
 
         mask = []
         ap_flux = []
@@ -2985,7 +3005,7 @@ class MovingTPF:
         psf_flux: Optional[np.ndarray] = None,
     ):
         """
-        Creates quality mask for lightcurve. This is defined independently of SPOC quality flags.
+        Creates quality flags for lightcurve. This is defined independently of SPOC quality flags.
         This function is called internally by `_aperture_photometry()` and `_psf_photometry()`.
 
         If you are creating LC quality for aperture photometry:
@@ -3000,7 +3020,7 @@ class MovingTPF:
         - `bad_bit_value` should be None.
         - `psf_flux` should be the PSF flux time-series from `_psf_photometry()`.
 
-        The quality mask is a bit-wise combination of the following flags:
+        The flag is a bit-wise combination of the following bits:
 
         Bit - Description
         ----------------
@@ -3017,8 +3037,8 @@ class MovingTPF:
         9  - at least one pixel inside mask had no star model (value is nan).
              Only relevant if `linear_model` background correction was used.
         10 - at least one pixel inside mask had negative value BEFORE background correction was applied.
-        11 - PSF fit failed due to singular matrix (see np.linalg.LinAlgError).
-             Only defined if `psf_flux` is not None (relevant for PSF photometry).
+        11 - PSF fit failed due to singular matrix (see np.linalg.LinAlgError) or because all pixels
+             used to fit the PRF model had NaN flux values. Only relevant if `method=psf`.
         12 - at least one pixel inside mask had a poor fitting background star model.
              Only relevant if `linear_model` background correction was used.
 
@@ -3042,7 +3062,7 @@ class MovingTPF:
         Returns
         -------
         lc_quality : ndarray
-            Lightcurve quality mask with length [ntimes].
+            Array of lightcurve quality flags with length [ntimes].
         """
 
         if (bad_bit_value is not None and psf_flux is not None) or (
@@ -3052,7 +3072,7 @@ class MovingTPF:
                 "Must define either `bad_bit_value` or `psf_flux`, but not both."
             )
 
-        # Define masks
+        # Define bits
         masks = {
             # No pixels in mask
             "no_pixel_mask": {
@@ -3151,7 +3171,7 @@ class MovingTPF:
             # Add flag for negative pixels (after BG correction) in aperture?
         }
 
-        # Compute bit-wise mask
+        # Compute bit-wise flags
         lc_quality = np.sum(
             [
                 (2 ** (masks[mask]["bit"] - 1)) * np.asarray(masks[mask]["value"])
@@ -3472,7 +3492,7 @@ class MovingTPF:
                 unit="pixel",
                 array=self.corner[:, 0],
             ),
-            # 3D pixel quality mask
+            # 3D pixel quality flags
             fits.Column(
                 name="PIXEL_QUALITY",
                 format=tform.replace("E", "I"),
@@ -4509,6 +4529,291 @@ class MovingTPF:
             logger.error(
                 "ipython needs to be installed for animate() to work (e.g., `pip install ipython`)"
             )
+
+    def create_lc_quality_mask(
+        self,
+        spoc_quality: np.ndarray,
+        lc_quality: np.ndarray,
+        bad_spoc_bits: Union[list[int], str] = "default",
+        bad_lc_bits: Union[list[int], str] = "default",
+    ):
+        """
+        Combines SPOC quality flags and tess_asteroids lightcurve quality flags to
+        create a boolean quality mask that can be applied to the aperture or PSF
+        lightcurve.
+
+        Parameters
+        ----------
+        spoc_quality : ndarray
+            Array of SPOC quality flags.
+        lc_quality : ndarray
+            Array of tess_asteroids lightcurve quality flags, as defined by `_create_lc_quality()`.
+            This must have the same length as `spoc_quality`.
+        bad_spoc_bits : list or str
+            Defines SPOC bits corresponding to bad quality data. Can be one of:
+
+                - "default" - mask bits defined by `default_bad_spoc_bits`.
+                - "all" - mask all data with a SPOC quality flag.
+                - "none" - mask no data.
+                - list - mask custom bits provided in list.
+                More information about the SPOC quality flags can be found in Section 9 of the TESS Science
+                Data Products Description Document.
+        bad_lc_bits : list or str
+            Defines bits corresponding to bad quality data from `_create_lc_quality()`.
+            Can be one of:
+
+            - "default" - mask bits defined by `default_bad_lc_bits`.
+            - "all" - mask all data with a quality flag.
+            - "none" - mask no data.
+            - list - mask custom bits provided in list.
+
+        Returns
+        -------
+        quality_mask : ndarray
+            A boolean mask with the same length as `spoc_quality` and `lc_quality`.
+            `True` indicates a good quality cadence and `False` indicates a bad quality cadence.
+        """
+
+        # Create SPOC quality mask using user-defined bad bits.
+        spoc_quality_mask, _ = self._create_spoc_quality_mask(
+            spoc_quality=spoc_quality, bad_spoc_bits=bad_spoc_bits
+        )
+
+        # Define bitmask for user-defined tess_asteroids lightcurve quality bits.
+        bad_lc_value = create_bad_bitmask(
+            bad_bits=bad_lc_bits, default_bad_bits=default_bad_lc_bits
+        )
+
+        # Define lightcurve quality mask.
+        if bad_lc_value == "all":
+            quality_mask = lc_quality == 0
+        else:
+            quality_mask = lc_quality & bad_lc_value == 0
+
+        return np.logical_and(quality_mask, spoc_quality_mask)
+
+    def plot_lc(
+        self,
+        lc: Optional[dict] = None,
+        method: str = "all",
+        bad_spoc_bits: Union[list[int], str] = "default",
+        bad_ap_bits: Union[list[int], str] = "default",
+        bad_psf_bits: Union[list[int], str] = "default",
+        plot_err: bool = False,
+        plot_bad_quality: bool = True,
+        xlim: Optional[tuple] = None,
+        ylim: Optional[tuple] = None,
+        save: bool = False,
+        outdir: str = "",
+        file_name: Optional[str] = None,
+    ):
+        """
+        Plot aperture and/or PSF lightcurves, with options to customise and save.
+
+        Parameters
+        ----------
+        lc : dict
+            A dictionary containing aperture and PSF photometry. This must have the same structure as that
+            produced by `self.to_lightcurve()`. If None, `self.lc` will be used by default.
+        method : str
+            Lightcurve to plot. One of [`all`, `aperture`, `psf`].
+        bad_spoc_bits : list or str
+            Defines SPOC bits corresponding to bad quality data. Can be one of:
+
+            - "default" - mask bits defined by `default_bad_spoc_bits`.
+            - "all" - mask all data with a SPOC quality flag.
+            - "none" - mask no data.
+            - list - mask custom bits provided in list.
+            More information about the SPOC quality flags can be found in Section 9 of the TESS Science
+            Data Products Description Document.
+        bad_ap_bits/bad_psf_bits : list or str
+            Defines bits corresponding to bad quality data for `aperture`/`psf` photometry, as defined by `_create_lc_quality()`.
+            Can be one of:
+
+            - "default" - mask bits defined by `default_bad_lc_bits`.
+            - "all" - mask all data with a quality flag.
+            - "none" - mask no data.
+            - list - mask custom bits provided in list.
+        plot_err : bool
+            If True, plot errorbars on lightcurve.
+        plot_bad_quality : bool
+            If True, include data flagged as bad quality in the plot.
+        xlim/ylim : tuple
+            (min, max) axes limits.
+        save : bool
+            If True, save the figure.
+        outdir : str
+            If `save`, this is the directory into which the file will be saved.
+        file_name : str or None
+            If `save`, this is the filename that will be used.
+            If no filename is given, a default one will be generated.
+
+        Returns
+        --------
+        fig : matplotlib.figure.Figure
+            Matplotlib figure object.
+
+        """
+
+        # Attribute checks
+        if not hasattr(self, "quality"):
+            raise AttributeError("Must run `get_data()` before plotting lightcurve.")
+
+        # Assign default value to `lc` if none is provided by user:
+        if lc is None:
+            if not hasattr(self, "lc"):
+                raise AttributeError(
+                    "Must run `to_lightcurve()` before plotting lightcurve, if you have not provided `lc`."
+                )
+            lc = self.lc
+
+        # Make a copy of dictionary
+        lc = deepcopy(lc)
+
+        # Only plot lightcurve for user specified `method`
+        if method != "all":
+            if method not in lc:
+                raise ValueError(f"Method '{method}' is not in `lc`.")
+            lc = {method: lc[method]}
+
+        # Ensure lc["aperture"] is at least 1D
+        if "aperture" in lc:
+            lc["aperture"] = np.atleast_1d(lc["aperture"])  # type: ignore
+
+        # Initialise figure
+        n_axes = (len(lc["aperture"]) if "aperture" in lc else 0) + (
+            1 if "psf" in lc else 0
+        )
+        if n_axes == 0:
+            raise ValueError(
+                "Must have at least one `aperture` or `psf` lightcurve in `lc`."
+            )
+        fig, ax = plt.subplots(
+            n_axes, 1, figsize=(8, 4 * n_axes), sharex=True, sharey=True
+        )
+        ax = np.atleast_1d(ax)
+
+        # Run through each available lightcurve and plot
+        for key in lc:
+            if key == "aperture":
+                # Run through each available aperture lightcurve
+                for i, lc_ap in enumerate(lc[key]):
+                    # Define aperture lightcurve quality mask.
+                    quality_mask = self.create_lc_quality_mask(
+                        spoc_quality=self.quality,
+                        lc_quality=lc_ap["quality"],
+                        bad_spoc_bits=bad_spoc_bits,
+                        bad_lc_bits=bad_ap_bits,
+                    )
+
+                    ax[i].errorbar(
+                        lc_ap["time"][quality_mask],
+                        lc_ap["flux"][quality_mask],
+                        yerr=lc_ap["flux_err"][quality_mask] if plot_err else None,
+                        color="deeppink",
+                        marker="o",
+                        ms=2,
+                        ls="",
+                    )
+                    if plot_bad_quality:
+                        ax[i].errorbar(
+                            lc_ap["time"][~quality_mask],
+                            lc_ap["flux"][~quality_mask],
+                            yerr=lc_ap["flux_err"][~quality_mask] if plot_err else None,
+                            color="black",
+                            marker="x",
+                            ms=6,
+                            ls="",
+                            label="Bad quality data",
+                        )
+                        ax[i].legend()
+                    ax[i].tick_params(
+                        axis="x", which="both", labelbottom=True, bottom=True
+                    )
+                    ax[i].set_ylabel("Flux [e-/s]")
+                    ax[i].grid(ls=":")
+                    ax[i].set_axisbelow(True)
+                    ax[i].set_title(
+                        "Aperture{} photometry".format(i if len(lc[key]) > 1 else "")
+                    )
+
+            elif key == "psf":
+                # Define PSF lightcurve quality mask.
+                quality_mask = self.create_lc_quality_mask(
+                    spoc_quality=lc[key]["spoc_quality"],
+                    lc_quality=lc[key]["quality"],
+                    bad_spoc_bits=bad_spoc_bits,
+                    bad_lc_bits=bad_psf_bits,
+                )
+
+                ax[-1].errorbar(
+                    lc[key]["time"][quality_mask],
+                    lc[key]["flux"][quality_mask],
+                    yerr=lc[key]["flux_err"][quality_mask] if plot_err else None,
+                    xerr=(
+                        lc[key]["time_lerr"][quality_mask],
+                        lc[key]["time_uerr"][quality_mask],
+                    )
+                    if plot_err
+                    else None,
+                    color="mediumorchid",
+                    marker="o",
+                    ms=2,
+                    ls="",
+                )
+                if plot_bad_quality:
+                    ax[-1].errorbar(
+                        lc[key]["time"][~quality_mask],
+                        lc[key]["flux"][~quality_mask],
+                        yerr=lc[key]["flux_err"][~quality_mask] if plot_err else None,
+                        xerr=(
+                            lc[key]["time_lerr"][~quality_mask],
+                            lc[key]["time_uerr"][~quality_mask],
+                        )
+                        if plot_err
+                        else None,
+                        color="black",
+                        marker="x",
+                        ms=6,
+                        ls="",
+                        label="Bad quality data",
+                    )
+                    ax[-1].legend()
+                ax[-1].set_ylabel("Flux [e-/s]")
+                ax[-1].grid(ls=":")
+                ax[-1].set_axisbelow(True)
+                ax[-1].set_title("PSF photometry")
+
+        if ylim is not None:
+            ax[-1].set_ylim(ylim)
+        if xlim is not None:
+            ax[-1].set_xlim(xlim)
+        ax[-1].set_xlabel("Time [BJD - 2457000]")
+
+        fig.suptitle(
+            f"Asteroid {self.target} in Sector {self.sector} Camera {self.camera} CCD {self.ccd}"
+        )
+        fig.tight_layout()
+
+        # Save figure
+        if save:
+            # Create default file name
+            if file_name is None:
+                file_name = "tess-{0}-s{1:04}-{2}-{3}-shape{4}x{5}_lc.png".format(
+                    str(self.target).replace(" ", "").replace("/", ""),
+                    self.sector,
+                    self.camera,
+                    self.ccd,
+                    *self.shape,
+                )
+            # Check outdir
+            if len(outdir) > 0 and not outdir.endswith("/"):
+                outdir += "/"
+            plt.savefig(outdir + file_name)
+            logger.info("Created file: {0}".format(outdir + file_name))
+
+        plt.close(fig)
+        return fig
 
     @staticmethod
     def from_name(
