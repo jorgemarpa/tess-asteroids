@@ -2869,7 +2869,6 @@ class MovingTPF:
 
         # Compute `value` to mask bad bits.
         bad_bit_value = create_bad_bitmask(bad_bits)
-        self.bad_bits = ",".join([str(bit) for bit in bad_bits])
 
         mask = []
         ap_flux = []
@@ -4689,7 +4688,12 @@ class MovingTPF:
                 "Must have at least one `aperture` or `psf` lightcurve in `lc`."
             )
         fig, ax = plt.subplots(
-            n_axes, 1, figsize=(8, 4 * n_axes), sharex=True, sharey=True
+            n_axes,
+            1,
+            figsize=(8, 4 * n_axes),
+            sharex=True,
+            sharey=True,
+            constrained_layout=True,
         )
         ax = np.atleast_1d(ax)
 
@@ -4734,7 +4738,14 @@ class MovingTPF:
                     ax[i].grid(ls=":")
                     ax[i].set_axisbelow(True)
                     ax[i].set_title(
-                        "Aperture{} photometry".format(i if len(lc[key]) > 1 else "")
+                        "Aperture{0} photometry (method = '{1}', {3} = {2})".format(
+                            i if len(lc[key]) > 1 else "",
+                            lc_ap["ap_method"],
+                            lc_ap["ap_param"],
+                            "threshold"
+                            if lc_ap["ap_method"] in ["prf", "threshold"]
+                            else "R value",
+                        )
                     )
 
             elif key == "psf":
@@ -4793,7 +4804,6 @@ class MovingTPF:
         fig.suptitle(
             f"Asteroid {self.target} in Sector {self.sector} Camera {self.camera} CCD {self.ccd}"
         )
-        fig.tight_layout()
 
         # Save figure
         if save:
