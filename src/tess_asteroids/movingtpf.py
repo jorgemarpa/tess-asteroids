@@ -582,7 +582,7 @@ class MovingTPF:
 
         bg = []
         bg_err = []
-        for i in range(len(self.all_flux)):
+        for i in tqdm(range(len(self.all_flux)), total=len(self.all_flux), desc="Computing rolling median bkg"):
             # Get flux window.
             flux_window = self.all_flux[
                 i - nframes if i >= nframes else 0 : i + nframes + 1
@@ -1682,7 +1682,7 @@ class MovingTPF:
             ax3.set(
                 xlabel="Time Index",
                 ylabel="Pixel Index",
-                title="Residuals (excluding target, vmin=-5, vmax=5)",
+                title="Residuals (excluding target, vmin=-2.5, vmax=2.5)",
             )
             im = ax3.imshow(
                 np.where(
@@ -1692,8 +1692,8 @@ class MovingTPF:
                 aspect="auto",
                 interpolation="none",
                 cmap="RdBu",
-                vmin=-5,
-                vmax=5,
+                vmin=-2.5,
+                vmax=2.5,
             )
             # Add colorbar
             cbar = fig.colorbar(im, ax=ax3, location="right")
@@ -2623,9 +2623,13 @@ class MovingTPF:
 
             # Find finite values and pixels with PRF value > 0.001%.
             # This value is small to include all pixels where the PRF has contribution.
+            sq_mask = np.zeros_like(p).astype(bool)
+            win_size = 25
+            sq_mask[:, win_size : 91 - win_size, win_size : 91 - win_size] = True
             pixel_masks.append(
                 np.logical_and(
-                    p > 0.00001,
+                    # p > 0.00001,
+                    sq_mask,
                     np.logical_and(np.isfinite(f), np.isfinite(fe)),
                 )
             )
