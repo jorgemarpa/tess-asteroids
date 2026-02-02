@@ -83,7 +83,8 @@ def target_observability(
 ):
     """
     Determine if a target has been observed by TESS and, if so, during which sector/camera/CCD. This function will also
-    give an estimate of the length of time, in days, for which the target was observed on each sector/camera/CCD.
+    give an estimate of the length of time, in days, for which the target was observed on each sector/camera/CCD and its
+    predicted average visual magnitude.
 
     Parameters
     ----------
@@ -103,6 +104,7 @@ def target_observability(
 
         - 'sector', 'camera', 'ccd': sector/camera/CCD target was observed in.
         - 'dur': approximate duration for which target was observed in this sector/camera/CCD, in days.
+        - 'vmag': average predicted visual magnitude of the target.
     df_ephem : DataFrame
         If `return_ephem` = True, the ephemeris will also be returned. This includes the pixel 'row' and 'column'
         of the target over time.
@@ -110,14 +112,14 @@ def target_observability(
 
     df_ephem = ephem(target, sector=sector)
 
-    obs = {"sector": [], "camera": [], "ccd": [], "dur": []}  # type: dict
+    obs = {"sector": [], "camera": [], "ccd": [], "dur": [], "vmag": []}  # type: dict
     if len(df_ephem) != 0:
         unique_combinations = df_ephem[["sector", "camera", "ccd"]].drop_duplicates()
         for _, combo in unique_combinations.iterrows():
             obs["sector"].append(combo["sector"])
             obs["camera"].append(combo["camera"])
             obs["ccd"].append(combo["ccd"])
-            time = df_ephem[
+            df_combo = df_ephem[
                 np.logical_and(
                     df_ephem["sector"] == obs["sector"][-1],
                     np.logical_and(
@@ -125,8 +127,11 @@ def target_observability(
                         df_ephem["ccd"] == obs["ccd"][-1],
                     ),
                 )
-            ].index
-            obs["dur"].append((np.nanmax(time) - np.nanmin(time)).value)
+            ]
+            obs["dur"].append(
+                (np.nanmax(df_combo.index) - np.nanmin(df_combo.index)).value
+            )
+            obs["vmag"].append(np.nanmean(df_combo["vmag"]))
 
     if return_ephem:
         return pd.DataFrame(obs), df_ephem
@@ -609,3 +614,48 @@ def animate_cube(
     )
 
     return ani
+
+
+def create_bad_bitmask(
+    bad_bits: Union[list[int], str], default_bad_bits: list[int] = []
+):
+    """
+    Convert a list of bits into an integer bitmask.
+
+    This function translates 1-indexed bit positions into a single bitwise
+    value. This value can be used with a bitwise AND operator to identify
+    data points containing specific quality flags.
+
+    Parameters
+    ----------
+    bad_bits : list or str
+        Defines bits corresponding to bad quality data. Can be one of:
+
+            - "default" - mask bits defined by `default_bad_bits`.
+            - "all" - mask all data with a quality flag.
+            - "none" - mask no data.
+            - list - mask custom bits provided in list.
+    default_bad_bits : list
+        A list of 1-indexed bit positions used if `bad_bits` is
+        set to 'default'.
+
+    Returns
+    -------
+    bad_bitmask : int or str
+        The computed integer bitmask or the string "all".
+    """
+    if bad_bits == "default":
+        bad_bits = default_bad_bits
+    elif bad_bits == "none":
+        bad_bits = []
+    elif not isinstance(bad_bits, list) and bad_bits != "all":
+        raise ValueError(
+            "`bad_bits` must be either one of ['default', 'all', 'none'] or a custom list of bad quality bits."
+        )
+    if bad_bits != "all":
+        bad_bitmask = 0
+        for bit in bad_bits:
+            bad_bitmask += 2 ** (bit - 1)  # type: ignore
+        return bad_bitmask
+    else:
+        return bad_bits  # type: ignore
