@@ -276,7 +276,7 @@ class MovingTPF:
         Returns
         -------
         """
-        # Shape needs to be >=3 in both dimensions, otherwise make_wcs_header() errors.
+        # Shape needs to be >=3 in both dimensions, otherwise `make_wcs_header()` errors.
         self.shape = shape
 
         # Use interpolation to get target (row,column) at cube time.
@@ -439,7 +439,7 @@ class MovingTPF:
         # internally converted (ra,dec) to (row,column) using tesswcs.
         # `self.coords` does not recover these original values because the
         # ephemeris has since been interpolated.
-        # Note: pixel_to_world() assumes zero-indexing so subtract one from (row,col).
+        # Note: `pixel_to_world()` assumes zero-indexing so subtract one from (row,col).
         self.wcs = tesswcs.WCS.from_sector(
             sector=self.sector, camera=self.camera, ccd=self.ccd
         )
@@ -2000,7 +2000,7 @@ class MovingTPF:
             if time_step >= cadence:
                 time_step = 0.99 * cadence
             logger.info(
-                "_create_target_prf_model() calculated a time_step of {0} minutes.".format(
+                "`_create_target_prf_model()` calculated a time_step of {0} minutes.".format(
                     time_step
                 )
             )
@@ -2080,7 +2080,7 @@ class MovingTPF:
                 "{0}-{1}".format(w.filename, w.lineno): w for w in recorded_warnings
             }.values()
         ):
-            logger.warning("Warning from prf.evaluate(): {0}".format(w))
+            logger.warning("Warning from `prf.evaluate()`: {0}".format(w))
 
         # If first/last frame contains nans, replace PRF model with following/preceding frame.
         if np.isnan(prf_model).any():
@@ -2303,16 +2303,15 @@ class MovingTPF:
         Each flag is a bit-wise combination of the following bits:
 
         Bit - Description
-        ----------------
-        1 - pixel is outside of science array
-        2 - pixel is in a strap column
-        3 - pixel is saturated
-        4 - pixel is within `sat_buffer_rad` pixels of a saturated pixel
-        5 - pixel has no scattered light correction. Only relevant if `linear_model` background correction was used.
-        6 - pixel had no background star model, value is nan. Only relevant if `linear_model` background correction was used.
-        7 - pixel had negative flux value BEFORE background correction was applied.
-            This can happen near bleed columns from saturated stars (e.g. see Sector 6, Camera 1, CCD 4).
-        8 - pixel has a poor fitting background star model. Only relevant if `linear_model` background correction was used.
+
+        - 1 - pixel is outside of science array
+        - 2 - pixel is in a strap column
+        - 3 - pixel is saturated
+        - 4 - pixel is within `sat_buffer_rad` pixels of a saturated pixel
+        - 5 - pixel has no scattered light correction. Only relevant if `linear_model` background correction was used.
+        - 6 - pixel had no background star model, value is nan. Only relevant if `linear_model` background correction was used.
+        - 7 - pixel had negative flux value BEFORE background correction was applied. This can happen near bleed columns from saturated stars (e.g. see Sector 6, Camera 1, CCD 4).
+        - 8 - pixel has a poor fitting background star model. Only relevant if `linear_model` background correction was used.
 
         Parameters
         ----------
@@ -2951,7 +2950,7 @@ class MovingTPF:
         row_cen += self.corner[:, 0]
 
         # Convert measured centroid from (row,col) to (ra,dec) using WCS from tesswcs.
-        # Note: pixel_to_world() assumes zero-indexing so subtract one from (row,col).
+        # Note: `pixel_to_world()` assumes zero-indexing so subtract one from (row,col).
         measured_coords = np.asarray(
             [
                 self.wcs.pixel_to_world(col_cen[t] - 1, row_cen[t] - 1)
@@ -3022,25 +3021,20 @@ class MovingTPF:
         The flag is a bit-wise combination of the following bits:
 
         Bit - Description
-        ----------------
-        1  - no pixels inside mask.
-        2  - at least one non-science pixel inside mask.
-        3  - at least one pixel inside mask is in a strap column.
-        4  - at least one saturated pixel inside mask.
-        5  - at least one pixel inside mask is 4-adjacent to a saturated pixel.
-        6  - all pixels inside aperture are `bad_bits`.
-             Only defined if `bad_bit_value` is not None (relevant for aperture photometry).
-        7  - PRF model contained nans.
-        8  - at least one pixel inside mask does not have scattered light correction.
-             Only relevant if `linear_model` background correction was used.
-        9  - at least one pixel inside mask had no star model (value is nan).
-             Only relevant if `linear_model` background correction was used.
-        10 - at least one pixel inside mask had negative value BEFORE background correction was applied.
-        11 - PSF fit failed due to singular matrix (see np.linalg.LinAlgError) or because all pixels
-             used to fit the PRF model had NaN flux values. Only relevant if `method=psf`.
-        12 - at least one pixel inside mask had a poor fitting background star model.
-             Only relevant if `linear_model` background correction was used.
-        13 - mask has two or more discrete regions.
+        
+        - 1 - no pixels inside mask.
+        - 2 - at least one non-science pixel inside mask.
+        - 3 - at least one pixel inside mask is in a strap column.
+        - 4 - at least one saturated pixel inside mask.
+        - 5 - at least one pixel inside mask is 4-adjacent to a saturated pixel.
+        - 6 - all pixels inside aperture are `bad_bits`. Only defined if `bad_bit_value` is not None (relevant for aperture photometry).
+        - 7 - PRF model contained nans.
+        - 8 - at least one pixel inside mask does not have scattered light correction. Only relevant if `linear_model` background correction was used.
+        - 9 - at least one pixel inside mask had no star model (value is nan). Only relevant if `linear_model` background correction was used.
+        - 10 - at least one pixel inside mask had negative value BEFORE background correction was applied.
+        - 11 - PSF fit failed due to singular matrix (see np.linalg.LinAlgError) or because all pixels used to fit the PRF model had NaN flux values. Only relevant if `method=psf`.
+        - 12 - at least one pixel inside mask had a poor fitting background star model. Only relevant if `linear_model` background correction was used.
+        - 13 - mask has two or more discrete regions.
 
         Parameters
         ----------
@@ -3053,7 +3047,7 @@ class MovingTPF:
             Cadences where the PRF model is NaN, as returned by `_create_target_prf_model()`. This must have length equal to the first
             dimension of `pixel_mask`.
         bad_bit_value : int
-            Value corresponding to `bad_bits`, as defined by user in _aperture_photometry().
+            Value corresponding to `bad_bits`, as defined by user in `_aperture_photometry()`.
             If creating quality mask for PSF photmetry, this should be None.
         psf_flux : ndarray
             PSF flux time-series from `_psf_photometry()`.
@@ -3112,7 +3106,7 @@ class MovingTPF:
                     for t in range(len(pixel_mask))
                 ],
             },
-            # All pixels in aperture are `bad_bits`, as defined by user in _aperture_photometry()
+            # All pixels in aperture are `bad_bits`, as defined by user in `_aperture_photometry()`
             # Only relevant for aperture photometry.
             "bad_bit_mask": {
                 "bit": 6,
@@ -3703,7 +3697,7 @@ class MovingTPF:
                     disp="E14.7",
                     array=ap_lc["dec"],
                 ),
-                # Quality from _create_lc_quality()
+                # Quality from `_create_lc_quality()`
                 fits.Column(
                     name="AP_QUALITY",
                     format="I",
@@ -3874,7 +3868,7 @@ class MovingTPF:
                     disp="E14.7",
                     array=lc["psf"]["red_chi2"],
                 ),
-                # Quality from _create_lc_quality()
+                # Quality from `_create_lc_quality()`
                 fits.Column(
                     name="PSF_QUALITY",
                     format="I",
@@ -4551,7 +4545,7 @@ class MovingTPF:
             # To make installing `tess-asteroids` easier, ipython is not a dependency
             # because we can assume it is installed when notebook-specific features are called.
             logger.error(
-                "ipython needs to be installed for animate() to work (e.g., `pip install ipython`)"
+                "ipython needs to be installed for `animate()` to work (e.g., `pip install ipython`)"
             )
 
     def create_lc_quality_mask(
@@ -4576,12 +4570,13 @@ class MovingTPF:
         bad_spoc_bits : list or str
             Defines SPOC bits corresponding to bad quality data. Can be one of:
 
-                - "default" - mask bits defined by `default_bad_spoc_bits`.
-                - "all" - mask all data with a SPOC quality flag.
-                - "none" - mask no data.
-                - list - mask custom bits provided in list.
-                More information about the SPOC quality flags can be found in Section 9 of the TESS Science
-                Data Products Description Document.
+            - "default" - mask bits defined by `default_bad_spoc_bits`.
+            - "all" - mask all data with a SPOC quality flag.
+            - "none" - mask no data.
+            - list - mask custom bits provided in list.
+                
+            More information about the SPOC quality flags can be found in Section 9 of the TESS Science
+            Data Products Description Document.
         bad_lc_bits : list or str
             Defines bits corresponding to bad quality data from `_create_lc_quality()`.
             Can be one of:
@@ -4648,6 +4643,7 @@ class MovingTPF:
             - "all" - mask all data with a SPOC quality flag.
             - "none" - mask no data.
             - list - mask custom bits provided in list.
+            
             More information about the SPOC quality flags can be found in Section 9 of the TESS Science
             Data Products Description Document.
         bad_ap_bits/bad_psf_bits : list or str
