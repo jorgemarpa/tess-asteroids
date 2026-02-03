@@ -3040,6 +3040,7 @@ class MovingTPF:
              used to fit the PRF model had NaN flux values. Only relevant if `method=psf`.
         12 - at least one pixel inside mask had a poor fitting background star model.
              Only relevant if `linear_model` background correction was used.
+        13 - mask has two or more discrete regions.
 
         Parameters
         ----------
@@ -3117,6 +3118,8 @@ class MovingTPF:
                 "bit": 6,
                 "value": [
                     (pixel_quality[t][pixel_mask[t]] & bad_bit_value != 0).all()
+                    if pixel_mask[t].sum() != 0
+                    else False
                     for t in range(len(pixel_mask))
                 ]
                 if bad_bit_value is not None
@@ -3164,6 +3167,28 @@ class MovingTPF:
                 "bit": 12,
                 "value": [
                     (pixel_quality[t][pixel_mask[t]] & 128 != 0).any()
+                    for t in range(len(pixel_mask))
+                ],
+            },
+            # Discontinuous mask
+            "discon_mask": {
+                "bit": 13,
+                "value": [
+                    any(
+                        [
+                            ndimage.label(
+                                p, structure=ndimage.generate_binary_structure(2, 2)
+                            )[1]
+                            > 1
+                            for p in pixel_mask[t]
+                        ]
+                    )
+                    if len(pixel_mask[t].shape) == 3
+                    else ndimage.label(
+                        pixel_mask[t],
+                        structure=ndimage.generate_binary_structure(2, 2),
+                    )[1]
+                    > 1
                     for t in range(len(pixel_mask))
                 ],
             },
