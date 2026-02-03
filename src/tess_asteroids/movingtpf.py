@@ -2885,8 +2885,7 @@ class MovingTPF:
             self.prf_model, self.ap_prf_nan_mask = self._create_target_prf_model()
 
         # Compute `value` to mask bad bits.
-        self.bad_bit_value = create_bad_bitmask(bad_bits)
-        self.bad_bits = ",".join([str(bit) for bit in bad_bits])
+        bad_bit_value = create_bad_bitmask(bad_bits)
 
         mask = []
         ap_flux = []
@@ -3022,11 +3021,21 @@ class MovingTPF:
         psf_flux: Optional[np.ndarray] = None,
     ):
         """
-        Called internally to create quality flags for lightcurve. This is defined independently of
-        SPOC quality flags.
+        Creates quality flags for lightcurve. This is defined independently of SPOC quality flags.
+        This function is called internally by `_aperture_photometry()` and `_psf_photometry()`.
 
         For `aperture` method, pixels inside the aperture mask are used to define LC quality.
         For `psf` method, pixels that were used to fit the PRF model are used to define LC quality.
+
+        - `pixel_mask` should correspond to the pixels inside the aperture mask.
+        - `bad_bit_value` should correspond to `bad_bits` defined by user in `_aperture_photometry()`.
+        - `psf_flux` should be None.
+
+        If you are creating LC quality for PSF photometry:
+
+        - `pixel_mask` should correspond to the pixels that were used to fit the PRF model in `_psf_photometry()`.
+        - `bad_bit_value` should be None.
+        - `psf_flux` should be the PSF flux time-series from `_psf_photometry()`.
 
         The flag is a bit-wise combination of the following bits:
 
@@ -4697,7 +4706,12 @@ class MovingTPF:
                 "Must have at least one `aperture` or `psf` lightcurve in `lc`."
             )
         fig, ax = plt.subplots(
-            n_axes, 1, figsize=(8, 4 * n_axes), sharex=True, sharey=True
+            n_axes,
+            1,
+            figsize=(8, 4 * n_axes),
+            sharex=True,
+            sharey=True,
+            constrained_layout=True,
         )
         ax = np.atleast_1d(ax)
 
@@ -4742,7 +4756,14 @@ class MovingTPF:
                     ax[i].grid(ls=":")
                     ax[i].set_axisbelow(True)
                     ax[i].set_title(
-                        "Aperture{} photometry".format(i if len(lc[key]) > 1 else "")
+                        "Aperture{0} photometry (method = '{1}', {3} = {2})".format(
+                            i if len(lc[key]) > 1 else "",
+                            lc_ap["ap_method"],
+                            lc_ap["ap_param"],
+                            "threshold"
+                            if lc_ap["ap_method"] in ["prf", "threshold"]
+                            else "R value",
+                        )
                     )
 
             elif key == "psf":
@@ -4801,7 +4822,6 @@ class MovingTPF:
         fig.suptitle(
             f"Asteroid {self.target} in Sector {self.sector} Camera {self.camera} CCD {self.ccd}"
         )
-        fig.tight_layout()
 
         # Save figure
         if save:
