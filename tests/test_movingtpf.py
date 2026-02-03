@@ -390,7 +390,8 @@ def test_to_lightcurve_aperture():
     assert len(target.lc["aperture"]["TESSmag"]) == len(target.time)
     assert len(target.lc["aperture"]["quality"]) == len(target.time)
     assert len(target.lc["aperture"]["flux_fraction"]) == len(target.time)
-    assert len(target.lc["aperture"]["n_pixels"]) == len(target.time)
+    assert len(target.lc["aperture"]["n_pix"]) == len(target.time)
+    assert len(target.lc["aperture"]["n_pix_star"]) == len(target.time)
     assert len(target.lc["aperture"]["bg_std"]) == len(target.time)
 
     # Check the average centroid is within 1/2 a pixel of the center of the TPF.

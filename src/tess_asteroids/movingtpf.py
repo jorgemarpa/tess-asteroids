@@ -618,40 +618,50 @@ class MovingTPF:
 
     def _create_source_mask(
         self,
-        target_threshold: float = 0.01,
+        include_target: bool = True,
         include_stars: bool = True,
+        target_threshold: float = 0.01,
         star_flux_threshold: float = 1.05,
         star_gradient_threshold: float = 4,
+        all_flux: bool = True,
         **kwargs,
     ):
         """
-        Creates a boolean mask, with the same shape as `self.all_flux` (ntimes, npixels), that masks stationary sources
-        (e.g. stars) and the moving target.
+        Creates a boolean mask that masks stationary sources (e.g. stars) and the moving target.
 
         The moving target mask is created using the PRF model and selecting all pixels that contain more than the
-        `target_threshold` fraction of the object's flux. This mask is defined per time.
+        `target_threshold` fraction of the object's flux. This mask is defined per time. This is only included in the mask
+        if `include_target` is `True`.
 
         The star mask is created using two condiditons: i) a high flux value and ii) a high flux gradient. This mask is
         constant across all times. This is only included in the mask if `include_stars` is `True`.
 
+        The source mask can be returned in all_flux or TPF space, controlled by the `all_flux` parameter. In all_flux
+        space the source mask has shape (ntimes, npixels) and in the TPF space the shape is (ntimes, nrows, ncols).
+
         Parameters
         ----------
+        include_target : bool
+            If `True`, includes moving target in the source mask.
+        include_stars : bool
+            If `True`, includes stars in the source mask.
         target_threshold : float
             Pixels where the PRF model is greater than this threshold are included in the target mask. Must be between 0 and 1
             because the PRF model is normalised so that all values sum to one.
-        include_stars : bool
-            If `True`, returns a mask for moving target and stars. If `False`, returns a mask for moving target only.
         star_flux_threshold : float
             Used to define the threshold above which a pixel has a high flux.
         star_gradient_threshold : float
             Used to define the threshold above which a pixel has a high flux gradient.
+        all_flux : boolean
+            If True, the mask is returned with shape (ntimes, npixels).
+            If False, the mask is returned with shape (ntimes, nrows, ncols).
         kwargs : dict
             Keywords arguments passed to `self._create_target_prf_model`, e.g `time_step`.
 
         Returns
         -------
         source_mask : ndarray
-            Boolean mask with shape (ntimes, npixels). The mask is `True` when the moving target or a star is present.
+            Boolean mask. The mask is `True` when the moving target or a star is present.
         """
 
         # Check thresholds are physical.
@@ -669,64 +679,80 @@ class MovingTPF:
             )
 
         # Create mask for moving target.
-        target_mask, _ = self._create_target_prf_model(all_flux=True, **kwargs)
-        target_mask = target_mask >= target_threshold
-        if not include_stars:
-            return target_mask
+        if include_target:
+            target_mask, _ = self._create_target_prf_model(all_flux=True, **kwargs)
+            target_mask = target_mask >= target_threshold
+        else:
+            target_mask = np.zeros_like(self.all_flux, dtype=bool)
 
         # Create mask for stationary sources e.g. stars (high flux values AND high flux gradients).
+        if include_stars:
+            # Compute median of each pixel across all times and median of all pixels across all times.
+            # Catch warnings that arise if value is nan at all times (e.g. non-science pixels).
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message="All-NaN slice encountered",
+                    category=RuntimeWarning,
+                )
+                med = np.nanmedian(self.all_flux, axis=0)
+                med_all = np.nanmedian(self.all_flux)
 
-        # Compute median of each pixel across all times and median of all pixels across all times.
-        # Catch warnings that arise if value is nan at all times (e.g. non-science pixels).
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore", message="All-NaN slice encountered", category=RuntimeWarning
+            # Mask pixels whose average flux value over all time is some fraction greater than average flux value over all
+            # pixels and all times.
+            star_flux_mask = med >= star_flux_threshold * med_all
+
+            # Reshape median to match 2D all_flux region. This is necessary to be able to compute mask in terms of gradient.
+            # Origin is minimum row/column (not a pair) and shape is entire all_flux region.
+            origin = tuple(self.pixels.min(axis=0).astype(int))
+            shape = tuple(
+                (self.pixels.max(axis=0) - self.pixels.min(axis=0) + 1).astype(int)
             )
-            med = np.nanmedian(self.all_flux, axis=0)
-            med_all = np.nanmedian(self.all_flux)
-
-        # Mask pixels whose average flux value over all time is some fraction greater than average flux value over all
-        # pixels and all times.
-        star_flux_mask = med >= star_flux_threshold * med_all
-
-        # Reshape median to match 2D all_flux region. This is necessary to be able to compute mask in terms of gradient.
-        # Origin is minimum row/column (not a pair) and shape is entire all_flux region.
-        origin = tuple(self.pixels.min(axis=0).astype(int))
-        shape = tuple(
-            (self.pixels.max(axis=0) - self.pixels.min(axis=0) + 1).astype(int)
-        )
-        med_reshaped = np.full(shape, np.nan)
-        med_reshaped[
-            self.pixels[:, 0] - np.asarray(origin[0]),
-            self.pixels[:, 1] - np.asarray(origin[1]),
-        ] = med
-
-        # Mask pixels whose average flux gradient over all time is some fraction greater than average flux gradient
-        # over all pixels and all times. Have to use binary_fill_holes to fill holes in binary mask (otherwise bright
-        # pixels in center of star are sometimes excluded from gradient mask).
-        # Catch warnings that arise if all pixels are nan at all times (e.g. non-science pixels).
-        med_gradient = np.gradient(med_reshaped)
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore", message="All-NaN slice encountered", category=RuntimeWarning
-            )
-            star_gradient_mask = np.hypot(
-                *med_gradient
-            ) >= star_gradient_threshold * np.nanmedian(np.hypot(*med_gradient))
-        star_gradient_mask = ndimage.binary_fill_holes(star_gradient_mask)
-
-        # Combine flux and gradient mask - gradient mask is reshaped back to match star_flux_mask.
-        star_mask = (
-            star_flux_mask
-            & star_gradient_mask[
+            med_reshaped = np.full(shape, np.nan)
+            med_reshaped[
                 self.pixels[:, 0] - np.asarray(origin[0]),
                 self.pixels[:, 1] - np.asarray(origin[1]),
-            ]
-        )
+            ] = med
 
-        return np.asarray(
+            # Mask pixels whose average flux gradient over all time is some fraction greater than average flux gradient
+            # over all pixels and all times. Have to use binary_fill_holes to fill holes in binary mask (otherwise bright
+            # pixels in center of star are sometimes excluded from gradient mask).
+            # Catch warnings that arise if all pixels are nan at all times (e.g. non-science pixels).
+            med_gradient = np.gradient(med_reshaped)
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message="All-NaN slice encountered",
+                    category=RuntimeWarning,
+                )
+                star_gradient_mask = np.hypot(
+                    *med_gradient
+                ) >= star_gradient_threshold * np.nanmedian(np.hypot(*med_gradient))
+            star_gradient_mask = ndimage.binary_fill_holes(star_gradient_mask)
+
+            # Combine flux and gradient mask - gradient mask is reshaped back to match star_flux_mask.
+            star_mask = (
+                star_flux_mask
+                & star_gradient_mask[
+                    self.pixels[:, 0] - np.asarray(origin[0]),
+                    self.pixels[:, 1] - np.asarray(origin[1]),
+                ]
+            )
+        else:
+            star_mask = np.zeros(self.all_flux.shape[1], dtype=bool)
+
+        source_mask = np.asarray(
             [np.logical_or(targ_mask, star_mask) for targ_mask in target_mask]
         )
+        if not all_flux:
+            source_mask_reshaped = []
+            for t in range(len(self.time)):
+                source_mask_reshaped.append(
+                    source_mask[t][self.target_mask[t]].reshape(self.shape)
+                )
+            source_mask = np.asarray(source_mask_reshaped)
+
+        return source_mask
 
     def _data_chunks(self, data_chunks: Optional[Union[list, np.ndarray]] = None):
         """
@@ -869,7 +895,7 @@ class MovingTPF:
         outdir : str
             If `diagnostic_plot`, this is the directory into which the plot will be saved.
         kwargs : dict
-            Keywords arguments passed to `self._create_pca_source_mask`, e.g `target_threshold`, `star_flux_threshold`.
+            Keywords arguments passed to `self._create_source_mask`, e.g `target_threshold`, `star_flux_threshold`.
 
         Returns
         -------
@@ -899,7 +925,9 @@ class MovingTPF:
             )
 
         # Create mask for moving target and stars.
-        source_mask = self._create_source_mask(include_stars=True, **kwargs)
+        source_mask = self._create_source_mask(
+            include_stars=True, include_target=True, all_flux=True, **kwargs
+        )
 
         # Add nan flux values to the mask (PCA cannot have nan in flux array).
         source_mask = np.logical_or(source_mask, np.isnan(self.all_flux))
@@ -1323,7 +1351,7 @@ class MovingTPF:
             If `diagnostic_plot`, this is the directory into which the plot will be saved.
         kwargs : dict
             Keywords arguments passed to `_create_scattered_light_model` (e.g. `niter`, `ncomponents`)
-            and `_create_pca_source_mask` (e.g `target_threshold`, `star_flux_threshold`).
+            and `_create_source_mask` (e.g `target_threshold`, `star_flux_threshold`).
 
         Returns
         -------
@@ -1398,7 +1426,9 @@ class MovingTPF:
         nan_mask = np.isnan(sl_corr_flux)
 
         # Create mask for moving target.
-        source_mask = self._create_source_mask(include_stars=False, **kwargs)
+        source_mask = self._create_source_mask(
+            include_stars=False, include_target=True, all_flux=True, **kwargs
+        )
 
         # Define equally spaced knots between bounds, with spacing approximately equal to `knot_width`.
         # It is important to include an extra knot at the lower bound - this gives proper behaviour of spline.
@@ -2837,7 +2867,8 @@ class MovingTPF:
             - `col_cen`, `col_cen_err`, `row_cen`, `row_cen_err`: flux-weighted centroids inside aperture and errors.
             - `quality`: cadence quality flag from `_create_lc_quality()`.
             - `flux_fraction`: fraction of PRF model flux inside aperture.
-            - `n_pixels`: number of pixels inside aperture, excluding pixels flagged as `bad_bits`.
+            - `n_pix`: number of pixels inside aperture, excluding pixels flagged as `bad_bits`.
+            - `n_pix_star`: number of pixels inside aperture, excluding pixels flagged as `bad_bits`, that overlap with star mask.
             - `bg_std`: standad deviation of background pixels (where PRF model < 0.1%).
             - `bg_mad`: median absolute deviation of background pixels (where PRF model < 0.1%).
             - `ra`, `dec`: flux-weighted centroids converted to world coordinates using WCS.
@@ -2983,7 +3014,13 @@ class MovingTPF:
                 bad_bit_value=bad_bit_value,
             ),
             "flux_fraction": np.asarray(flux_fraction),
-            "n_pixels": np.asarray(mask).sum(axis=(1, 2)),
+            "n_pix": np.asarray(mask).sum(axis=(1, 2)),
+            "n_pix_star": np.logical_and(
+                mask,
+                self._create_source_mask(
+                    include_target=False, include_stars=True, all_flux=False, **kwargs
+                ),
+            ).sum(axis=(1, 2)),
             "bg_std": np.asarray(bg_std),
             "bg_mad": np.asarray(bg_mad),
             "ra": [coord.ra.value for coord in measured_coords],
@@ -3021,7 +3058,7 @@ class MovingTPF:
         The flag is a bit-wise combination of the following bits:
 
         Bit - Description
-        
+
         - 1 - no pixels inside mask.
         - 2 - at least one non-science pixel inside mask.
         - 3 - at least one pixel inside mask is in a strap column.
@@ -3716,7 +3753,14 @@ class MovingTPF:
                 fits.Column(
                     name="NPIX",
                     format="I",
-                    array=ap_lc["n_pixels"],
+                    array=ap_lc["n_pix"],
+                ),
+                # Number of pixels inside aperture, excluding pixels flagged as
+                # `bad_bits` by the user, that overlap with star mask.
+                fits.Column(
+                    name="NPIX_STAR",
+                    format="I",
+                    array=ap_lc["n_pix_star"],
                 ),
                 # Standard deviation of background pixels.
                 fits.Column(
@@ -4574,7 +4618,7 @@ class MovingTPF:
             - "all" - mask all data with a SPOC quality flag.
             - "none" - mask no data.
             - list - mask custom bits provided in list.
-                
+
             More information about the SPOC quality flags can be found in Section 9 of the TESS Science
             Data Products Description Document.
         bad_lc_bits : list or str
@@ -4643,7 +4687,7 @@ class MovingTPF:
             - "all" - mask all data with a SPOC quality flag.
             - "none" - mask no data.
             - list - mask custom bits provided in list.
-            
+
             More information about the SPOC quality flags can be found in Section 9 of the TESS Science
             Data Products Description Document.
         bad_ap_bits/bad_psf_bits : list or str
