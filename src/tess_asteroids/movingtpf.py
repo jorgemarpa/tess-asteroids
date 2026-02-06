@@ -3453,7 +3453,7 @@ class MovingTPF:
                 table_hdu_spoc.header.insert(f"TDIM{ext}", card, after=True)
 
         # Add comments to column keywords
-        table_hdu_spoc = add_column_header_comments(table_hdu_spoc)
+        add_column_header_comments(table_hdu_spoc)
 
         table_hdu_spoc.header["EXTNAME"] = ("PIXELS", "name of extension")
 
@@ -3476,6 +3476,7 @@ class MovingTPF:
             table_hdu_spoc.header["TELAPSE"] * table_hdu_spoc.header["DEADC"],
             comment="[d] TELAPSE multiplied by DEADC",
         )
+        table_hdu_spoc.header.set("BACKAPP", 1.0)
 
         # Save to TPF HDUList
         tpf_hdulist.append(table_hdu_spoc)
@@ -3580,7 +3581,7 @@ class MovingTPF:
         # Create table HDU for extra columns
         table_hdu_extra = fits.BinTableHDU.from_columns(cols)
         # Add comments to column keywords
-        table_hdu_extra = add_column_header_comments(table_hdu_extra)
+        add_column_header_comments(table_hdu_extra)
         table_hdu_extra.header["EXTNAME"] = ("EXTRAS", "name of extension")
         tpf_hdulist.append(table_hdu_extra)
 
@@ -3793,7 +3794,7 @@ class MovingTPF:
 
             table_hdu_ap = fits.BinTableHDU.from_columns(cols_ap)
             # Add comments to column keywords
-            table_hdu_ap = add_column_header_comments(table_hdu_ap)
+            add_column_header_comments(table_hdu_ap)
             table_hdu_ap.header["EXTNAME"] = (
                 "LIGHTCURVE_AP{0}".format(i if len(lc["aperture"]) > 1 else ""),
                 "name of extension",
@@ -3966,7 +3967,7 @@ class MovingTPF:
             # Create table HDU
             table_hdu_psf = fits.BinTableHDU.from_columns(cols_psf)
             # Add comments to column keywords
-            table_hdu_psf = add_column_header_comments(table_hdu_psf)
+            add_column_header_comments(table_hdu_psf)
             table_hdu_psf.header["EXTNAME"] = ("LIGHTCURVE_PSF", "name of extension")
 
             # Add extra keywords to header
@@ -4094,7 +4095,7 @@ class MovingTPF:
         # Create table HDU
         table_hdu_extra = fits.BinTableHDU.from_columns(cols_extra)
         # Add comments to column keywords
-        table_hdu_extra = add_column_header_comments(table_hdu_extra)
+        add_column_header_comments(table_hdu_extra)
         table_hdu_extra.header["EXTNAME"] = ("EXTRAS", "name of extension")
 
         # Add extras to overall HDUList

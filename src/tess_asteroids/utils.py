@@ -362,18 +362,13 @@ def make_wcs_header(shape: Tuple[int, int]):
 
 def add_column_header_comments(table_hdu: BinTableHDU):
     """
-    Automatically add comments to FITS column header keywords (e.g. TTYPE, TFORM, TUNIT)
+    Add comments to FITS column header keywords (e.g. TTYPE, TFORM, TUNIT)
     in Binary table HDU.
 
     Parameters
     ----------
     table_hdu : astropy.io.fits.BinTableHDU
         The binary table HDU to which header comments will be added.
-
-    Returns
-    -------
-    table_hdu : astropy.io.fits.BinTableHDU
-        The same HDU object with updated header comments.
     """
 
     # Define comment for each column keyword
@@ -386,14 +381,12 @@ def add_column_header_comments(table_hdu: BinTableHDU):
         "TDIM": "column dimensions",
     }
 
-    # Automatically add comments to header keywords in table HDU
+    # Add comments to header keywords in table HDU
     for i in range(1, table_hdu.header["TFIELDS"] + 1):
         for keyword, comment in keywords.items():
             keyword_index = f"{keyword}{i}"
             if keyword_index in table_hdu.header:
                 table_hdu.header.comments[keyword_index] = comment
-
-    return table_hdu
 
 
 def plot_img_aperture(
