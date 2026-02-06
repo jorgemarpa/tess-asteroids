@@ -37,6 +37,7 @@ from . import (
     straps,
 )
 from .utils import (
+    add_column_header_comments,
     animate_cube,
     calculate_TESSmag,
     compute_moments,
@@ -3451,7 +3452,10 @@ class MovingTPF:
             ):
                 table_hdu_spoc.header.insert(f"TDIM{ext}", card, after=True)
 
-        table_hdu_spoc.header["EXTNAME"] = "PIXELS"
+        # Add comments to column keywords
+        table_hdu_spoc = add_column_header_comments(table_hdu_spoc)
+
+        table_hdu_spoc.header["EXTNAME"] = ("PIXELS", "name of extension")
 
         # Remove irrelevent keywords
         for keyword in ["TICID", "RA_OBJ", "DEC_OBJ"]:
@@ -3486,10 +3490,13 @@ class MovingTPF:
                     [*self.cube.output_secondary_header.cards, *wcs_header.cards]
                 ),
             )
-            aperture_hdu.header["EXTNAME"] = "APERTURE{0}".format(
-                i if len(ap_masks) > 1 else ""
+            aperture_hdu.header["EXTNAME"] = (
+                "APERTURE{0}".format(i if len(ap_masks) > 1 else ""),
+                "name of extension",
             )
             aperture_hdu.header.set("OBJECT", self.target, comment="object name")
+            aperture_hdu.header.comments["NAXIS1"] = "length of dimension 1"
+            aperture_hdu.header.comments["NAXIS2"] = "length of dimension 2"
 
             # Remove irrelevent keywords
             for keyword in ["TICID", "RA_OBJ", "DEC_OBJ"]:
@@ -3572,11 +3579,15 @@ class MovingTPF:
 
         # Create table HDU for extra columns
         table_hdu_extra = fits.BinTableHDU.from_columns(cols)
-        table_hdu_extra.header["EXTNAME"] = "EXTRAS"
+        # Add comments to column keywords
+        table_hdu_extra = add_column_header_comments(table_hdu_extra)
+        table_hdu_extra.header["EXTNAME"] = ("EXTRAS", "name of extension")
         tpf_hdulist.append(table_hdu_extra)
 
         # Return hdulist
-        return fits.HDUList(tpf_hdulist)
+        hdulist = fits.HDUList(tpf_hdulist)
+        hdulist[0].header.comments["EXTEND"] = "file contains extensions"
+        return hdulist
 
     def _make_lc_hdulist(self, lc: Optional[dict] = None):
         """
@@ -3781,8 +3792,11 @@ class MovingTPF:
             ]
 
             table_hdu_ap = fits.BinTableHDU.from_columns(cols_ap)
-            table_hdu_ap.header["EXTNAME"] = "LIGHTCURVE_AP{0}".format(
-                i if len(lc["aperture"]) > 1 else ""
+            # Add comments to column keywords
+            table_hdu_ap = add_column_header_comments(table_hdu_ap)
+            table_hdu_ap.header["EXTNAME"] = (
+                "LIGHTCURVE_AP{0}".format(i if len(lc["aperture"]) > 1 else ""),
+                "name of extension",
             )
 
             # Add extra keywords to header
@@ -3951,7 +3965,9 @@ class MovingTPF:
             ]
             # Create table HDU
             table_hdu_psf = fits.BinTableHDU.from_columns(cols_psf)
-            table_hdu_psf.header["EXTNAME"] = "LIGHTCURVE_PSF"
+            # Add comments to column keywords
+            table_hdu_psf = add_column_header_comments(table_hdu_psf)
+            table_hdu_psf.header["EXTNAME"] = ("LIGHTCURVE_PSF", "name of extension")
 
             # Add extra keywords to header
             table_hdu_psf.header.set(
@@ -4077,13 +4093,17 @@ class MovingTPF:
 
         # Create table HDU
         table_hdu_extra = fits.BinTableHDU.from_columns(cols_extra)
-        table_hdu_extra.header["EXTNAME"] = "EXTRAS"
+        # Add comments to column keywords
+        table_hdu_extra = add_column_header_comments(table_hdu_extra)
+        table_hdu_extra.header["EXTNAME"] = ("EXTRAS", "name of extension")
 
         # Add extras to overall HDUList
         lc_hdulist.append(table_hdu_extra)
 
         # Return hdulist
-        return fits.HDUList(lc_hdulist)
+        hdulist = fits.HDUList(lc_hdulist)
+        hdulist[0].header.comments["EXTEND"] = "file contains extensions"
+        return hdulist
 
     def _make_primary_hdu(
         self,
@@ -4156,7 +4176,7 @@ class MovingTPF:
 
         # Get primary hdu from tesscube
         hdu = self.cube.output_primary_ext.copy()
-        hdu.header["EXTNAME"] = "PRIMARY"
+        hdu.header["EXTNAME"] = ("PRIMARY", "name of extension")
 
         # Remove irrelevent keywords
         for keyword in [

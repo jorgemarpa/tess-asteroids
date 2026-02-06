@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from astropy.coordinates import SkyCoord
+from astropy.io.fits import BinTableHDU
 from astropy.visualization import simple_norm
 from astropy.wcs.utils import fit_wcs_from_points
 from matplotlib import animation, colors, patches
@@ -357,6 +358,42 @@ def make_wcs_header(shape: Tuple[int, int]):
     wcs_header.set("CDELT2P", 1.0, "physical WCS axis 2 step")
 
     return wcs_header
+
+
+def add_column_header_comments(table_hdu: BinTableHDU):
+    """
+    Automatically add comments to FITS column header keywords (e.g. TTYPE, TFORM, TUNIT)
+    in Binary table HDU.
+
+    Parameters
+    ----------
+    table_hdu : astropy.io.fits.BinTableHDU
+        The binary table HDU to which header comments will be added.
+
+    Returns
+    -------
+    table_hdu : astropy.io.fits.BinTableHDU
+        The same HDU object with updated header comments.
+    """
+
+    # Define comment for each column keyword
+    keywords = {
+        "TTYPE": "column name",
+        "TFORM": "column format",
+        "TUNIT": "column unit",
+        "TNULL": "column null value",
+        "TDISP": "column display format",
+        "TDIM": "column dimensions",
+    }
+
+    # Automatically add comments to header keywords in table HDU
+    for i in range(1, table_hdu.header["TFIELDS"] + 1):
+        for keyword, comment in keywords.items():
+            keyword_index = f"{keyword}{i}"
+            if keyword_index in table_hdu.header:
+                table_hdu.header.comments[keyword_index] = comment
+
+    return table_hdu
 
 
 def plot_img_aperture(
