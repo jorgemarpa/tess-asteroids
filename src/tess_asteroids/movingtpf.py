@@ -4272,13 +4272,36 @@ class MovingTPF:
             after="BG_CORR",
         )
 
-        # Add TESS magnitude zero-point to LCF
+        # Add TESS magnitude zero-point and timing information to LCF
         if file_type == "lc":
             hdu.header.set(
                 "TESSMAG0",
                 round(TESSmag_zero_point, 3),
                 comment="[mag] TESS zero-point magnitude",
                 after="SL_CORR",
+            )
+            for keyword in reversed(
+                [
+                    "TIMEREF",
+                    "TASSIGN",
+                    "TIMESYS",
+                    "BJDREFI",
+                    "BJDREFF",
+                    "TIMEUNIT",
+                    "EXPOSURE",
+                ]
+            ):
+                hdu.header.set(
+                    keyword,
+                    self.cube.output_first_header[keyword],
+                    comment=self.cube.output_first_header.comments[keyword],
+                    after="DATE-END",
+                )
+            hdu.header.set(
+                "TELAPSE",
+                hdu.header["TSTOP"] - hdu.header["TSTART"],
+                before="TSTART",
+                comment="[d] TSTOP - TSTART",
             )
 
         # Add aperture information to TPF
