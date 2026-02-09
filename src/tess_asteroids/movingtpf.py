@@ -4272,14 +4272,16 @@ class MovingTPF:
             after="BG_CORR",
         )
 
-        # Add TESS magnitude zero-point and timing information to LCF
+        # Add extra information to LCF
         if file_type == "lc":
+            # TESS magnitude zero-point
             hdu.header.set(
                 "TESSMAG0",
                 round(TESSmag_zero_point, 3),
                 comment="[mag] TESS zero-point magnitude",
                 after="SL_CORR",
             )
+            # Copy over header keywords from TESS
             for keyword in reversed(
                 [
                     "TIMEREF",
@@ -4289,6 +4291,7 @@ class MovingTPF:
                     "BJDREFF",
                     "TIMEUNIT",
                     "EXPOSURE",
+                    "RADESYS",
                 ]
             ):
                 hdu.header.set(
