@@ -3836,7 +3836,7 @@ class MovingTPF:
                 mag_header = round(np.nanmedian(ap_lc["TESSmag"]), 3)
             table_hdu_ap.header.set(
                 "TESSMAG",
-                mag_header if ~np.isnan(mag_header) else "n/a",
+                mag_header if ~np.isnan(mag_header) else None,
                 comment="[mag] avg measured TESS magnitude",
             )
 
@@ -4000,7 +4000,7 @@ class MovingTPF:
                 mag_header = round(np.nanmedian(lc["psf"]["TESSmag"]), 3)
             table_hdu_psf.header.set(
                 "TESSMAG",
-                mag_header if ~np.isnan(mag_header) else "n/a",
+                mag_header if ~np.isnan(mag_header) else None,
                 comment="[mag] avg measured TESS magnitude",
             )
 
