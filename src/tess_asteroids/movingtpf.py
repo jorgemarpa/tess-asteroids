@@ -2697,29 +2697,6 @@ class MovingTPF:
             else:
                 te_u, te_l = np.nanmax(t) - t_mean, t_mean - np.nanmin(t)
 
-            # If there are no pixels to fit, return nan for flux, flux_err and red_chi2.
-            if not j.any():
-                psf_phot.append(
-                    [
-                        t_mean,
-                        te_u,
-                        te_l,
-                        tc.mean(),
-                        np.median(cn),
-                        np.nan,
-                        np.nan,
-                        np.nan,
-                        qual,
-                        len(bdx),
-                        qual_frac,
-                        pn.any(),
-                        bg_std,
-                        bg_mad,
-                    ]
-                )
-                nfails += 1
-                continue
-
             # Create DM from PRF model
             X = p.ravel()[:, None]
 
@@ -2745,11 +2722,18 @@ class MovingTPF:
                 )[0]
                 # Compute flux error
                 amp_err = (np.linalg.inv(sigma_w_inv).diagonal() ** 0.5)[0]
-                # Compute reduced chi-squared (X has 1 component)
-                red_chi2 = np.sum(
-                    ((f.ravel() - X.dot(amp).ravel()) ** 2 / (fe.ravel() ** 2))[j],
-                    axis=0,
-                ) / (j.sum() - 1)
+                # Catch warnings that arise because of divide by zero.
+                with warnings.catch_warnings():
+                    warnings.filterwarnings(
+                        "ignore",
+                        message="divide by zero encountered in scalar divide",
+                        category=RuntimeWarning,
+                    )
+                    # Compute reduced chi-squared (X has 1 component)
+                    red_chi2 = np.sum(
+                        ((f.ravel() - X.dot(amp).ravel()) ** 2 / (fe.ravel() ** 2))[j],
+                        axis=0,
+                    ) / (j.sum() - 1)
 
                 # Save results
                 psf_phot.append(
@@ -3516,6 +3500,16 @@ class MovingTPF:
 
         # Define extra FITS columns
         cols = [
+            # Times in TDB at SS barycenter.
+            fits.Column(
+                name="TIME",
+                format="D",
+                unit="BJD - 2457000, days",
+                disp="D14.7",
+                array=self.time,
+            ),
+            # Cadence number, as defined by tesscube.
+            fits.Column(name="CADENCENO", format="I", array=self.cadence_number),
             # Original TESS FFI timestamps, in TDB at SS barycenter.
             # This was calculated for the center of the FFI, not the target position.
             fits.Column(

@@ -330,6 +330,7 @@ def test_make_tpf():
         assert "SPOCDATE" in hdul[0].header.keys()
         assert "TIME" in hdul[1].columns.names
         assert "TIMECORR" in hdul[1].columns.names
+        assert "CADENCENO" in hdul[3].columns.names
         assert "APERTURE" in hdul[3].columns.names
         assert "PIXEL_QUALITY" in hdul[3].columns.names
         assert "CORNER1" in hdul[3].columns.names
