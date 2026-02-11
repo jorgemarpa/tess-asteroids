@@ -30,6 +30,8 @@ def calculate_TESSmag(
     This function assumes that the background flux has been perfectly removed, i.e. the only flux is that
     from the target. It can account for flux outside of the aperture via `flux_fraction`.
 
+    This function returns the symmetric errorbar, as well as asymmetric errorbars.
+
     Parameters
     ----------
     flux : float or ndarray
@@ -44,7 +46,11 @@ def calculate_TESSmag(
     mag : float or ndarray
         TESS magnitude.
     mag_err : float or ndarray
-        Error on TESS magnitude.
+        Symmetric error on TESS magnitude.
+    mag_uerr : float or ndarray
+        Upper error on TESS magnitude.
+    mag_lerr : float or ndarray
+        Lower error on TESS magnitude.
     """
 
     # Check that all values of flux fraction are within allowed range:
@@ -70,13 +76,30 @@ def calculate_TESSmag(
     flux /= flux_fraction
     flux_err /= flux_fraction
 
-    # Calculate magnitude and error.
+    # Calculate magnitude and symmetric error.
     mag = -2.5 * np.log10(flux) + TESSmag_zero_point
     mag_err = np.sqrt(
         (TESSmag_zero_point_err) ** 2 + ((2.5 / np.log(10)) * (flux_err / flux)) ** 2
     )
 
-    return mag, mag_err
+    # Calculate asymmetric errors (upper error is undefined if flux - flux_err <= 0)
+    # Catch warnings that arise if flux - flux_err <= 0
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="invalid value encountered in log10",
+            category=RuntimeWarning,
+        )
+        mag_uerr = np.sqrt(
+            ((-2.5 * np.log10(flux - flux_err) + TESSmag_zero_point) - mag) ** 2
+            + (TESSmag_zero_point_err) ** 2
+        )
+    mag_lerr = np.sqrt(
+        (mag - (-2.5 * np.log10(flux + flux_err) + TESSmag_zero_point)) ** 2
+        + (TESSmag_zero_point_err) ** 2
+    )
+
+    return mag, mag_err, mag_uerr, mag_lerr
 
 
 def target_observability(

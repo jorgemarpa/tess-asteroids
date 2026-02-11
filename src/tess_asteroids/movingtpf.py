@@ -2523,7 +2523,7 @@ class MovingTPF:
             - `time_corr` is the average barycentric time correction in the binning window.
             - `cadenceno` is the average cadence number, as defined by `tesscube`, in the binning window.
             - `flux` and `flux_err` from the PRF fitting.
-            - `TESSmag`, `TESSmag_err`: flux and error converted to magnitude in the TESS bandpass.
+            - `TESSmag`, `TESSmag_err`, `TESSmag_uerr`, `TESSmag_lerr`: magnitude, symmetric and asymmetric errors in the TESS bandpass.
             - `red_chi2` is the reduced chi-squared of the fitted PRF model.
             - `spoc_quality` is the combined SPOC quality flag in the binning window.
             - `quality`: cadence quality flag from `_create_lc_quality()`.
@@ -2583,6 +2583,8 @@ class MovingTPF:
                 "flux_err": np.array([]),
                 "TESSmag": np.array([]),
                 "TESSmag_err": np.array([]),
+                "TESSmag_uerr": np.array([]),
+                "TESSmag_lerr": np.array([]),
                 "red_chi2": np.array([]),
                 "spoc_quality": np.array([]),
                 "quality": np.array([]),
@@ -2816,7 +2818,9 @@ class MovingTPF:
 
         # Convert measured flux to TESS magnitude.
         # Flux fraction is one - the fitted amplitude is 100% of the target's flux.
-        mag, mag_err = calculate_TESSmag(flux, flux_err, np.ones_like(flux))
+        mag, mag_err, mag_uerr, mag_lerr = calculate_TESSmag(
+            flux, flux_err, np.ones_like(flux)
+        )
 
         return {
             "time": time,
@@ -2828,6 +2832,8 @@ class MovingTPF:
             "flux_err": flux_err,
             "TESSmag": mag,
             "TESSmag_err": mag_err,
+            "TESSmag_uerr": mag_uerr,
+            "TESSmag_lerr": mag_lerr,
             "red_chi2": red_chi2,
             "spoc_quality": spoc_quality.astype(int),
             "quality": self._create_lc_quality(
@@ -2863,7 +2869,7 @@ class MovingTPF:
 
             - `time`: equal to `self.time`.
             - `flux`, `flux_err`: sum of flux inside aperture and error.
-            - `TESSmag`, `TESSmag_err`: flux and error converted to magnitude in the TESS bandpass.
+            - `TESSmag`, `TESSmag_err`, `TESSmag_uerr`, `TESSmag_lerr`: magnitude, symmetric and asymmetric errors in the TESS bandpass.
             - `bg`, `bg_err`: sum of background flux inside aperture and error.
             - `col_cen`, `col_cen_err`, `row_cen`, `row_cen_err`: flux-weighted centroids inside aperture and errors.
             - `quality`: cadence quality flag from `_create_lc_quality()`.
@@ -2992,7 +2998,7 @@ class MovingTPF:
 
         # Convert measured flux to TESS magnitude.
         # Flux fraction is always one - the flux has already been corrected with `flux_fraction`.
-        mag, mag_err = calculate_TESSmag(
+        mag, mag_err, mag_uerr, mag_lerr = calculate_TESSmag(
             np.asarray(ap_flux), np.asarray(ap_flux_err), np.ones_like(ap_flux)
         )
 
@@ -3002,6 +3008,8 @@ class MovingTPF:
             "flux_err": np.asarray(ap_flux_err),
             "TESSmag": mag,
             "TESSmag_err": mag_err,
+            "TESSmag_uerr": mag_uerr,
+            "TESSmag_lerr": mag_lerr,
             "bg": np.asarray(ap_bg),
             "bg_err": np.asarray(ap_bg_err),
             "col_cen": col_cen,
@@ -3671,7 +3679,7 @@ class MovingTPF:
                     disp="E14.7",
                     array=ap_lc["flux_err"],
                 ),
-                # TESS magnitude and error
+                # TESS magnitude and errors
                 fits.Column(
                     name="TESSMAG",
                     format="E",
@@ -3685,6 +3693,20 @@ class MovingTPF:
                     unit="mag",
                     disp="E14.7",
                     array=ap_lc["TESSmag_err"],
+                ),
+                fits.Column(
+                    name="TESSMAG_UERR",
+                    format="E",
+                    unit="mag",
+                    disp="E14.7",
+                    array=ap_lc["TESSmag_uerr"],
+                ),
+                fits.Column(
+                    name="TESSMAG_LERR",
+                    format="E",
+                    unit="mag",
+                    disp="E14.7",
+                    array=ap_lc["TESSmag_lerr"],
                 ),
                 # Sum of BG flux inside aperture and err
                 fits.Column(
@@ -3919,6 +3941,20 @@ class MovingTPF:
                     unit="mag",
                     disp="E14.7",
                     array=lc["psf"]["TESSmag_err"],
+                ),
+                fits.Column(
+                    name="TESSMAG_UERR",
+                    format="E",
+                    unit="mag",
+                    disp="E14.7",
+                    array=lc["psf"]["TESSmag_uerr"],
+                ),
+                fits.Column(
+                    name="TESSMAG_LERR",
+                    format="E",
+                    unit="mag",
+                    disp="E14.7",
+                    array=lc["psf"]["TESSmag_lerr"],
                 ),
                 # Model fit reduced chi-squared
                 fits.Column(
