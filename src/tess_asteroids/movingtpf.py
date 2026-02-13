@@ -2026,14 +2026,20 @@ class MovingTPF:
             int(np.ceil((tstop[-1] - tstart[0]) * 24 * 60 / time_step)),
         )
         column_interp = CubicSpline(
-            self.ephem["time"].astype(float),
-            self.ephem["column"].astype(float),
-            extrapolate=False,
+            # self.ephem["time"].astype(float),
+            # self.ephem["column"].astype(float),
+            self.time,
+            self.ephemeris[:, 1],
+            bc_type="natural",
+            extrapolate=True,
         )(high_res_time)
         row_interp = CubicSpline(
-            self.ephem["time"].astype(float),
-            self.ephem["row"].astype(float),
-            extrapolate=False,
+            # self.ephem["time"].astype(float),
+            # self.ephem["row"].astype(float),
+            self.time,
+            self.ephemeris[:, 0],
+            bc_type="natural",
+            extrapolate=True,
         )(high_res_time)
 
         # Define origin and shape for all_flux
@@ -2645,7 +2651,7 @@ class MovingTPF:
 
             # Use pixels with PRF value > 0.001% for fitting.
             # This value is small to include all pixels where the PRF has contribution.
-            pixel_masks.append(p > 0.00001)
+            pixel_masks.append(p > 0.001)
             # Exclude nan values from mask:
             j = np.logical_and(
                 pixel_masks[-1], np.logical_and(np.isfinite(f), np.isfinite(fe))
