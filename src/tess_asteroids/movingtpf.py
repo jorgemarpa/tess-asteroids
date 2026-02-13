@@ -37,6 +37,7 @@ from . import (
     straps,
 )
 from .utils import (
+    add_column_header_comments,
     animate_cube,
     calculate_TESSmag,
     compute_moments,
@@ -276,7 +277,7 @@ class MovingTPF:
         Returns
         -------
         """
-        # Shape needs to be >=3 in both dimensions, otherwise make_wcs_header() errors.
+        # Shape needs to be >=3 in both dimensions, otherwise `make_wcs_header()` errors.
         self.shape = shape
 
         # Use interpolation to get target (row,column) at cube time.
@@ -439,7 +440,7 @@ class MovingTPF:
         # internally converted (ra,dec) to (row,column) using tesswcs.
         # `self.coords` does not recover these original values because the
         # ephemeris has since been interpolated.
-        # Note: pixel_to_world() assumes zero-indexing so subtract one from (row,col).
+        # Note: `pixel_to_world()` assumes zero-indexing so subtract one from (row,col).
         self.wcs = tesswcs.WCS.from_sector(
             sector=self.sector, camera=self.camera, ccd=self.ccd
         )
@@ -618,40 +619,50 @@ class MovingTPF:
 
     def _create_source_mask(
         self,
-        target_threshold: float = 0.01,
+        include_target: bool = True,
         include_stars: bool = True,
+        target_threshold: float = 0.01,
         star_flux_threshold: float = 1.05,
         star_gradient_threshold: float = 4,
+        all_flux: bool = True,
         **kwargs,
     ):
         """
-        Creates a boolean mask, with the same shape as `self.all_flux` (ntimes, npixels), that masks stationary sources
-        (e.g. stars) and the moving target.
+        Creates a boolean mask that masks stationary sources (e.g. stars) and the moving target.
 
         The moving target mask is created using the PRF model and selecting all pixels that contain more than the
-        `target_threshold` fraction of the object's flux. This mask is defined per time.
+        `target_threshold` fraction of the object's flux. This mask is defined per time. This is only included in the mask
+        if `include_target` is `True`.
 
         The star mask is created using two condiditons: i) a high flux value and ii) a high flux gradient. This mask is
         constant across all times. This is only included in the mask if `include_stars` is `True`.
 
+        The source mask can be returned in all_flux or TPF space, controlled by the `all_flux` parameter. In all_flux
+        space the source mask has shape (ntimes, npixels) and in the TPF space the shape is (ntimes, nrows, ncols).
+
         Parameters
         ----------
+        include_target : bool
+            If `True`, includes moving target in the source mask.
+        include_stars : bool
+            If `True`, includes stars in the source mask.
         target_threshold : float
             Pixels where the PRF model is greater than this threshold are included in the target mask. Must be between 0 and 1
             because the PRF model is normalised so that all values sum to one.
-        include_stars : bool
-            If `True`, returns a mask for moving target and stars. If `False`, returns a mask for moving target only.
         star_flux_threshold : float
             Used to define the threshold above which a pixel has a high flux.
         star_gradient_threshold : float
             Used to define the threshold above which a pixel has a high flux gradient.
+        all_flux : boolean
+            If True, the mask is returned with shape (ntimes, npixels).
+            If False, the mask is returned with shape (ntimes, nrows, ncols).
         kwargs : dict
             Keywords arguments passed to `self._create_target_prf_model`, e.g `time_step`.
 
         Returns
         -------
         source_mask : ndarray
-            Boolean mask with shape (ntimes, npixels). The mask is `True` when the moving target or a star is present.
+            Boolean mask. The mask is `True` when the moving target or a star is present.
         """
 
         # Check thresholds are physical.
@@ -669,64 +680,80 @@ class MovingTPF:
             )
 
         # Create mask for moving target.
-        target_mask, _ = self._create_target_prf_model(all_flux=True, **kwargs)
-        target_mask = target_mask >= target_threshold
-        if not include_stars:
-            return target_mask
+        if include_target:
+            target_mask, _ = self._create_target_prf_model(all_flux=True, **kwargs)
+            target_mask = target_mask >= target_threshold
+        else:
+            target_mask = np.zeros_like(self.all_flux, dtype=bool)
 
         # Create mask for stationary sources e.g. stars (high flux values AND high flux gradients).
+        if include_stars:
+            # Compute median of each pixel across all times and median of all pixels across all times.
+            # Catch warnings that arise if value is nan at all times (e.g. non-science pixels).
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message="All-NaN slice encountered",
+                    category=RuntimeWarning,
+                )
+                med = np.nanmedian(self.all_flux, axis=0)
+                med_all = np.nanmedian(self.all_flux)
 
-        # Compute median of each pixel across all times and median of all pixels across all times.
-        # Catch warnings that arise if value is nan at all times (e.g. non-science pixels).
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore", message="All-NaN slice encountered", category=RuntimeWarning
+            # Mask pixels whose average flux value over all time is some fraction greater than average flux value over all
+            # pixels and all times.
+            star_flux_mask = med >= star_flux_threshold * med_all
+
+            # Reshape median to match 2D all_flux region. This is necessary to be able to compute mask in terms of gradient.
+            # Origin is minimum row/column (not a pair) and shape is entire all_flux region.
+            origin = tuple(self.pixels.min(axis=0).astype(int))
+            shape = tuple(
+                (self.pixels.max(axis=0) - self.pixels.min(axis=0) + 1).astype(int)
             )
-            med = np.nanmedian(self.all_flux, axis=0)
-            med_all = np.nanmedian(self.all_flux)
-
-        # Mask pixels whose average flux value over all time is some fraction greater than average flux value over all
-        # pixels and all times.
-        star_flux_mask = med >= star_flux_threshold * med_all
-
-        # Reshape median to match 2D all_flux region. This is necessary to be able to compute mask in terms of gradient.
-        # Origin is minimum row/column (not a pair) and shape is entire all_flux region.
-        origin = tuple(self.pixels.min(axis=0).astype(int))
-        shape = tuple(
-            (self.pixels.max(axis=0) - self.pixels.min(axis=0) + 1).astype(int)
-        )
-        med_reshaped = np.full(shape, np.nan)
-        med_reshaped[
-            self.pixels[:, 0] - np.asarray(origin[0]),
-            self.pixels[:, 1] - np.asarray(origin[1]),
-        ] = med
-
-        # Mask pixels whose average flux gradient over all time is some fraction greater than average flux gradient
-        # over all pixels and all times. Have to use binary_fill_holes to fill holes in binary mask (otherwise bright
-        # pixels in center of star are sometimes excluded from gradient mask).
-        # Catch warnings that arise if all pixels are nan at all times (e.g. non-science pixels).
-        med_gradient = np.gradient(med_reshaped)
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore", message="All-NaN slice encountered", category=RuntimeWarning
-            )
-            star_gradient_mask = np.hypot(
-                *med_gradient
-            ) >= star_gradient_threshold * np.nanmedian(np.hypot(*med_gradient))
-        star_gradient_mask = ndimage.binary_fill_holes(star_gradient_mask)
-
-        # Combine flux and gradient mask - gradient mask is reshaped back to match star_flux_mask.
-        star_mask = (
-            star_flux_mask
-            & star_gradient_mask[
+            med_reshaped = np.full(shape, np.nan)
+            med_reshaped[
                 self.pixels[:, 0] - np.asarray(origin[0]),
                 self.pixels[:, 1] - np.asarray(origin[1]),
-            ]
-        )
+            ] = med
 
-        return np.asarray(
+            # Mask pixels whose average flux gradient over all time is some fraction greater than average flux gradient
+            # over all pixels and all times. Have to use binary_fill_holes to fill holes in binary mask (otherwise bright
+            # pixels in center of star are sometimes excluded from gradient mask).
+            # Catch warnings that arise if all pixels are nan at all times (e.g. non-science pixels).
+            med_gradient = np.gradient(med_reshaped)
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message="All-NaN slice encountered",
+                    category=RuntimeWarning,
+                )
+                star_gradient_mask = np.hypot(
+                    *med_gradient
+                ) >= star_gradient_threshold * np.nanmedian(np.hypot(*med_gradient))
+            star_gradient_mask = ndimage.binary_fill_holes(star_gradient_mask)
+
+            # Combine flux and gradient mask - gradient mask is reshaped back to match star_flux_mask.
+            star_mask = (
+                star_flux_mask
+                & star_gradient_mask[
+                    self.pixels[:, 0] - np.asarray(origin[0]),
+                    self.pixels[:, 1] - np.asarray(origin[1]),
+                ]
+            )
+        else:
+            star_mask = np.zeros(self.all_flux.shape[1], dtype=bool)
+
+        source_mask = np.asarray(
             [np.logical_or(targ_mask, star_mask) for targ_mask in target_mask]
         )
+        if not all_flux:
+            source_mask_reshaped = []
+            for t in range(len(self.time)):
+                source_mask_reshaped.append(
+                    source_mask[t][self.target_mask[t]].reshape(self.shape)
+                )
+            source_mask = np.asarray(source_mask_reshaped)
+
+        return source_mask
 
     def _data_chunks(self, data_chunks: Optional[Union[list, np.ndarray]] = None):
         """
@@ -869,7 +896,7 @@ class MovingTPF:
         outdir : str
             If `diagnostic_plot`, this is the directory into which the plot will be saved.
         kwargs : dict
-            Keywords arguments passed to `self._create_pca_source_mask`, e.g `target_threshold`, `star_flux_threshold`.
+            Keywords arguments passed to `self._create_source_mask`, e.g `target_threshold`, `star_flux_threshold`.
 
         Returns
         -------
@@ -899,7 +926,9 @@ class MovingTPF:
             )
 
         # Create mask for moving target and stars.
-        source_mask = self._create_source_mask(include_stars=True, **kwargs)
+        source_mask = self._create_source_mask(
+            include_stars=True, include_target=True, all_flux=True, **kwargs
+        )
 
         # Add nan flux values to the mask (PCA cannot have nan in flux array).
         source_mask = np.logical_or(source_mask, np.isnan(self.all_flux))
@@ -1324,7 +1353,7 @@ class MovingTPF:
             If `diagnostic_plot`, this is the directory into which the plot will be saved.
         kwargs : dict
             Keywords arguments passed to `_create_scattered_light_model` (e.g. `niter`, `ncomponents`)
-            and `_create_pca_source_mask` (e.g `target_threshold`, `star_flux_threshold`).
+            and `_create_source_mask` (e.g `target_threshold`, `star_flux_threshold`).
 
         Returns
         -------
@@ -1408,7 +1437,9 @@ class MovingTPF:
 
         if target_mask is None:
             # Create mask for moving target.
-            source_mask = self._create_source_mask(include_stars=False, **kwargs)
+            source_mask = self._create_source_mask(
+            include_stars=False, include_target=True, all_flux=True, **kwargs
+        )
         else:
             # Use user-defined target mask.
             print("Using user-defined target mask for star model.")
@@ -2014,7 +2045,7 @@ class MovingTPF:
             if time_step >= cadence:
                 time_step = 0.99 * cadence
             logger.info(
-                "_create_target_prf_model() calculated a time_step of {0} minutes.".format(
+                "`_create_target_prf_model()` calculated a time_step of {0} minutes.".format(
                     time_step
                 )
             )
@@ -2100,7 +2131,7 @@ class MovingTPF:
                 "{0}-{1}".format(w.filename, w.lineno): w for w in recorded_warnings
             }.values()
         ):
-            logger.warning("Warning from prf.evaluate(): {0}".format(w))
+            logger.warning("Warning from `prf.evaluate()`: {0}".format(w))
 
         # If first/last frame contains nans, replace PRF model with following/preceding frame.
         if np.isnan(prf_model).any():
@@ -2323,16 +2354,15 @@ class MovingTPF:
         Each flag is a bit-wise combination of the following bits:
 
         Bit - Description
-        ----------------
-        1 - pixel is outside of science array
-        2 - pixel is in a strap column
-        3 - pixel is saturated
-        4 - pixel is within `sat_buffer_rad` pixels of a saturated pixel
-        5 - pixel has no scattered light correction. Only relevant if `linear_model` background correction was used.
-        6 - pixel had no background star model, value is nan. Only relevant if `linear_model` background correction was used.
-        7 - pixel had negative flux value BEFORE background correction was applied.
-            This can happen near bleed columns from saturated stars (e.g. see Sector 6, Camera 1, CCD 4).
-        8 - pixel has a poor fitting background star model. Only relevant if `linear_model` background correction was used.
+
+        - 1 - pixel is outside of science array
+        - 2 - pixel is in a strap column
+        - 3 - pixel is saturated
+        - 4 - pixel is within `sat_buffer_rad` pixels of a saturated pixel
+        - 5 - pixel has no scattered light correction. Only relevant if `linear_model` background correction was used.
+        - 6 - pixel had no background star model, value is nan. Only relevant if `linear_model` background correction was used.
+        - 7 - pixel had negative flux value BEFORE background correction was applied. This can happen near bleed columns from saturated stars (e.g. see Sector 6, Camera 1, CCD 4).
+        - 8 - pixel has a poor fitting background star model. Only relevant if `linear_model` background correction was used.
 
         Parameters
         ----------
@@ -2513,7 +2543,7 @@ class MovingTPF:
             - `time_corr` is the average barycentric time correction in the binning window.
             - `cadenceno` is the average cadence number, as defined by `tesscube`, in the binning window.
             - `flux` and `flux_err` from the PRF fitting.
-            - `TESSmag`, `TESSmag_err`: flux and error converted to magnitude in the TESS bandpass.
+            - `TESSmag`, `TESSmag_err`, `TESSmag_uerr`, `TESSmag_lerr`: magnitude, symmetric and asymmetric errors in the TESS bandpass.
             - `red_chi2` is the reduced chi-squared of the fitted PRF model.
             - `spoc_quality` is the combined SPOC quality flag in the binning window.
             - `quality`: cadence quality flag from `_create_lc_quality()`.
@@ -2576,6 +2606,8 @@ class MovingTPF:
                 "flux_err": np.array([]),
                 "TESSmag": np.array([]),
                 "TESSmag_err": np.array([]),
+                "TESSmag_uerr": np.array([]),
+                "TESSmag_lerr": np.array([]),
                 "red_chi2": np.array([]),
                 "spoc_quality": np.array([]),
                 "quality": np.array([]),
@@ -2688,29 +2720,6 @@ class MovingTPF:
             else:
                 te_u, te_l = np.nanmax(t) - t_mean, t_mean - np.nanmin(t)
 
-            # If there are no pixels to fit, return nan for flux, flux_err and red_chi2.
-            if not j.any():
-                psf_phot.append(
-                    [
-                        t_mean,
-                        te_u,
-                        te_l,
-                        tc.mean(),
-                        np.median(cn),
-                        np.nan,
-                        np.nan,
-                        np.nan,
-                        qual,
-                        len(bdx),
-                        qual_frac,
-                        pn.any(),
-                        bg_std,
-                        bg_mad,
-                    ]
-                )
-                nfails += 1
-                continue
-
             # Create DM from PRF model
             X = p.ravel()[:, None]
 
@@ -2736,11 +2745,18 @@ class MovingTPF:
                 )[0]
                 # Compute flux error
                 amp_err = (np.linalg.inv(sigma_w_inv).diagonal() ** 0.5)[0]
-                # Compute reduced chi-squared (X has 1 component)
-                red_chi2 = np.sum(
-                    ((f.ravel() - X.dot(amp).ravel()) ** 2 / (fe.ravel() ** 2))[j],
-                    axis=0,
-                ) / (j.sum() - 1)
+                # Catch warnings that arise because of divide by zero.
+                with warnings.catch_warnings():
+                    warnings.filterwarnings(
+                        "ignore",
+                        message="divide by zero encountered in scalar divide",
+                        category=RuntimeWarning,
+                    )
+                    # Compute reduced chi-squared (X has 1 component)
+                    red_chi2 = np.sum(
+                        ((f.ravel() - X.dot(amp).ravel()) ** 2 / (fe.ravel() ** 2))[j],
+                        axis=0,
+                    ) / (j.sum() - 1)
 
                 # Save results
                 psf_phot.append(
@@ -2809,7 +2825,9 @@ class MovingTPF:
 
         # Convert measured flux to TESS magnitude.
         # Flux fraction is one - the fitted amplitude is 100% of the target's flux.
-        mag, mag_err = calculate_TESSmag(flux, flux_err, np.ones_like(flux))
+        mag, mag_err, mag_uerr, mag_lerr = calculate_TESSmag(
+            flux, flux_err, np.ones_like(flux)
+        )
 
         return {
             "time": time,
@@ -2821,6 +2839,8 @@ class MovingTPF:
             "flux_err": flux_err,
             "TESSmag": mag,
             "TESSmag_err": mag_err,
+            "TESSmag_uerr": mag_uerr,
+            "TESSmag_lerr": mag_lerr,
             "red_chi2": red_chi2,
             "spoc_quality": spoc_quality.astype(int),
             "quality": self._create_lc_quality(
@@ -2856,12 +2876,13 @@ class MovingTPF:
 
             - `time`: equal to `self.time`.
             - `flux`, `flux_err`: sum of flux inside aperture and error.
-            - `TESSmag`, `TESSmag_err`: flux and error converted to magnitude in the TESS bandpass.
+            - `TESSmag`, `TESSmag_err`, `TESSmag_uerr`, `TESSmag_lerr`: magnitude, symmetric and asymmetric errors in the TESS bandpass.
             - `bg`, `bg_err`: sum of background flux inside aperture and error.
             - `col_cen`, `col_cen_err`, `row_cen`, `row_cen_err`: flux-weighted centroids inside aperture and errors.
             - `quality`: cadence quality flag from `_create_lc_quality()`.
             - `flux_fraction`: fraction of PRF model flux inside aperture.
-            - `n_pixels`: number of pixels inside aperture, excluding pixels flagged as `bad_bits`.
+            - `n_pix`: number of pixels inside aperture, excluding pixels flagged as `bad_bits`.
+            - `n_pix_star`: number of pixels inside aperture, excluding pixels flagged as `bad_bits`, that overlap with star mask.
             - `bg_std`: standad deviation of background pixels (where PRF model < 0.1%).
             - `bg_mad`: median absolute deviation of background pixels (where PRF model < 0.1%).
             - `ra`, `dec`: flux-weighted centroids converted to world coordinates using WCS.
@@ -2974,7 +2995,7 @@ class MovingTPF:
         row_cen += self.corner[:, 0]
 
         # Convert measured centroid from (row,col) to (ra,dec) using WCS from tesswcs.
-        # Note: pixel_to_world() assumes zero-indexing so subtract one from (row,col).
+        # Note: `pixel_to_world()` assumes zero-indexing so subtract one from (row,col).
         measured_coords = np.asarray(
             [
                 self.wcs.pixel_to_world(col_cen[t] - 1, row_cen[t] - 1)
@@ -2984,7 +3005,7 @@ class MovingTPF:
 
         # Convert measured flux to TESS magnitude.
         # Flux fraction is always one - the flux has already been corrected with `flux_fraction`.
-        mag, mag_err = calculate_TESSmag(
+        mag, mag_err, mag_uerr, mag_lerr = calculate_TESSmag(
             np.asarray(ap_flux), np.asarray(ap_flux_err), np.ones_like(ap_flux)
         )
 
@@ -2994,6 +3015,8 @@ class MovingTPF:
             "flux_err": np.asarray(ap_flux_err),
             "TESSmag": mag,
             "TESSmag_err": mag_err,
+            "TESSmag_uerr": mag_uerr,
+            "TESSmag_lerr": mag_lerr,
             "bg": np.asarray(ap_bg),
             "bg_err": np.asarray(ap_bg_err),
             "col_cen": col_cen,
@@ -3007,7 +3030,13 @@ class MovingTPF:
                 bad_bit_value=bad_bit_value,
             ),
             "flux_fraction": np.asarray(flux_fraction),
-            "n_pixels": np.asarray(mask).sum(axis=(1, 2)),
+            "n_pix": np.asarray(mask).sum(axis=(1, 2)),
+            "n_pix_star": np.logical_and(
+                mask,
+                self._create_source_mask(
+                    include_target=False, include_stars=True, all_flux=False, **kwargs
+                ),
+            ).sum(axis=(1, 2)),
             "bg_std": np.asarray(bg_std),
             "bg_mad": np.asarray(bg_mad),
             "ra": [coord.ra.value for coord in measured_coords],
@@ -3046,24 +3075,20 @@ class MovingTPF:
         The flag is a bit-wise combination of the following bits:
 
         Bit - Description
-        ----------------
-        1  - no pixels inside mask.
-        2  - at least one non-science pixel inside mask.
-        3  - at least one pixel inside mask is in a strap column.
-        4  - at least one saturated pixel inside mask.
-        5  - at least one pixel inside mask is 4-adjacent to a saturated pixel.
-        6  - all pixels inside aperture are `bad_bits`.
-             Only defined if `bad_bit_value` is not None (relevant for aperture photometry).
-        7  - PRF model contained nans.
-        8  - at least one pixel inside mask does not have scattered light correction.
-             Only relevant if `linear_model` background correction was used.
-        9  - at least one pixel inside mask had no star model (value is nan).
-             Only relevant if `linear_model` background correction was used.
-        10 - at least one pixel inside mask had negative value BEFORE background correction was applied.
-        11 - PSF fit failed due to singular matrix (see np.linalg.LinAlgError) or because all pixels
-             used to fit the PRF model had NaN flux values. Only relevant if `method=psf`.
-        12 - at least one pixel inside mask had a poor fitting background star model.
-             Only relevant if `linear_model` background correction was used.
+
+        - 1 - no pixels inside mask.
+        - 2 - at least one non-science pixel inside mask.
+        - 3 - at least one pixel inside mask is in a strap column.
+        - 4 - at least one saturated pixel inside mask.
+        - 5 - at least one pixel inside mask is 4-adjacent to a saturated pixel.
+        - 6 - all pixels inside aperture are `bad_bits`. Only defined if `bad_bit_value` is not None (relevant for aperture photometry).
+        - 7 - PRF model contained nans.
+        - 8 - at least one pixel inside mask does not have scattered light correction. Only relevant if `linear_model` background correction was used.
+        - 9 - at least one pixel inside mask had no star model (value is nan). Only relevant if `linear_model` background correction was used.
+        - 10 - at least one pixel inside mask had negative value BEFORE background correction was applied.
+        - 11 - PSF fit failed due to singular matrix (see np.linalg.LinAlgError) or because all pixels used to fit the PRF model had NaN flux values. Only relevant if `method=psf`.
+        - 12 - at least one pixel inside mask had a poor fitting background star model. Only relevant if `linear_model` background correction was used.
+        - 13 - mask has two or more discrete regions.
 
         Parameters
         ----------
@@ -3076,7 +3101,7 @@ class MovingTPF:
             Cadences where the PRF model is NaN, as returned by `_create_target_prf_model()`. This must have length equal to the first
             dimension of `pixel_mask`.
         bad_bit_value : int
-            Value corresponding to `bad_bits`, as defined by user in _aperture_photometry().
+            Value corresponding to `bad_bits`, as defined by user in `_aperture_photometry()`.
             If creating quality mask for PSF photmetry, this should be None.
         psf_flux : ndarray
             PSF flux time-series from `_psf_photometry()`.
@@ -3135,12 +3160,14 @@ class MovingTPF:
                     for t in range(len(pixel_mask))
                 ],
             },
-            # All pixels in aperture are `bad_bits`, as defined by user in _aperture_photometry()
+            # All pixels in aperture are `bad_bits`, as defined by user in `_aperture_photometry()`
             # Only relevant for aperture photometry.
             "bad_bit_mask": {
                 "bit": 6,
                 "value": [
                     (pixel_quality[t][pixel_mask[t]] & bad_bit_value != 0).all()
+                    if pixel_mask[t].sum() != 0
+                    else False
                     for t in range(len(pixel_mask))
                 ]
                 if bad_bit_value is not None
@@ -3188,6 +3215,28 @@ class MovingTPF:
                 "bit": 12,
                 "value": [
                     (pixel_quality[t][pixel_mask[t]] & 128 != 0).any()
+                    for t in range(len(pixel_mask))
+                ],
+            },
+            # Discontinuous mask
+            "discon_mask": {
+                "bit": 13,
+                "value": [
+                    any(
+                        [
+                            ndimage.label(
+                                p, structure=ndimage.generate_binary_structure(2, 2)
+                            )[1]
+                            > 1
+                            for p in pixel_mask[t]
+                        ]
+                    )
+                    if len(pixel_mask[t].shape) == 3
+                    else ndimage.label(
+                        pixel_mask[t],
+                        structure=ndimage.generate_binary_structure(2, 2),
+                    )[1]
+                    > 1
                     for t in range(len(pixel_mask))
                 ],
             },
@@ -3419,7 +3468,10 @@ class MovingTPF:
             ):
                 table_hdu_spoc.header.insert(f"TDIM{ext}", card, after=True)
 
-        table_hdu_spoc.header["EXTNAME"] = "PIXELS"
+        # Add comments to column keywords
+        add_column_header_comments(table_hdu_spoc)
+
+        table_hdu_spoc.header["EXTNAME"] = ("PIXELS", "name of extension")
 
         # Remove irrelevent keywords
         for keyword in ["TICID", "RA_OBJ", "DEC_OBJ"]:
@@ -3440,6 +3492,7 @@ class MovingTPF:
             table_hdu_spoc.header["TELAPSE"] * table_hdu_spoc.header["DEADC"],
             comment="[d] TELAPSE multiplied by DEADC",
         )
+        table_hdu_spoc.header.set("BACKAPP", 1.0)
 
         # Save to TPF HDUList
         tpf_hdulist.append(table_hdu_spoc)
@@ -3454,10 +3507,13 @@ class MovingTPF:
                     [*self.cube.output_secondary_header.cards, *wcs_header.cards]
                 ),
             )
-            aperture_hdu.header["EXTNAME"] = "APERTURE{0}".format(
-                i if len(ap_masks) > 1 else ""
+            aperture_hdu.header["EXTNAME"] = (
+                "APERTURE{0}".format(i if len(ap_masks) > 1 else ""),
+                "name of extension",
             )
             aperture_hdu.header.set("OBJECT", self.target, comment="object name")
+            aperture_hdu.header.comments["NAXIS1"] = "length of dimension 1"
+            aperture_hdu.header.comments["NAXIS2"] = "length of dimension 2"
 
             # Remove irrelevent keywords
             for keyword in ["TICID", "RA_OBJ", "DEC_OBJ"]:
@@ -3468,6 +3524,16 @@ class MovingTPF:
 
         # Define extra FITS columns
         cols = [
+            # Times in TDB at SS barycenter.
+            fits.Column(
+                name="TIME",
+                format="D",
+                unit="BJD - 2457000, days",
+                disp="D14.7",
+                array=self.time,
+            ),
+            # Cadence number, as defined by tesscube.
+            fits.Column(name="CADENCENO", format="I", array=self.cadence_number),
             # Original TESS FFI timestamps, in TDB at SS barycenter.
             # This was calculated for the center of the FFI, not the target position.
             fits.Column(
@@ -3540,11 +3606,15 @@ class MovingTPF:
 
         # Create table HDU for extra columns
         table_hdu_extra = fits.BinTableHDU.from_columns(cols)
-        table_hdu_extra.header["EXTNAME"] = "EXTRAS"
+        # Add comments to column keywords
+        add_column_header_comments(table_hdu_extra)
+        table_hdu_extra.header["EXTNAME"] = ("EXTRAS", "name of extension")
         tpf_hdulist.append(table_hdu_extra)
 
         # Return hdulist
-        return fits.HDUList(tpf_hdulist)
+        hdulist = fits.HDUList(tpf_hdulist)
+        hdulist[0].header.comments["EXTEND"] = "file contains extensions"
+        return hdulist
 
     def _make_lc_hdulist(self, lc: Optional[dict] = None):
         """
@@ -3627,7 +3697,7 @@ class MovingTPF:
                     disp="E14.7",
                     array=ap_lc["flux_err"],
                 ),
-                # TESS magnitude and error
+                # TESS magnitude and errors
                 fits.Column(
                     name="TESSMAG",
                     format="E",
@@ -3641,6 +3711,20 @@ class MovingTPF:
                     unit="mag",
                     disp="E14.7",
                     array=ap_lc["TESSmag_err"],
+                ),
+                fits.Column(
+                    name="TESSMAG_UERR",
+                    format="E",
+                    unit="mag",
+                    disp="E14.7",
+                    array=ap_lc["TESSmag_uerr"],
+                ),
+                fits.Column(
+                    name="TESSMAG_LERR",
+                    format="E",
+                    unit="mag",
+                    disp="E14.7",
+                    array=ap_lc["TESSmag_lerr"],
                 ),
                 # Sum of BG flux inside aperture and err
                 fits.Column(
@@ -3702,7 +3786,7 @@ class MovingTPF:
                     disp="E14.7",
                     array=ap_lc["dec"],
                 ),
-                # Quality from _create_lc_quality()
+                # Quality from `_create_lc_quality()`
                 fits.Column(
                     name="AP_QUALITY",
                     format="I",
@@ -3721,7 +3805,14 @@ class MovingTPF:
                 fits.Column(
                     name="NPIX",
                     format="I",
-                    array=ap_lc["n_pixels"],
+                    array=ap_lc["n_pix"],
+                ),
+                # Number of pixels inside aperture, excluding pixels flagged as
+                # `bad_bits` by the user, that overlap with star mask.
+                fits.Column(
+                    name="NPIX_STAR",
+                    format="I",
+                    array=ap_lc["n_pix_star"],
                 ),
                 # Standard deviation of background pixels.
                 fits.Column(
@@ -3742,8 +3833,11 @@ class MovingTPF:
             ]
 
             table_hdu_ap = fits.BinTableHDU.from_columns(cols_ap)
-            table_hdu_ap.header["EXTNAME"] = "LIGHTCURVE_AP{0}".format(
-                i if len(lc["aperture"]) > 1 else ""
+            # Add comments to column keywords
+            add_column_header_comments(table_hdu_ap)
+            table_hdu_ap.header["EXTNAME"] = (
+                "LIGHTCURVE_AP{0}".format(i if len(lc["aperture"]) > 1 else ""),
+                "name of extension",
             )
 
             # Add extra keywords to header
@@ -3782,7 +3876,7 @@ class MovingTPF:
                 mag_header = round(np.nanmedian(ap_lc["TESSmag"]), 3)
             table_hdu_ap.header.set(
                 "TESSMAG",
-                mag_header if ~np.isnan(mag_header) else "n/a",
+                mag_header if ~np.isnan(mag_header) else None,
                 comment="[mag] avg measured TESS magnitude",
             )
 
@@ -3866,6 +3960,20 @@ class MovingTPF:
                     disp="E14.7",
                     array=lc["psf"]["TESSmag_err"],
                 ),
+                fits.Column(
+                    name="TESSMAG_UERR",
+                    format="E",
+                    unit="mag",
+                    disp="E14.7",
+                    array=lc["psf"]["TESSmag_uerr"],
+                ),
+                fits.Column(
+                    name="TESSMAG_LERR",
+                    format="E",
+                    unit="mag",
+                    disp="E14.7",
+                    array=lc["psf"]["TESSmag_lerr"],
+                ),
                 # Model fit reduced chi-squared
                 fits.Column(
                     name="RED_CHI2",
@@ -3873,7 +3981,7 @@ class MovingTPF:
                     disp="E14.7",
                     array=lc["psf"]["red_chi2"],
                 ),
-                # Quality from _create_lc_quality()
+                # Quality from `_create_lc_quality()`
                 fits.Column(
                     name="PSF_QUALITY",
                     format="I",
@@ -3912,7 +4020,9 @@ class MovingTPF:
             ]
             # Create table HDU
             table_hdu_psf = fits.BinTableHDU.from_columns(cols_psf)
-            table_hdu_psf.header["EXTNAME"] = "LIGHTCURVE_PSF"
+            # Add comments to column keywords
+            add_column_header_comments(table_hdu_psf)
+            table_hdu_psf.header["EXTNAME"] = ("LIGHTCURVE_PSF", "name of extension")
 
             # Add extra keywords to header
             table_hdu_psf.header.set(
@@ -3944,7 +4054,7 @@ class MovingTPF:
                 mag_header = round(np.nanmedian(lc["psf"]["TESSmag"]), 3)
             table_hdu_psf.header.set(
                 "TESSMAG",
-                mag_header if ~np.isnan(mag_header) else "n/a",
+                mag_header if ~np.isnan(mag_header) else None,
                 comment="[mag] avg measured TESS magnitude",
             )
 
@@ -4038,13 +4148,17 @@ class MovingTPF:
 
         # Create table HDU
         table_hdu_extra = fits.BinTableHDU.from_columns(cols_extra)
-        table_hdu_extra.header["EXTNAME"] = "EXTRAS"
+        # Add comments to column keywords
+        add_column_header_comments(table_hdu_extra)
+        table_hdu_extra.header["EXTNAME"] = ("EXTRAS", "name of extension")
 
         # Add extras to overall HDUList
         lc_hdulist.append(table_hdu_extra)
 
         # Return hdulist
-        return fits.HDUList(lc_hdulist)
+        hdulist = fits.HDUList(lc_hdulist)
+        hdulist[0].header.comments["EXTEND"] = "file contains extensions"
+        return hdulist
 
     def _make_primary_hdu(
         self,
@@ -4117,7 +4231,7 @@ class MovingTPF:
 
         # Get primary hdu from tesscube
         hdu = self.cube.output_primary_ext.copy()
-        hdu.header["EXTNAME"] = "PRIMARY"
+        hdu.header["EXTNAME"] = ("PRIMARY", "name of extension")
 
         # Remove irrelevent keywords
         for keyword in [
@@ -4212,13 +4326,39 @@ class MovingTPF:
             after="BG_CORR",
         )
 
-        # Add TESS magnitude zero-point to LCF
+        # Add extra information to LCF
         if file_type == "lc":
+            # TESS magnitude zero-point
             hdu.header.set(
                 "TESSMAG0",
                 round(TESSmag_zero_point, 3),
                 comment="[mag] TESS zero-point magnitude",
                 after="SL_CORR",
+            )
+            # Copy over header keywords from TESS
+            for keyword in reversed(
+                [
+                    "TIMEREF",
+                    "TASSIGN",
+                    "TIMESYS",
+                    "BJDREFI",
+                    "BJDREFF",
+                    "TIMEUNIT",
+                    "EXPOSURE",
+                    "RADESYS",
+                ]
+            ):
+                hdu.header.set(
+                    keyword,
+                    self.cube.output_first_header[keyword],
+                    comment=self.cube.output_first_header.comments[keyword],
+                    after="DATE-END",
+                )
+            hdu.header.set(
+                "TELAPSE",
+                hdu.header["TSTOP"] - hdu.header["TSTART"],
+                before="TSTART",
+                comment="[d] TSTOP - TSTART",
             )
 
         # Add aperture information to TPF
@@ -4550,7 +4690,7 @@ class MovingTPF:
             # To make installing `tess-asteroids` easier, ipython is not a dependency
             # because we can assume it is installed when notebook-specific features are called.
             logger.error(
-                "ipython needs to be installed for animate() to work (e.g., `pip install ipython`)"
+                "ipython needs to be installed for `animate()` to work (e.g., `pip install ipython`)"
             )
 
     def create_lc_quality_mask(
@@ -4575,12 +4715,13 @@ class MovingTPF:
         bad_spoc_bits : list or str
             Defines SPOC bits corresponding to bad quality data. Can be one of:
 
-                - "default" - mask bits defined by `default_bad_spoc_bits`.
-                - "all" - mask all data with a SPOC quality flag.
-                - "none" - mask no data.
-                - list - mask custom bits provided in list.
-                More information about the SPOC quality flags can be found in Section 9 of the TESS Science
-                Data Products Description Document.
+            - "default" - mask bits defined by `default_bad_spoc_bits`.
+            - "all" - mask all data with a SPOC quality flag.
+            - "none" - mask no data.
+            - list - mask custom bits provided in list.
+
+            More information about the SPOC quality flags can be found in Section 9 of the TESS Science
+            Data Products Description Document.
         bad_lc_bits : list or str
             Defines bits corresponding to bad quality data from `_create_lc_quality()`.
             Can be one of:
@@ -4647,6 +4788,7 @@ class MovingTPF:
             - "all" - mask all data with a SPOC quality flag.
             - "none" - mask no data.
             - list - mask custom bits provided in list.
+
             More information about the SPOC quality flags can be found in Section 9 of the TESS Science
             Data Products Description Document.
         bad_ap_bits/bad_psf_bits : list or str

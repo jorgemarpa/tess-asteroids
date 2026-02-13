@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from astropy.coordinates import SkyCoord
+from astropy.io.fits import BinTableHDU
 from astropy.visualization import simple_norm
 from astropy.wcs.utils import fit_wcs_from_points
 from matplotlib import animation, colors, patches
@@ -29,6 +30,8 @@ def calculate_TESSmag(
     This function assumes that the background flux has been perfectly removed, i.e. the only flux is that
     from the target. It can account for flux outside of the aperture via `flux_fraction`.
 
+    This function returns the symmetric errorbar, as well as asymmetric errorbars.
+
     Parameters
     ----------
     flux : float or ndarray
@@ -43,7 +46,11 @@ def calculate_TESSmag(
     mag : float or ndarray
         TESS magnitude.
     mag_err : float or ndarray
-        Error on TESS magnitude.
+        Symmetric error on TESS magnitude.
+    mag_uerr : float or ndarray
+        Upper error on TESS magnitude.
+    mag_lerr : float or ndarray
+        Lower error on TESS magnitude.
     """
 
     # Check that all values of flux fraction are within allowed range:
@@ -69,13 +76,30 @@ def calculate_TESSmag(
     flux /= flux_fraction
     flux_err /= flux_fraction
 
-    # Calculate magnitude and error.
+    # Calculate magnitude and symmetric error.
     mag = -2.5 * np.log10(flux) + TESSmag_zero_point
     mag_err = np.sqrt(
         (TESSmag_zero_point_err) ** 2 + ((2.5 / np.log(10)) * (flux_err / flux)) ** 2
     )
 
-    return mag, mag_err
+    # Calculate asymmetric errors (upper error is undefined if flux - flux_err <= 0)
+    # Catch warnings that arise if flux - flux_err <= 0
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="invalid value encountered in log10",
+            category=RuntimeWarning,
+        )
+        mag_uerr = np.sqrt(
+            ((-2.5 * np.log10(flux - flux_err) + TESSmag_zero_point) - mag) ** 2
+            + (TESSmag_zero_point_err) ** 2
+        )
+    mag_lerr = np.sqrt(
+        (mag - (-2.5 * np.log10(flux + flux_err) + TESSmag_zero_point)) ** 2
+        + (TESSmag_zero_point_err) ** 2
+    )
+
+    return mag, mag_err, mag_uerr, mag_lerr
 
 
 def target_observability(
@@ -357,6 +381,35 @@ def make_wcs_header(shape: Tuple[int, int]):
     wcs_header.set("CDELT2P", 1.0, "physical WCS axis 2 step")
 
     return wcs_header
+
+
+def add_column_header_comments(table_hdu: BinTableHDU):
+    """
+    Add comments to FITS column header keywords (e.g. TTYPE, TFORM, TUNIT)
+    in Binary table HDU.
+
+    Parameters
+    ----------
+    table_hdu : astropy.io.fits.BinTableHDU
+        The binary table HDU to which header comments will be added.
+    """
+
+    # Define comment for each column keyword
+    keywords = {
+        "TTYPE": "column name",
+        "TFORM": "column format",
+        "TUNIT": "column unit",
+        "TNULL": "column null value",
+        "TDISP": "column display format",
+        "TDIM": "column dimensions",
+    }
+
+    # Add comments to header keywords in table HDU
+    for i in range(1, table_hdu.header["TFIELDS"] + 1):
+        for keyword, comment in keywords.items():
+            keyword_index = f"{keyword}{i}"
+            if keyword_index in table_hdu.header:
+                table_hdu.header.comments[keyword_index] = comment
 
 
 def plot_img_aperture(
