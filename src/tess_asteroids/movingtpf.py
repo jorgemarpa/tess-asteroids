@@ -60,13 +60,17 @@ class MovingTPF:
     target : str
         Target ID. This is only used when saving the TPF.
     ephem : DataFrame
-        Target ephemeris with columns ['time', 'sector', 'camera', 'ccd', 'column', 'row']. Optional columns: ['vmag', 'hmag'].
+        Target ephemeris with columns ['time', 'sector', 'camera', 'ccd', 'column', 'row'].
+        Optional columns: ['vmag', 'hmag', 'sun_distance', 'obs_distance', 'phase_angle'].
 
         - 'time' : float in format (JD - 2457000) in TDB. See also `barycentric` below.
         - 'sector', 'camera', 'ccd' : int
         - 'column', 'row' : float. These must be one-indexed, where the lower left pixel of the FFI is (1,1).
         - 'vmag' : float, optional. Visual magnitude.
         - 'hmag' : float, optional. Absolute magnitude.
+        - 'sun_distance' : float, optional. Distance from Sun, in AU.
+        - 'obs_distance' : float, optional. Distance from observer (TESS), in AU.
+        - 'phase_angle' : float, optional. Phase angle, in degrees.
     barycentric : bool, default=True
 
         - If True, the input `ephem['time']` must be in TDB measured at the solar system barycenter. This is the case for the
@@ -117,6 +121,28 @@ class MovingTPF:
             raise NotImplementedError(
                 "Target crosses multiple camera/ccd. Not yet implemented."
             )
+
+        # Check the values of the observing geometry parameters are physical.
+        if "sun_distance" in self.ephem:
+            # Distance from Sun cannot be negative:
+            if (self.ephem["sun_distance"] < 0).any():
+                raise ValueError(
+                    "`sun_distance` is the distance from the Sun in AU and every value must be >= 0."
+                )
+        if "obs_distance" in self.ephem:
+            # Distance from observer cannot be negative:
+            if (self.ephem["obs_distance"] < 0).any():
+                raise ValueError(
+                    "`obs_distance` is the distance from the observer in AU and every value must be >= 0"
+                )
+        if "phase_angle" in self.ephem:
+            # Phase angle runs from 0 to 180 degrees:
+            if (self.ephem["phase_angle"] < 0).any() or (
+                self.ephem["phase_angle"] > 180
+            ).any():
+                raise ValueError(
+                    "`phase_angle` is the phase angle in degrees and every value must satisfy: 0 <= phase <= 180."
+                )
 
         # Save orbital elements and check the values are physical.
         if "eccentricity" in metadata:
@@ -489,6 +515,21 @@ class MovingTPF:
             )
             self.timecorr = self.timecorr_original
             self.time = self.time_original
+
+        # Interpolate observing geometry parameters (r, delta, phi) onto observation times
+        # Note: interpolation will fail if any value is not finite.
+        self.obs_params = {}
+        for param in ["sun_distance", "obs_distance", "phase_angle"]:
+            if param in self.ephem and np.isfinite(self.ephem[param].values).all():
+                val = CubicSpline(
+                    self.ephem["time"].astype(float),
+                    self.ephem[param].astype(float),
+                    extrapolate=False,
+                )(self.time if self.barycentric else self.time - self.timecorr)
+            else:
+                val = np.full(len(self.time), np.nan)
+
+            self.obs_params[param] = val
 
     def reshape_data(self):
         """
@@ -2531,6 +2572,9 @@ class MovingTPF:
             - `qual_frac` is the average fraction of flux in the PRF model that falls on good quality pixels (`self.pixel_quality` = 0).
             - `bg_std` is the standad deviation of the background pixels (where PRF model < 0.1%) in each binning window.
             - `bg_mad` is the median absolute deviation of background pixels (where PRF model < 0.1%) in each binning window.
+            - `sun_distance` is the average distance from the Sun (AU) in the binning window.
+            - `obs_distance` is the average distance from TESS (AU) in the binning window.
+            - `phase_angle` is the average phase angle (degrees) in the binning window.
             - `time_bin_size` is the width of window used for binning.
             - `bad_spoc_bits` is the SPOC bits used to define bad quality data.
 
@@ -2567,6 +2611,9 @@ class MovingTPF:
         spoc_quality = self.quality[spoc_quality_mask]
         cadno = self.cadence_number[spoc_quality_mask]
         pixel_quality = self.pixel_quality[spoc_quality_mask]
+        sun_distance = self.obs_params["sun_distance"][spoc_quality_mask]
+        obs_distance = self.obs_params["obs_distance"][spoc_quality_mask]
+        phase_angle = self.obs_params["phase_angle"][spoc_quality_mask]
 
         # If all data has been masked, raise warning and return empty arrays.
         if len(time) == 0:
@@ -2592,6 +2639,9 @@ class MovingTPF:
                 "quality_fraction": np.array([]),
                 "bg_std": np.array([]),
                 "bg_mad": np.array([]),
+                "sun_distance": np.array([]),
+                "obs_distance": np.array([]),
+                "phase_angle": np.array([]),
                 "time_bin_size": time_bin_size,
                 "bad_spoc_bits": bad_spoc_bits,
             }
@@ -2657,6 +2707,18 @@ class MovingTPF:
             tc = timecorr[bdx]
             pmu = flux_prior[bdx]
             pixel_qualities.append(pixel_quality[bdx])
+
+            # Compute average observing geometry parameters inside binning window
+            # Catch warnings that arise if self.obs_params contains empty arrays
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message="Mean of empty slice",
+                    category=RuntimeWarning,
+                )
+                sun = np.nanmean(sun_distance[bdx])
+                obs = np.nanmean(obs_distance[bdx])
+                phase = np.nanmean(phase_angle[bdx])
 
             # Use pixels with PRF value > 0.001% for fitting.
             # This value is small to include all pixels where the PRF has contribution.
@@ -2752,6 +2814,9 @@ class MovingTPF:
                         pn.any(),
                         bg_std,
                         bg_mad,
+                        sun,
+                        obs,
+                        phase,
                     ]
                 )
 
@@ -2773,6 +2838,9 @@ class MovingTPF:
                         pn.any(),
                         bg_std,
                         bg_mad,
+                        sun,
+                        obs,
+                        phase,
                     ]
                 )
                 nfails += 1
@@ -2798,6 +2866,9 @@ class MovingTPF:
             prf_nan_mask,
             bg_std,
             bg_mad,
+            sun,
+            obs,
+            phase,
         ) = np.asarray(psf_phot).T
 
         # Convert measured flux to TESS magnitude.
@@ -2830,6 +2901,9 @@ class MovingTPF:
             "quality_fraction": qual_frac,
             "bg_std": bg_std,
             "bg_mad": bg_mad,
+            "sun_distance": sun,
+            "obs_distance": obs,
+            "phase_angle": phase,
             "time_bin_size": time_bin_size,
             "bad_spoc_bits": bad_spoc_bits,
         }
@@ -3994,6 +4068,42 @@ class MovingTPF:
                     array=lc["psf"]["bg_mad"],
                 ),
             ]
+
+            # Add observing geometry parameters, if they exist:
+            if (
+                "sun_distance" in self.ephem
+                and "obs_distance" in self.ephem
+                and "phase_angle" in self.ephem
+            ):
+                cols_psf.extend(
+                    [
+                        # Distance from Sun, in AU.
+                        fits.Column(
+                            name="SUN_DISTANCE",
+                            format="E",
+                            unit="AU",
+                            disp="E14.7",
+                            array=lc["psf"]["sun_distance"],
+                        ),
+                        # Distance from observer (TESS), in AU.
+                        fits.Column(
+                            name="OBS_DISTANCE",
+                            format="E",
+                            unit="AU",
+                            disp="E14.7",
+                            array=lc["psf"]["obs_distance"],
+                        ),
+                        # Phase angle, in degrees.
+                        fits.Column(
+                            name="PHASE_ANGLE",
+                            format="E",
+                            unit="deg",
+                            disp="E14.7",
+                            array=lc["psf"]["phase_angle"],
+                        ),
+                    ]
+                )
+
             # Create table HDU
             table_hdu_psf = fits.BinTableHDU.from_columns(cols_psf)
             # Add comments to column keywords
@@ -4121,6 +4231,41 @@ class MovingTPF:
                 array=[coord.dec.value for coord in self.coords],
             ),
         ]
+
+        # Add observing geometry parameters, if they exist: if they exist:
+        if (
+            "sun_distance" in self.ephem
+            and "obs_distance" in self.ephem
+            and "phase_angle" in self.ephem
+        ):
+            cols_extra.extend(
+                [
+                    # Distance from Sun, in AU.
+                    fits.Column(
+                        name="SUN_DISTANCE",
+                        format="E",
+                        unit="AU",
+                        disp="E14.7",
+                        array=self.obs_params["sun_distance"],
+                    ),
+                    # Distance from observer (TESS), in AU.
+                    fits.Column(
+                        name="OBS_DISTANCE",
+                        format="E",
+                        unit="AU",
+                        disp="E14.7",
+                        array=self.obs_params["obs_distance"],
+                    ),
+                    # Phase angle, in degrees.
+                    fits.Column(
+                        name="PHASE_ANGLE",
+                        format="E",
+                        unit="deg",
+                        disp="E14.7",
+                        array=self.obs_params["phase_angle"],
+                    ),
+                ]
+            )
 
         # Create table HDU
         table_hdu_extra = fits.BinTableHDU.from_columns(cols_extra)
@@ -4490,6 +4635,34 @@ class MovingTPF:
             ),
             comment="[pix/h] average speed",
             after="DECRATE",
+        )
+
+        hdu.header.set(
+            "SUN_DIST",
+            round(np.nanmean(self.obs_params["sun_distance"]), 3)
+            if "sun_distance" in self.ephem
+            and ~np.isnan(self.ephem["sun_distance"]).all()
+            else None,
+            comment="[AU] average distance from Sun",
+            after="PIXVEL",
+        )
+        hdu.header.set(
+            "OBS_DIST",
+            round(np.nanmean(self.obs_params["obs_distance"]), 3)
+            if "obs_distance" in self.ephem
+            and ~np.isnan(self.ephem["obs_distance"]).all()
+            else None,
+            comment="[AU] average distance from TESS",
+            after="SUN_DIST",
+        )
+        hdu.header.set(
+            "PHASE",
+            round(np.nanmean(self.obs_params["phase_angle"]), 3)
+            if "phase_angle" in self.ephem
+            and ~np.isnan(self.ephem["phase_angle"]).all()
+            else None,
+            comment="[deg] average phase angle",
+            after="OBS_DIST",
         )
 
         return hdu
@@ -4998,13 +5171,17 @@ class MovingTPF:
         -------
         MovingTPF :
             Initialised MovingTPF with ephemeris and orbital elements from JPL/Horizons.
-            Target ephemeris has columns ['time', 'sector', 'camera', 'ccd', 'column', 'row', 'vmag', 'hmag'].
+            Target ephemeris has columns ['time', 'sector', 'camera', 'ccd', 'column', 'row', 'vmag', 'hmag'
+            'sun_distance', 'obs_distance', 'phase_angle'].
 
             - 'time' : float with units (JD - 2457000) in TDB at spacecraft.
             - 'sector', 'camera', 'ccd' : int
             - 'column', 'row' : float. These are one-indexed, where the lower left pixel of the FFI is (1,1).
             - 'vmag' : float. Visual magnitude.
             - 'hmag' : float. Absolute magntiude.
+            - 'sun_distance' : float. Distance from Sun, in AU.
+            - 'obs_distance' : float. Distance from observer (TESS), in AU.
+            - 'phase_angle' : float. Phase angle, in degrees.
         """
 
         # Get target ephemeris and orbital elements using tess-ephem
@@ -5053,6 +5230,9 @@ class MovingTPF:
                 "row",
                 "vmag",
                 "hmag",
+                "sun_distance",
+                "obs_distance",
+                "phase_angle",
             ]
         ].reset_index(drop=True)
 

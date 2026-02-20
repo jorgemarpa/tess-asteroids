@@ -28,6 +28,11 @@ def test_from_name():
     assert min(target.ephem["time"]) >= 2458463.5 - 2457000
     assert max(target.ephem["time"]) <= 2458490.5 - 2457000
 
+    # Previous JPL Horizons query reveals Sun distance should always be between 2 and 2.2 AU during sector 6
+    assert np.logical_and(
+        target.ephem["sun_distance"] > 2, target.ephem["sun_distance"] < 2.2
+    ).all()
+
     # Asteroid 1994 EL3 is observed by camera 1, CCDs 1 and 2 during sector 6.
     target = MovingTPF.from_name("1994 EL3", sector=6, camera=1, ccd=1)
     assert target.sector == 6
@@ -89,6 +94,17 @@ def test_data_logic(caplog):
         (target.time - target.timecorr)
         == (target.time_original - target.timecorr_original)
     ).all()
+
+    # Check the observing geometry parameters have been correctly set to np.nan
+    assert np.isnan(target.obs_params["sun_distance"]).all()
+    assert np.isnan(target.obs_params["obs_distance"]).all()
+    assert np.isnan(target.obs_params["phase_angle"]).all()
+    assert (
+        len(target.obs_params["sun_distance"])
+        == len(target.obs_params["obs_distance"])
+        == len(target.obs_params["phase_angle"])
+        == len(target.time)
+    )
 
     # Check magnitude of time correction derived by lkspacecraft
     # Maximum Earth to SS barycenter is 500sec, with an
@@ -327,6 +343,9 @@ def test_make_tpf():
         assert hdul[0].header["SL_CORR"].strip() == "pca"
         assert hdul[0].header["VMAG"] > 0
         assert hdul[0].header["HMAG"] > 0
+        assert hdul[0].header["PHASE"] > 0
+        assert hdul[0].header["OBS_DIST"] > 0
+        assert hdul[0].header["SUN_DIST"] > 0
         assert "SPOCDATE" in hdul[0].header.keys()
         assert "TIME" in hdul[1].columns.names
         assert "TIMECORR" in hdul[1].columns.names
@@ -451,6 +470,7 @@ def test_to_lightcurve_psf():
     assert len(target.lc["psf"]["TESSmag_err"]) == len(target.time)
     assert len(target.lc["psf"]["quality"]) == len(target.time)
     assert len(target.lc["psf"]["bg_std"]) == len(target.time)
+    assert len(target.lc["psf"]["sun_distance"]) == len(target.time)
 
     # Check the upper and lower errors are nan
     assert np.isnan(target.lc["psf"]["time_uerr"]).all()
@@ -481,6 +501,7 @@ def test_to_lightcurve_psf():
     assert len(target.lc["psf"]["TESSmag_err"]) < len(target.time)
     assert len(target.lc["psf"]["quality"]) < len(target.time)
     assert len(target.lc["psf"]["bg_std"]) < len(target.time)
+    assert len(target.lc["psf"]["sun_distance"]) < len(target.time)
 
     # Check the upper and lower errors are not nan
     assert ~np.isnan(target.lc["psf"]["time_uerr"]).all()
@@ -574,6 +595,9 @@ def test_make_lc():
         assert hdul[0].header["SL_CORR"].strip() == "n/a"
         assert hdul[0].header["VMAG"] > 0
         assert hdul[0].header["HMAG"] > 0
+        assert hdul[0].header["PHASE"] > 0
+        assert hdul[0].header["OBS_DIST"] > 0
+        assert hdul[0].header["SUN_DIST"] > 0
         assert hdul[1].header["TESSMAG"] > 0
         assert hdul[0].header["TESSMAG0"] > 0
         assert "SPOCDATE" in hdul[0].header.keys()
@@ -596,6 +620,7 @@ def test_make_lc():
         assert "ORIGINAL_TIMECORR" in hdul[2].columns.names
         assert "RA_PRED" in hdul[2].columns.names
         assert "EPHEM1" in hdul[2].columns.names
+        assert "SUN_DISTANCE" in hdul[2].columns.names
 
         # Check the barycentric time correction has been applied.
         assert (hdul[2].data["TIME"] != hdul[2].data["ORIGINAL_TIME"]).all()
@@ -722,6 +747,13 @@ def test_multiple_apertures():
 
         # All aperture LCs should have the same columns
         assert hdul[1].columns.names == hdul[2].columns.names == hdul[3].columns.names
+
+        # Observing geometry parameters should be in the PSF and EXTRAS extensions only
+        assert "PHASE_ANGLE" not in hdul[1].columns.names
+        assert "PHASE_ANGLE" not in hdul[2].columns.names
+        assert "PHASE_ANGLE" not in hdul[3].columns.names
+        assert "PHASE_ANGLE" in hdul[4].columns.names
+        assert "PHASE_ANGLE" in hdul[5].columns.names
 
         # Check the aperture methods and parameters in the aperture photometry HDUs.
         assert (
