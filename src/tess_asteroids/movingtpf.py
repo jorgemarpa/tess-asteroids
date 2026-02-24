@@ -61,7 +61,7 @@ class MovingTPF:
         Target ID. This is only used when saving the TPF.
     ephem : DataFrame
         Target ephemeris with columns ['time', 'sector', 'camera', 'ccd', 'column', 'row'].
-        Optional columns: ['vmag', 'hmag', 'sun_distance', 'obs_distance', 'phase_angle'].
+        Optional columns: ['vmag', 'hmag', 'sun_distance', 'obs_distance', 'sto_angle'].
 
         - 'time' : float in format (JD - 2457000) in TDB. See also `barycentric` below.
         - 'sector', 'camera', 'ccd' : int
@@ -70,7 +70,7 @@ class MovingTPF:
         - 'hmag' : float, optional. Absolute magnitude.
         - 'sun_distance' : float, optional. Distance from Sun, in AU.
         - 'obs_distance' : float, optional. Distance from observer (TESS), in AU.
-        - 'phase_angle' : float, optional. Phase angle, in degrees.
+        - 'sto_angle' : float, optional. Sun-Target-Observer angle, in degrees. Closely approximates true phase angle. See Horizons documentation for definition: https://ssd.jpl.nasa.gov/horizons/manual.html#obsquan
     barycentric : bool, default=True
 
         - If True, the input `ephem['time']` must be in TDB measured at the solar system barycenter. This is the case for the
@@ -135,13 +135,13 @@ class MovingTPF:
                 raise ValueError(
                     "`obs_distance` is the distance from the observer in AU and every value must be >= 0"
                 )
-        if "phase_angle" in self.ephem:
-            # Phase angle runs from 0 to 180 degrees:
-            if (self.ephem["phase_angle"] < 0).any() or (
-                self.ephem["phase_angle"] > 180
+        if "sto_angle" in self.ephem:
+            # Sun-Target-Observer angle runs from 0 to 180 degrees:
+            if (self.ephem["sto_angle"] < 0).any() or (
+                self.ephem["sto_angle"] > 180
             ).any():
                 raise ValueError(
-                    "`phase_angle` is the phase angle in degrees and every value must satisfy: 0 <= phase <= 180."
+                    "`sto_angle` is the Sun-Target-Observer angle in degrees and every value must satisfy: 0 <= sto_angle <= 180."
                 )
 
         # Save orbital elements and check the values are physical.
@@ -516,10 +516,10 @@ class MovingTPF:
             self.timecorr = self.timecorr_original
             self.time = self.time_original
 
-        # Interpolate observing geometry parameters (r, delta, phi) onto observation times
+        # Interpolate observing geometry parameters onto observation times
         # Note: interpolation will fail if any value is not finite.
         self.obs_params = {}
-        for param in ["sun_distance", "obs_distance", "phase_angle"]:
+        for param in ["sun_distance", "obs_distance", "sto_angle"]:
             if param in self.ephem and np.isfinite(self.ephem[param].values).all():
                 val = CubicSpline(
                     self.ephem["time"].astype(float),
@@ -2574,7 +2574,7 @@ class MovingTPF:
             - `bg_mad` is the median absolute deviation of background pixels (where PRF model < 0.1%) in each binning window.
             - `sun_distance` is the average distance from the Sun (AU) in the binning window.
             - `obs_distance` is the average distance from TESS (AU) in the binning window.
-            - `phase_angle` is the average phase angle (degrees) in the binning window.
+            - `sto_angle` is the average Sun-Target-Observer angle (degrees) in the binning window.
             - `time_bin_size` is the width of window used for binning.
             - `bad_spoc_bits` is the SPOC bits used to define bad quality data.
 
@@ -2613,7 +2613,7 @@ class MovingTPF:
         pixel_quality = self.pixel_quality[spoc_quality_mask]
         sun_distance = self.obs_params["sun_distance"][spoc_quality_mask]
         obs_distance = self.obs_params["obs_distance"][spoc_quality_mask]
-        phase_angle = self.obs_params["phase_angle"][spoc_quality_mask]
+        sto_angle = self.obs_params["sto_angle"][spoc_quality_mask]
 
         # If all data has been masked, raise warning and return empty arrays.
         if len(time) == 0:
@@ -2641,7 +2641,7 @@ class MovingTPF:
                 "bg_mad": np.array([]),
                 "sun_distance": np.array([]),
                 "obs_distance": np.array([]),
-                "phase_angle": np.array([]),
+                "sto_angle": np.array([]),
                 "time_bin_size": time_bin_size,
                 "bad_spoc_bits": bad_spoc_bits,
             }
@@ -2718,7 +2718,7 @@ class MovingTPF:
                 )
                 sun = np.nanmean(sun_distance[bdx])
                 obs = np.nanmean(obs_distance[bdx])
-                phase = np.nanmean(phase_angle[bdx])
+                sto = np.nanmean(sto_angle[bdx])
 
             # Use pixels with PRF value > 0.001% for fitting.
             # This value is small to include all pixels where the PRF has contribution.
@@ -2816,7 +2816,7 @@ class MovingTPF:
                         bg_mad,
                         sun,
                         obs,
-                        phase,
+                        sto,
                     ]
                 )
 
@@ -2840,7 +2840,7 @@ class MovingTPF:
                         bg_mad,
                         sun,
                         obs,
-                        phase,
+                        sto,
                     ]
                 )
                 nfails += 1
@@ -2868,7 +2868,7 @@ class MovingTPF:
             bg_mad,
             sun,
             obs,
-            phase,
+            sto,
         ) = np.asarray(psf_phot).T
 
         # Convert measured flux to TESS magnitude.
@@ -2903,7 +2903,7 @@ class MovingTPF:
             "bg_mad": bg_mad,
             "sun_distance": sun,
             "obs_distance": obs,
-            "phase_angle": phase,
+            "sto_angle": sto,
             "time_bin_size": time_bin_size,
             "bad_spoc_bits": bad_spoc_bits,
         }
@@ -4073,7 +4073,7 @@ class MovingTPF:
             if (
                 "sun_distance" in self.ephem
                 and "obs_distance" in self.ephem
-                and "phase_angle" in self.ephem
+                and "sto_angle" in self.ephem
             ):
                 cols_psf.extend(
                     [
@@ -4093,13 +4093,13 @@ class MovingTPF:
                             disp="E14.7",
                             array=lc["psf"]["obs_distance"],
                         ),
-                        # Phase angle, in degrees.
+                        # Sun-Target-Observer angle, in degrees.
                         fits.Column(
-                            name="PHASE_ANGLE",
+                            name="STO_ANGLE",
                             format="E",
                             unit="deg",
                             disp="E14.7",
-                            array=lc["psf"]["phase_angle"],
+                            array=lc["psf"]["sto_angle"],
                         ),
                     ]
                 )
@@ -4232,11 +4232,11 @@ class MovingTPF:
             ),
         ]
 
-        # Add observing geometry parameters, if they exist: if they exist:
+        # Add observing geometry parameters, if they exist:
         if (
             "sun_distance" in self.ephem
             and "obs_distance" in self.ephem
-            and "phase_angle" in self.ephem
+            and "sto_angle" in self.ephem
         ):
             cols_extra.extend(
                 [
@@ -4256,13 +4256,13 @@ class MovingTPF:
                         disp="E14.7",
                         array=self.obs_params["obs_distance"],
                     ),
-                    # Phase angle, in degrees.
+                    # Sun-Target-Observer angle, in degrees.
                     fits.Column(
-                        name="PHASE_ANGLE",
+                        name="STO_ANGLE",
                         format="E",
                         unit="deg",
                         disp="E14.7",
-                        array=self.obs_params["phase_angle"],
+                        array=self.obs_params["sto_angle"],
                     ),
                 ]
             )
@@ -4656,12 +4656,12 @@ class MovingTPF:
             after="SUN_DIST",
         )
         hdu.header.set(
-            "PHASE",
-            round(np.nanmean(self.obs_params["phase_angle"]), 3)
-            if "phase_angle" in self.ephem
-            and ~np.isnan(self.ephem["phase_angle"]).all()
+            "STO_ANG",
+            round(np.nanmean(self.obs_params["sto_angle"]), 3)
+            if "sto_angle" in self.ephem
+            and ~np.isnan(self.ephem["sto_angle"]).all()
             else None,
-            comment="[deg] average phase angle",
+            comment="[deg] average Sun-Target-Observer angle",
             after="OBS_DIST",
         )
 
@@ -5172,7 +5172,7 @@ class MovingTPF:
         MovingTPF :
             Initialised MovingTPF with ephemeris and orbital elements from JPL/Horizons.
             Target ephemeris has columns ['time', 'sector', 'camera', 'ccd', 'column', 'row', 'vmag', 'hmag'
-            'sun_distance', 'obs_distance', 'phase_angle'].
+            'sun_distance', 'obs_distance', 'sto_angle'].
 
             - 'time' : float with units (JD - 2457000) in TDB at spacecraft.
             - 'sector', 'camera', 'ccd' : int
@@ -5181,7 +5181,7 @@ class MovingTPF:
             - 'hmag' : float. Absolute magntiude.
             - 'sun_distance' : float. Distance from Sun, in AU.
             - 'obs_distance' : float. Distance from observer (TESS), in AU.
-            - 'phase_angle' : float. Phase angle, in degrees.
+            - 'sto_angle' : float. Sun-Target-Observer phase angle, in degrees. Closely approximates true phase angle. See Horizons documentation for definition: https://ssd.jpl.nasa.gov/horizons/manual.html#obsquan
         """
 
         # Get target ephemeris and orbital elements using tess-ephem
@@ -5232,7 +5232,7 @@ class MovingTPF:
                 "hmag",
                 "sun_distance",
                 "obs_distance",
-                "phase_angle",
+                "sto_angle",
             ]
         ].reset_index(drop=True)
 

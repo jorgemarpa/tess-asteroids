@@ -98,11 +98,11 @@ def test_data_logic(caplog):
     # Check the observing geometry parameters have been correctly set to np.nan
     assert np.isnan(target.obs_params["sun_distance"]).all()
     assert np.isnan(target.obs_params["obs_distance"]).all()
-    assert np.isnan(target.obs_params["phase_angle"]).all()
+    assert np.isnan(target.obs_params["sto_angle"]).all()
     assert (
         len(target.obs_params["sun_distance"])
         == len(target.obs_params["obs_distance"])
-        == len(target.obs_params["phase_angle"])
+        == len(target.obs_params["sto_angle"])
         == len(target.time)
     )
 
@@ -343,7 +343,7 @@ def test_make_tpf():
         assert hdul[0].header["SL_CORR"].strip() == "pca"
         assert hdul[0].header["VMAG"] > 0
         assert hdul[0].header["HMAG"] > 0
-        assert hdul[0].header["PHASE"] > 0
+        assert hdul[0].header["STO_ANG"] > 0
         assert hdul[0].header["OBS_DIST"] > 0
         assert hdul[0].header["SUN_DIST"] > 0
         assert "SPOCDATE" in hdul[0].header.keys()
@@ -595,7 +595,7 @@ def test_make_lc():
         assert hdul[0].header["SL_CORR"].strip() == "n/a"
         assert hdul[0].header["VMAG"] > 0
         assert hdul[0].header["HMAG"] > 0
-        assert hdul[0].header["PHASE"] > 0
+        assert hdul[0].header["STO_ANG"] > 0
         assert hdul[0].header["OBS_DIST"] > 0
         assert hdul[0].header["SUN_DIST"] > 0
         assert hdul[1].header["TESSMAG"] > 0
@@ -749,11 +749,11 @@ def test_multiple_apertures():
         assert hdul[1].columns.names == hdul[2].columns.names == hdul[3].columns.names
 
         # Observing geometry parameters should be in the PSF and EXTRAS extensions only
-        assert "PHASE_ANGLE" not in hdul[1].columns.names
-        assert "PHASE_ANGLE" not in hdul[2].columns.names
-        assert "PHASE_ANGLE" not in hdul[3].columns.names
-        assert "PHASE_ANGLE" in hdul[4].columns.names
-        assert "PHASE_ANGLE" in hdul[5].columns.names
+        assert "STO_ANGLE" not in hdul[1].columns.names
+        assert "STO_ANGLE" not in hdul[2].columns.names
+        assert "STO_ANGLE" not in hdul[3].columns.names
+        assert "STO_ANGLE" in hdul[4].columns.names
+        assert "STO_ANGLE" in hdul[5].columns.names
 
         # Check the aperture methods and parameters in the aperture photometry HDUs.
         assert (
