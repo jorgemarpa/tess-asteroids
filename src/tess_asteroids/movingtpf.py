@@ -4658,8 +4658,7 @@ class MovingTPF:
         hdu.header.set(
             "STO_ANG",
             round(np.nanmean(self.obs_params["sto_angle"]), 3)
-            if "sto_angle" in self.ephem
-            and ~np.isnan(self.ephem["sto_angle"]).all()
+            if "sto_angle" in self.ephem and ~np.isnan(self.ephem["sto_angle"]).all()
             else None,
             comment="[deg] average Sun-Target-Observer angle",
             after="OBS_DIST",
