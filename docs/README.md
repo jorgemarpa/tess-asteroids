@@ -231,7 +231,7 @@ The TPF has four HDUs:
 
 - "PRIMARY" - a primary HDU containing only a header.
 - "PIXELS" - a table with the same columns as a SPOC TPF. Note that "POS_CORR1" and "POS_CORR2" are defined as the offset between the center of the TPF and the expected position of the moving object given the input ephemeris. 
-- "APERTURE" - an image HDU containing the total aperture across all times.
+- "APERTURE" - an image HDU containing the flattened aperture i.e. all pixels that are included in the time-dependent aperture at least once.
 - "EXTRAS" - a table HDU containing columns not found in a SPOC TPF. This includes "RA_PRED"/"DEC_PRED" (expected position of target in world coordinates), "CORNER1"/"CORNER2" (original FFI column/row of the lower-left pixel in the TPF), "PIXEL_QUALITY" (3D pixel quality flags identifying e.g. strap columns, non-science pixels and saturation), "APERTURE" (aperture as a function of time) and "ORIGINAL_TIME"/"ORIGINAL_TIMECORR" (time and barycentric correction derived by SPOC).
 
 The LCF has three or four HDUs (depending upon which lightcurves you created): 
