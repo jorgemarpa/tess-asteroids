@@ -40,10 +40,11 @@ TESSmag_zero_point_err = 0.05
 # Default bad bits for SPOC quality masking, as recommended in TESS archive manual
 # (https://outerspace.stsci.edu/display/TESS/2.0+-+Data+Product+Overview)
 default_bad_spoc_bits = [1, 2, 3, 4, 5, 6, 8, 10, 13, 15]
-# Default bad bits for LC quality masking
+# Default bad bits for LC quality masking: at least one pixel inside mask is non-science, saturated
+# or negative raw flux.
 default_bad_lc_bits = [2, 4, 10]
 
-__version__ = "1.4.3"
+__version__ = "1.5.0"
 __all__ = ["MovingTPF"]
 
 from .movingtpf import MovingTPF  # noqa: E402
