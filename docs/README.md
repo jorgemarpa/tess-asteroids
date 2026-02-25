@@ -231,15 +231,15 @@ The TPF has four HDUs:
 
 - "PRIMARY" - a primary HDU containing only a header.
 - "PIXELS" - a table with the same columns as a SPOC TPF. Note that "POS_CORR1" and "POS_CORR2" are defined as the offset between the center of the TPF and the expected position of the moving object given the input ephemeris. 
-- "APERTURE" - an image HDU containing the average aperture across all times.
+- "APERTURE" - an image HDU containing the total aperture across all times.
 - "EXTRAS" - a table HDU containing columns not found in a SPOC TPF. This includes "RA_PRED"/"DEC_PRED" (expected position of target in world coordinates), "CORNER1"/"CORNER2" (original FFI column/row of the lower-left pixel in the TPF), "PIXEL_QUALITY" (3D pixel quality flags identifying e.g. strap columns, non-science pixels and saturation), "APERTURE" (aperture as a function of time) and "ORIGINAL_TIME"/"ORIGINAL_TIMECORR" (time and barycentric correction derived by SPOC).
 
 The LCF has three or four HDUs (depending upon which lightcurves you created): 
 
 - "PRIMARY" - a primary HDU containing only a header.
-- "LIGHTCURVE_AP" - a table HDU containing the aperture photomety light curve, with columns including "TIME" (timestamps in BTJD), "FLUX"/"FLUX_ERR" (flux and error from aperture photometry) and "TESSMAG"/"TESSMAG_ERR" (measured TESS magnitude and error).
-- "LIGHTCURVE_PSF" - a table HDU containing the PSF photomety light curve, with columns including "TIME" (timestamps in BTJD), "FLUX"/"FLUX_ERR" (flux and error from PSF photometry) and "TESSMAG"/"TESSMAG_ERR" (measured TESS magnitude and error).
-- "EXTRAS" - a table HDU containing extra infomration, with columns including "RA_PRED"/"DEC_PRED" (expected position of target in world coordinates), "CORNER1"/"CORNER2" (original FFI column/row of the lower-left pixel in the TPF) and "ORIGINAL_TIME"/"ORIGINAL_TIMECORR" (time and barycentric correction derived by SPOC).
+- "LIGHTCURVE_AP" - a table HDU containing the aperture photomety light curve, with columns including "TIME" (timestamps in BTJD), "FLUX"/"FLUX_ERR" (flux and error from aperture photometry) and "AP_QUALITY" (light curve quality flags).
+- "LIGHTCURVE_PSF" - a table HDU containing the PSF photomety light curve, with columns including "TIME" (timestamps in BTJD), "FLUX"/"FLUX_ERR" (flux and error from PSF photometry) and "PSF_QUALITY" (light curve quality flags).
+- "EXTRAS" - a table HDU containing extra information, with columns including "RA_PRED"/"DEC_PRED" (expected position of target in world coordinates), "CORNER1"/"CORNER2" (original FFI column/row of the lower-left pixel in the TPF), "ORIGINAL_TIME"/"ORIGINAL_TIMECORR" (time and barycentric correction derived by SPOC) and "SUN_DISTANCE"/"OBS_DISTANCE"/"STO_ANGLE" (distance from Sun [AU] / distance from observer (TESS) [AU] / Sun-Target-Observer angle [deg]).
 
 ## Citation
 
