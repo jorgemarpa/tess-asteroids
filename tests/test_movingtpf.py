@@ -6,8 +6,7 @@ import numpy as np
 import pandas as pd
 from astropy.io import fits
 
-from tess_asteroids import MovingTPF, TESSmag_zero_point, __version__
-from tess_asteroids.utils import calculate_TESSmag
+from tess_asteroids import MovingTPF, __version__
 
 
 def test_from_name():
@@ -27,6 +26,11 @@ def test_from_name():
     # Bounds taken from tesswcs pointings.csv file for sector 6.
     assert min(target.ephem["time"]) >= 2458463.5 - 2457000
     assert max(target.ephem["time"]) <= 2458490.5 - 2457000
+
+    # Previous JPL Horizons query reveals Sun distance should always be between 2 and 2.2 AU during sector 6
+    assert np.logical_and(
+        target.ephem["sun_distance"] > 2, target.ephem["sun_distance"] < 2.2
+    ).all()
 
     # Asteroid 1994 EL3 is observed by camera 1, CCDs 1 and 2 during sector 6.
     target = MovingTPF.from_name("1994 EL3", sector=6, camera=1, ccd=1)
@@ -89,6 +93,17 @@ def test_data_logic(caplog):
         (target.time - target.timecorr)
         == (target.time_original - target.timecorr_original)
     ).all()
+
+    # Check the observing geometry parameters have been correctly set to np.nan
+    assert np.isnan(target.obs_params["sun_distance"]).all()
+    assert np.isnan(target.obs_params["obs_distance"]).all()
+    assert np.isnan(target.obs_params["sto_angle"]).all()
+    assert (
+        len(target.obs_params["sun_distance"])
+        == len(target.obs_params["obs_distance"])
+        == len(target.obs_params["sto_angle"])
+        == len(target.time)
+    )
 
     # Check magnitude of time correction derived by lkspacecraft
     # Maximum Earth to SS barycenter is 500sec, with an
@@ -327,6 +342,9 @@ def test_make_tpf():
         assert hdul[0].header["SL_CORR"].strip() == "pca"
         assert hdul[0].header["VMAG"] > 0
         assert hdul[0].header["HMAG"] > 0
+        assert hdul[0].header["STO_ANG"] > 0
+        assert hdul[0].header["OBS_DIST"] > 0
+        assert hdul[0].header["SUN_DIST"] > 0
         assert "SPOCDATE" in hdul[0].header.keys()
         assert "TIME" in hdul[1].columns.names
         assert "TIMECORR" in hdul[1].columns.names
@@ -451,6 +469,7 @@ def test_to_lightcurve_psf():
     assert len(target.lc["psf"]["TESSmag_err"]) == len(target.time)
     assert len(target.lc["psf"]["quality"]) == len(target.time)
     assert len(target.lc["psf"]["bg_std"]) == len(target.time)
+    assert len(target.lc["psf"]["sun_distance"]) == len(target.time)
 
     # Check the upper and lower errors are nan
     assert np.isnan(target.lc["psf"]["time_uerr"]).all()
@@ -481,6 +500,7 @@ def test_to_lightcurve_psf():
     assert len(target.lc["psf"]["TESSmag_err"]) < len(target.time)
     assert len(target.lc["psf"]["quality"]) < len(target.time)
     assert len(target.lc["psf"]["bg_std"]) < len(target.time)
+    assert len(target.lc["psf"]["sun_distance"]) < len(target.time)
 
     # Check the upper and lower errors are not nan
     assert ~np.isnan(target.lc["psf"]["time_uerr"]).all()
@@ -499,55 +519,6 @@ def test_to_lightcurve_psf():
 
     # Check reduced chi-squared values are positives
     assert np.all(target.lc["psf"]["red_chi2"][target.lc["psf"]["quality"] == 0] >= 0)
-
-
-def test_calculate_TESSmag():
-    """
-    Check expected behaviour of calculate_TESSmag() for some simple test cases.
-    """
-
-    # If flux_fraction = 1, magnitude should be equal to zero-point magnitude.
-    mag, _, _, _ = calculate_TESSmag(1.0, 0.1, 1.0)
-    assert mag == TESSmag_zero_point
-
-    # If flux = NaN, magnitude should be NaN.
-    mag, _, _, _ = calculate_TESSmag(np.nan, 0.1, 1.0)
-    assert np.isnan(mag)
-
-    # If flux, flux_err and flux_frac are arrays, mag and errors should have the same length.
-    flux = np.array([0.1, 0.5, 0.9, 1.5])
-    flux_err = np.array([0.01, 0.05, 0.09, 0.15])
-    flux_frac = np.array([1.0, 0.5, 0.8, 0.9])
-    mag, mag_err, mag_uerr, mag_lerr = calculate_TESSmag(flux, flux_err, flux_frac)
-    assert len(mag) == len(flux)
-    assert len(mag_err) == len(flux)
-    assert len(mag_uerr) == len(flux)
-    assert len(mag_lerr) == len(flux)
-
-    # If any value of flux <= 0, corresponding mag and errors should be NaN.
-    flux[0] = -0.3
-    mag, mag_err, mag_uerr, mag_lerr = calculate_TESSmag(flux, flux_err, flux_frac)
-    assert np.isnan(mag[0])
-    assert np.isnan(mag_err[0])
-    assert np.isnan(mag_uerr[0])
-    assert np.isnan(mag_lerr[0])
-
-    # If any value of flux - flux_err <= 0, only mag_uerr should be NaN.
-    flux[0] = 0.005
-    mag, mag_err, mag_uerr, mag_lerr = calculate_TESSmag(flux, flux_err, flux_frac)
-    assert ~np.isnan(mag[0])
-    assert ~np.isnan(mag_err[0])
-    assert np.isnan(mag_uerr[0])
-    assert ~np.isnan(mag_lerr[0])
-
-    # If any value of flux_frac < 0, function should return ValueError.
-    flux_frac[2] = -0.3
-    try:
-        calculate_TESSmag(flux, flux_err, flux_frac)
-    except ValueError:
-        assert True
-    else:
-        assert False
 
 
 def test_make_lc():
@@ -574,6 +545,9 @@ def test_make_lc():
         assert hdul[0].header["SL_CORR"].strip() == "n/a"
         assert hdul[0].header["VMAG"] > 0
         assert hdul[0].header["HMAG"] > 0
+        assert hdul[0].header["STO_ANG"] > 0
+        assert hdul[0].header["OBS_DIST"] > 0
+        assert hdul[0].header["SUN_DIST"] > 0
         assert hdul[1].header["TESSMAG"] > 0
         assert hdul[0].header["TESSMAG0"] > 0
         assert "SPOCDATE" in hdul[0].header.keys()
@@ -596,6 +570,7 @@ def test_make_lc():
         assert "ORIGINAL_TIMECORR" in hdul[2].columns.names
         assert "RA_PRED" in hdul[2].columns.names
         assert "EPHEM1" in hdul[2].columns.names
+        assert "SUN_DISTANCE" in hdul[2].columns.names
 
         # Check the barycentric time correction has been applied.
         assert (hdul[2].data["TIME"] != hdul[2].data["ORIGINAL_TIME"]).all()
@@ -722,6 +697,13 @@ def test_multiple_apertures():
 
         # All aperture LCs should have the same columns
         assert hdul[1].columns.names == hdul[2].columns.names == hdul[3].columns.names
+
+        # Observing geometry parameters should be in the PSF and EXTRAS extensions only
+        assert "STO_ANGLE" not in hdul[1].columns.names
+        assert "STO_ANGLE" not in hdul[2].columns.names
+        assert "STO_ANGLE" not in hdul[3].columns.names
+        assert "STO_ANGLE" in hdul[4].columns.names
+        assert "STO_ANGLE" in hdul[5].columns.names
 
         # Check the aperture methods and parameters in the aperture photometry HDUs.
         assert (
