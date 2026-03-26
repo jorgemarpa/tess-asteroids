@@ -6,8 +6,7 @@ import numpy as np
 import pandas as pd
 from astropy.io import fits
 
-from tess_asteroids import MovingTPF, TESSmag_zero_point, __version__
-from tess_asteroids.utils import calculate_TESSmag
+from tess_asteroids import MovingTPF, __version__
 
 
 def test_from_name():
@@ -20,12 +19,18 @@ def test_from_name():
     assert target.camera == 1
     assert target.ccd == 1
 
-    # Check the time scale is UTC
-    assert target.time_scale == "utc"
+    # Check the time is NOT barycentric
+    if target.barycentric:
+        assert False
 
     # Bounds taken from tesswcs pointings.csv file for sector 6.
     assert min(target.ephem["time"]) >= 2458463.5 - 2457000
     assert max(target.ephem["time"]) <= 2458490.5 - 2457000
+
+    # Previous JPL Horizons query reveals Sun distance should always be between 2 and 2.2 AU during sector 6
+    assert np.logical_and(
+        target.ephem["sun_distance"] > 2, target.ephem["sun_distance"] < 2.2
+    ).all()
 
     # Asteroid 1994 EL3 is observed by camera 1, CCDs 1 and 2 during sector 6.
     target = MovingTPF.from_name("1994 EL3", sector=6, camera=1, ccd=1)
@@ -89,6 +94,17 @@ def test_data_logic(caplog):
         == (target.time_original - target.timecorr_original)
     ).all()
 
+    # Check the observing geometry parameters have been correctly set to np.nan
+    assert np.isnan(target.obs_params["sun_distance"]).all()
+    assert np.isnan(target.obs_params["obs_distance"]).all()
+    assert np.isnan(target.obs_params["sto_angle"]).all()
+    assert (
+        len(target.obs_params["sun_distance"])
+        == len(target.obs_params["obs_distance"])
+        == len(target.obs_params["sto_angle"])
+        == len(target.time)
+    )
+
     # Check magnitude of time correction derived by lkspacecraft
     # Maximum Earth to SS barycenter is 500sec, with an
     # additional offset to account for TESS.
@@ -115,38 +131,35 @@ def test_data_logic(caplog):
 def test_bg_linear_model():
     """
     Test background linear model. This checks the shapes and quality masks for the
-    scattered light model, the linear model and the global background model.
+    scattered light model, the star model and the global background model.
     """
     # Initialise MovingTPF for 1980 VR1 and get data.
     target = MovingTPF.from_name("1980 VR1", sector=1, camera=1, ccd=1)
     target.get_data()
     target.reshape_data()
 
-    for method in ["all_time", "per_time"]:
-        # Background correction using `all_time` SL correction
-        bg, bg_err, sl, sl_err, linear, linear_err = target._bg_linear_model(
-            sl_method=method
-        )
+    # Background correction using `pca` SL correction
+    bg, bg_err, sl, sl_err, star, star_err = target._bg_linear_model(sl_method="pca")
 
-        # Check the components have the expected shape
-        assert np.shape(bg) == np.shape(target.flux)
-        assert np.shape(bg_err) == np.shape(target.flux)
-        assert np.shape(sl) == np.shape(target.flux)
-        assert np.shape(sl_err) == np.shape(target.flux)
-        assert np.shape(linear) == np.shape(target.flux)
-        assert np.shape(linear_err) == np.shape(target.flux)
+    # Check the components have the expected shape
+    assert np.shape(bg) == np.shape(target.flux)
+    assert np.shape(bg_err) == np.shape(target.flux)
+    assert np.shape(sl) == np.shape(target.flux)
+    assert np.shape(sl_err) == np.shape(target.flux)
+    assert np.shape(star) == np.shape(target.flux)
+    assert np.shape(star_err) == np.shape(target.flux)
 
-        # Check method is recorded correctly.
-        assert target.sl_method == method
+    # Check method is recorded correctly.
+    assert target.sl_method == "pca"
 
-        # Check models are summer for global model.
-        assert np.array_equal(bg, sl + linear)
+    # Check models are correctly summed for global model.
+    assert np.array_equal(bg, sl + star, equal_nan=True)
 
-    # Check SL and LM quality masks:
-    target.background_correction(sl_method="per_time", ncomponents=8000)
+    # Check SL and star quality masks catch issues caused by using too many components:
+    target.background_correction(sl_method="pca", ncomponents=8000)
     assert np.shape(target.sl_nan_mask) == np.shape(target.time)
     assert np.array_equal(target.sl_nan_mask, np.ones_like(target.time, dtype=bool))
-    assert np.shape(target.lm_nan_mask) == np.shape(target.all_flux)
+    assert np.shape(target.star_nan_mask) == np.shape(target.all_flux)
 
 
 def test_create_threshold_aperture():
@@ -163,17 +176,18 @@ def test_create_threshold_aperture():
     target.reshape_data()
     target.background_correction(method="rolling")
 
-    aperture_mask = target._create_threshold_aperture(
+    aperture_mask, ap_param = target._create_threshold_aperture(
         threshold=3.0, reference_pixel="center"
     )
 
     assert aperture_mask.shape == target.flux.shape
+    assert ap_param == 3.0
     assert (
         np.median(aperture_mask.reshape((target.time.shape[0], -1)).sum(axis=1)) == 7.0
     )
 
 
-def test_create_prf_aperture(caplog):
+def test_create_prf_aperture():
     """
     Test the PRF aperture. When running `_create_prf_aperture()`, it internally calls
     `_create_target_prf_model()` first. These tests check the properties of both the model
@@ -185,12 +199,14 @@ def test_create_prf_aperture(caplog):
     target.get_data(shape=(11, 11))
 
     # Make aperture from PRF model
-    with caplog.at_level(logging.WARNING):
-        aperture_mask = target._create_prf_aperture()
+    aperture_mask, ap_param = target._create_prf_aperture()
 
     # Check shape of the PRF model and aperture
     assert target.prf_model.shape == (len(target.time), *target.shape)
     assert aperture_mask.shape == (len(target.time), *target.shape)
+
+    # Check default value of threhsold
+    assert ap_param == 0.01
 
     # Check that each frame of the PRF model sums to one
     # Note: rounding errors result in some values being very close, but not equal,
@@ -201,10 +217,6 @@ def test_create_prf_aperture(caplog):
             for i in range(len(target.prf_model))
         ]
     )
-
-    # Check that the last frame of the PRF model contained NaNs.
-    # Previous testing has revealed this should be the case.
-    assert "The PRF model contained nans in the last frame" in caplog.text
 
     # Check median number of pixels in the aperture across all frames equals 15.0.
     # Previous testing has revealed this should be the case.
@@ -226,12 +238,14 @@ def test_create_ellipse_aperture():
     target.reshape_data()
     target.background_correction(method="rolling")
 
-    ellip_mask, params = target._create_ellipse_aperture(return_params=True)
+    ellip_mask, R, params = target._create_ellipse_aperture(return_params=True)
 
     # aperture mask
     # for the test source the median number of pixels across all frames is 10
     assert ellip_mask.shape == target.flux.shape
     assert np.median(ellip_mask.reshape((target.time.shape[0], -1)).sum(axis=1)) == 10
+    # check default R value
+    assert R == 3.0
     # ellipse parameters
     # for the test source the centroid values should be within 0.2 pixels
     # from the asteroid ephemeris
@@ -245,7 +259,7 @@ def test_create_ellipse_aperture():
 
 def test_pixel_quality():
     """
-    Test 3D pixel quality mask. Checks that the shape of the mask is the same as self.flux
+    Test 3D pixel quality flags. Checks that the shape of the array is the same as `self.flux`
     and that the values are as expected from a manual inspection.
     """
 
@@ -270,10 +284,10 @@ def test_pixel_quality():
     target.background_correction(method="rolling")
     target.create_pixel_quality(sat_buffer_rad=1)
 
-    # Check that pixel quality mask has expected shape.
+    # Check that pixel quality has expected shape.
     assert np.shape(target.pixel_quality) == (len(target.time), *shape)
 
-    # Check that pixel quality mask has expected values.
+    # Check that pixel quality has expected values.
     # The expected values were determined manually using the first frame of the TPF and the strap table.
     pixels = np.zeros_like(target.flux[0])
 
@@ -325,14 +339,16 @@ def test_make_tpf():
         assert hdul[0].header["PROCVER"].strip() == __version__
         assert hdul[0].header["AP_TYPE"].strip() == "prf"
         assert hdul[0].header["BG_CORR"].strip() == "linear_model"
-        assert hdul[0].header["SL_CORR"].strip() == "all_time"
+        assert hdul[0].header["SL_CORR"].strip() == "pca"
         assert hdul[0].header["VMAG"] > 0
         assert hdul[0].header["HMAG"] > 0
-        assert hdul[0].header["TESSMAG"] == 0
-        assert hdul[0].header["TESSMAG0"] == 0
+        assert hdul[0].header["STO_ANG"] > 0
+        assert hdul[0].header["OBS_DIST"] > 0
+        assert hdul[0].header["SUN_DIST"] > 0
         assert "SPOCDATE" in hdul[0].header.keys()
         assert "TIME" in hdul[1].columns.names
         assert "TIMECORR" in hdul[1].columns.names
+        assert "CADENCENO" in hdul[3].columns.names
         assert "APERTURE" in hdul[3].columns.names
         assert "PIXEL_QUALITY" in hdul[3].columns.names
         assert "CORNER1" in hdul[3].columns.names
@@ -342,9 +358,11 @@ def test_make_tpf():
         assert "ORIGINAL_TIME" in hdul[3].columns.names
         assert "ORIGINAL_TIMECORR" in hdul[3].columns.names
         assert len(hdul[3].data["APERTURE"]) == len(target.time)
-        assert np.allclose(target.corr_flux, hdul[1].data["FLUX"], rtol=1e-07)
+        assert np.allclose(
+            target.corr_flux, hdul[1].data["FLUX"], rtol=1e-07, equal_nan=True
+        )
 
-        # Check the UTC to TDB conversion has been applied.
+        # Check the barycentric time correction has been applied.
         assert (hdul[1].data["TIME"] != hdul[3].data["ORIGINAL_TIME"]).all()
 
         # 1998 YT6 is a main-belt asteroid, ensure the orbital elements are physical:
@@ -364,18 +382,18 @@ def test_make_tpf():
     assert isinstance(tpf, lk.targetpixelfile.TessTargetPixelFile)
     assert hasattr(tpf, "pipeline_mask")
     assert len(tpf.time) == len(target.time)
-    assert np.allclose(target.corr_flux, tpf.flux.value, rtol=1e-07)
+    assert np.allclose(target.corr_flux, tpf.flux.value, rtol=1e-07, equal_nan=True)
 
     # Delete the file
     os.remove("tests/tess-1998YT6-s0006-1-1-shape11x11-moving_tp.fits")
 
 
-def test_to_lightcurve():
+def test_to_lightcurve_aperture():
     """
     Test the to_lightcurve() function with the method `aperture`.  This internally calls
     _aperture_photometry() and _create_lc_quality(). The tests check the expected length
     of the lightcurve, the expected value of the centroid and the expected values of the
-    quality mask.
+    quality flags.
     """
 
     # Make TPF for asteroid 1998 YT6.
@@ -391,6 +409,9 @@ def test_to_lightcurve():
     assert len(target.lc["aperture"]["TESSmag"]) == len(target.time)
     assert len(target.lc["aperture"]["quality"]) == len(target.time)
     assert len(target.lc["aperture"]["flux_fraction"]) == len(target.time)
+    assert len(target.lc["aperture"]["n_pix"]) == len(target.time)
+    assert len(target.lc["aperture"]["n_pix_star"]) == len(target.time)
+    assert len(target.lc["aperture"]["bg_std"]) == len(target.time)
 
     # Check the average centroid is within 1/2 a pixel of the center of the TPF.
     assert (
@@ -402,7 +423,7 @@ def test_to_lightcurve():
         & (np.nanmean(target.lc["aperture"]["col_cen"] - target.corner[:, 1]) < 5.5)
     ).all()
 
-    # Check the pixel quality has been correctly accounted for in quality mask.
+    # Check the pixel quality has been correctly accounted for in quality flag.
     for t in range(len(target.time)):
         if target.pixel_quality[t][target.aperture_mask[t]].any() != 0:
             assert target.lc["aperture"]["quality"][t] > 0
@@ -426,41 +447,78 @@ def test_to_lightcurve():
     ).all()
 
 
-def test_calculate_TESSmag():
+def test_to_lightcurve_psf():
     """
-    Check expected behaviour of calculate_TESSmag() for some simple test cases.
+    Test the to_lightcurve() function with the method `psf`.  This internally calls
+    _psf_photometry(). The tests check the expected length of the lightcurve, the expected value
+    of the time errors and the expected values of the reduced chi-squared.
     """
 
-    # If flux_fraction = 1, magnitude should be equal to zero-point magnitude.
-    mag, _ = calculate_TESSmag(1.0, 0.1, 1.0)
-    assert mag == TESSmag_zero_point
+    # Make TPF for asteroid 1998 YT6.
+    target = MovingTPF.from_name("1998 YT6", sector=6)
+    target.make_tpf()
 
-    # If flux = NaN, magnitude should be NaN.
-    mag, _ = calculate_TESSmag(np.nan, 0.1, 1.0)
-    assert np.isnan(mag)
+    # Test PSF photometry to extract lightcurve from TPF.
+    target.to_lightcurve(method="psf", bad_spoc_bits="none")
 
-    # If flux, flux_err and flux_frac are arrays, mag/mag_err should have the same length.
-    flux = np.array([0.1, 0.5, 0.9, 1.5])
-    flux_err = np.array([0.01, 0.05, 0.09, 0.15])
-    flux_frac = np.array([1.0, 0.5, 0.8, 0.9])
-    mag, mag_err = calculate_TESSmag(flux, flux_err, flux_frac)
-    assert len(mag) == len(flux)
-    assert len(mag_err) == len(flux)
+    # Check the lightcurve has the same length as target.time
+    assert len(target.lc["psf"]["time"]) == len(target.time)
+    assert len(target.lc["psf"]["flux"]) == len(target.time)
+    assert len(target.lc["psf"]["flux_err"]) == len(target.time)
+    assert len(target.lc["psf"]["TESSmag"]) == len(target.time)
+    assert len(target.lc["psf"]["TESSmag_err"]) == len(target.time)
+    assert len(target.lc["psf"]["quality"]) == len(target.time)
+    assert len(target.lc["psf"]["bg_std"]) == len(target.time)
+    assert len(target.lc["psf"]["sun_distance"]) == len(target.time)
 
-    # If any value of flux <= 0, corresponding mag/mag_err should be NaN.
-    flux[0] = -0.3
-    mag, mag_err = calculate_TESSmag(flux, flux_err, flux_frac)
-    assert np.isnan(mag[0])
-    assert np.isnan(mag_err[0])
+    # Check the upper and lower errors are nan
+    assert np.isnan(target.lc["psf"]["time_uerr"]).all()
+    assert np.isnan(target.lc["psf"]["time_lerr"]).all()
 
-    # If any value of flux_frac < 0, function should return ValueError.
-    flux_frac[2] = -0.3
-    try:
-        calculate_TESSmag(flux, flux_err, flux_frac)
-    except ValueError:
-        assert True
-    else:
-        assert False
+    # Check n_cadences is one (no binning was used)
+    assert np.all(target.lc["psf"]["n_cadences"] == 1)
+
+    # Check quality fraction is between 0 and 1
+    assert np.all(
+        np.logical_and(
+            np.round(target.lc["psf"]["quality_fraction"], 2) >= 0,
+            np.round(target.lc["psf"]["quality_fraction"], 2) <= 1,
+        )
+    )
+
+    # Check reduced chi-squared values are positives
+    assert np.all(target.lc["psf"]["red_chi2"][target.lc["psf"]["quality"] == 0] >= 0)
+
+    # Test PSF photometry, with binning
+    target.to_lightcurve(method="psf", time_bin_size=0.5, bad_spoc_bits="none")
+
+    # Check the lightcurve has less datapoints than target.time
+    assert len(target.lc["psf"]["time"]) < len(target.time)
+    assert len(target.lc["psf"]["flux"]) < len(target.time)
+    assert len(target.lc["psf"]["flux_err"]) < len(target.time)
+    assert len(target.lc["psf"]["TESSmag"]) < len(target.time)
+    assert len(target.lc["psf"]["TESSmag_err"]) < len(target.time)
+    assert len(target.lc["psf"]["quality"]) < len(target.time)
+    assert len(target.lc["psf"]["bg_std"]) < len(target.time)
+    assert len(target.lc["psf"]["sun_distance"]) < len(target.time)
+
+    # Check the upper and lower errors are not nan
+    assert ~np.isnan(target.lc["psf"]["time_uerr"]).all()
+    assert ~np.isnan(target.lc["psf"]["time_lerr"]).all()
+
+    # Check n_cadences is > 1 (no binning was used)
+    assert np.all(target.lc["psf"]["n_cadences"] > 1)
+
+    # Check quality fraction is between 0 and 1
+    assert np.all(
+        np.logical_and(
+            np.round(target.lc["psf"]["quality_fraction"], 2) >= 0,
+            np.round(target.lc["psf"]["quality_fraction"], 2) <= 1,
+        )
+    )
+
+    # Check reduced chi-squared values are positives
+    assert np.all(target.lc["psf"]["red_chi2"][target.lc["psf"]["quality"] == 0] >= 0)
 
 
 def test_make_lc():
@@ -472,7 +530,7 @@ def test_make_lc():
     # Make TPF for asteroid 1998 YT6
     target = MovingTPF.from_name("1998 YT6", sector=6)
     target.make_tpf(bg_method="rolling")
-    target.make_lc(save=True, outdir="tests")
+    target.make_lc(method="aperture", save=True, outdir="tests")
 
     # Check the file exists
     assert os.path.exists("tests/tess-1998YT6-s0006-1-1-shape11x11_lc.fits")
@@ -480,33 +538,42 @@ def test_make_lc():
     # Open the file with astropy and check some attributes
     with fits.open("tests/tess-1998YT6-s0006-1-1-shape11x11_lc.fits") as hdul:
         # Check primary header
-        assert "BAD_BITS" in hdul[0].header.keys()
+        assert "BAD_BITS" in hdul[1].header.keys()
         assert hdul[0].header["PROCVER"].strip() == __version__
-        assert hdul[0].header["AP_TYPE"].strip() == "prf"
+        assert hdul[1].header["AP_TYPE"].strip() == "prf"
         assert hdul[0].header["BG_CORR"].strip() == "rolling"
         assert hdul[0].header["SL_CORR"].strip() == "n/a"
         assert hdul[0].header["VMAG"] > 0
         assert hdul[0].header["HMAG"] > 0
-        assert hdul[0].header["TESSMAG"] > 0
+        assert hdul[0].header["STO_ANG"] > 0
+        assert hdul[0].header["OBS_DIST"] > 0
+        assert hdul[0].header["SUN_DIST"] > 0
+        assert hdul[1].header["TESSMAG"] > 0
         assert hdul[0].header["TESSMAG0"] > 0
         assert "SPOCDATE" in hdul[0].header.keys()
 
         # Check columns in lightcurve HDU
         assert "TIME" in hdul[1].columns.names
-        assert "TIMECORR" in hdul[1].columns.names
-        assert "ORIGINAL_TIME" in hdul[1].columns.names
-        assert "ORIGINAL_TIMECORR" in hdul[1].columns.names
         assert "FLUX" in hdul[1].columns.names
         assert "FLUX_ERR" in hdul[1].columns.names
         assert "TESSMAG" in hdul[1].columns.names
         assert "TESSMAG_ERR" in hdul[1].columns.names
         assert "MOM_CENTR1" in hdul[1].columns.names
         assert "RA" in hdul[1].columns.names
-        assert "RA_PRED" in hdul[1].columns.names
-        assert "EPHEM1" in hdul[1].columns.names
+        assert "NPIX" in hdul[1].columns.names
+        assert "BKG_STD" in hdul[1].columns.names
 
-        # Check the UTC to TDB conversion has been applied.
-        assert (hdul[1].data["TIME"] != hdul[1].data["ORIGINAL_TIME"]).all()
+        # Check columns in extras HDU
+        assert "TIME" in hdul[2].columns.names
+        assert "TIMECORR" in hdul[2].columns.names
+        assert "ORIGINAL_TIME" in hdul[2].columns.names
+        assert "ORIGINAL_TIMECORR" in hdul[2].columns.names
+        assert "RA_PRED" in hdul[2].columns.names
+        assert "EPHEM1" in hdul[2].columns.names
+        assert "SUN_DISTANCE" in hdul[2].columns.names
+
+        # Check the barycentric time correction has been applied.
+        assert (hdul[2].data["TIME"] != hdul[2].data["ORIGINAL_TIME"]).all()
 
         # 1998 YT6 is a main-belt asteroid, ensure the orbital elements are physical:
         assert hdul[0].header["ORBECC"] >= 0 and hdul[0].header["ORBECC"] < 1
@@ -536,6 +603,124 @@ def test_make_lc():
     os.remove("tests/tess-1998YT6-s0006-1-1-shape11x11_lc.fits")
 
 
+def test_multiple_apertures():
+    # Initialise MovingTPF for 1980 VR1
+    target = MovingTPF.from_name("1980 VR1", sector=1, camera=1, ccd=1)
+
+    # Get data, do background correction and compute pixel quality mask
+    target.get_data()
+    target.reshape_data()
+    target.background_correction()
+    target.create_pixel_quality()
+
+    # Create three PRF apertures and extract a light curve for each
+    lc = {"aperture": []}
+    for thresh in [0.01, 0.05, 0.1]:
+        target.create_aperture(method="prf", threshold=thresh)
+        lc["aperture"].append(target._aperture_photometry())
+
+    # PSF photometry with no bad quality masking
+    lc["psf"] = target._psf_photometry(bad_spoc_bits="none")
+
+    # Create HDUList for TPF and LCF
+    target.tpf_hdulist = target._make_tpf_hdulist(
+        ap_masks=[lc["aperture"][i]["ap_mask"] for i in range(len(lc["aperture"]))],
+        ap_methods=[lc["aperture"][i]["ap_method"] for i in range(len(lc["aperture"]))],
+        ap_params=[lc["aperture"][i]["ap_param"] for i in range(len(lc["aperture"]))],
+    )
+    target.lc_hdulist = target._make_lc_hdulist(lc=lc)
+
+    # Save TPF and LCF
+    target._save_hdulist(file_type="tpf", outdir="tests")
+    target._save_hdulist(file_type="lc", outdir="tests")
+
+    # Check the files exist
+    assert os.path.exists("tests/tess-1980VR1-s0001-1-1-shape11x11-moving_tp.fits")
+    assert os.path.exists("tests/tess-1980VR1-s0001-1-1-shape11x11_lc.fits")
+
+    # Open the TPF with astropy and check properties
+    with fits.open("tests/tess-1980VR1-s0001-1-1-shape11x11-moving_tp.fits") as hdul:
+        assert hdul[1].name == "PIXELS"
+        assert hdul[2].name == "APERTURE0"
+        assert hdul[3].name == "APERTURE1"
+        assert hdul[4].name == "APERTURE2"
+        assert hdul[5].name == "EXTRAS"
+
+        # Check all aperture HDUs have the expected shape
+        assert (
+            hdul[2].data.shape
+            == hdul[3].data.shape
+            == hdul[4].data.shape
+            == target.shape
+        )
+
+        # Check the aperture methods and parameters in the primary header.
+        assert (
+            hdul[0].header["AP0_TYPE"]
+            == hdul[0].header["AP1_TYPE"]
+            == hdul[0].header["AP2_TYPE"]
+            == "prf"
+        )
+        assert hdul[0].header["AP0_PAR"] == 0.01
+        assert hdul[0].header["AP1_PAR"] == 0.05
+        assert hdul[0].header["AP2_PAR"] == 0.1
+
+    # Open the LCF with astropy and check properties
+    with fits.open("tests/tess-1980VR1-s0001-1-1-shape11x11_lc.fits") as hdul:
+        assert hdul[1].name == "LIGHTCURVE_AP0"
+        assert hdul[2].name == "LIGHTCURVE_AP1"
+        assert hdul[3].name == "LIGHTCURVE_AP2"
+        assert hdul[4].name == "LIGHTCURVE_PSF"
+        assert hdul[5].name == "EXTRAS"
+
+        # All HDUs should have the same length
+        # This is only true because we did not use data masking or binning when creating the PSF LC.
+        assert (
+            len(hdul[1].data)
+            == len(hdul[2].data)
+            == len(hdul[3].data)
+            == len(hdul[4].data)
+            == len(hdul[5].data)
+        )
+
+        # Time should be shared between all extensions.
+        # This is only true because we did not use data masking or binning when creating the PSF LC.
+        assert all(
+            (a == hdul[1].data["TIME"]).all()
+            for a in [
+                hdul[2].data["TIME"],
+                hdul[3].data["TIME"],
+                hdul[4].data["TIME"],
+                hdul[5].data["TIME"],
+            ]
+        )
+
+        # All aperture LCs should have the same columns
+        assert hdul[1].columns.names == hdul[2].columns.names == hdul[3].columns.names
+
+        # Observing geometry parameters should be in the PSF and EXTRAS extensions only
+        assert "STO_ANGLE" not in hdul[1].columns.names
+        assert "STO_ANGLE" not in hdul[2].columns.names
+        assert "STO_ANGLE" not in hdul[3].columns.names
+        assert "STO_ANGLE" in hdul[4].columns.names
+        assert "STO_ANGLE" in hdul[5].columns.names
+
+        # Check the aperture methods and parameters in the aperture photometry HDUs.
+        assert (
+            hdul[1].header["AP_TYPE"]
+            == hdul[2].header["AP_TYPE"]
+            == hdul[3].header["AP_TYPE"]
+            == "prf"
+        )
+        assert hdul[1].header["AP_PAR"] == 0.01
+        assert hdul[2].header["AP_PAR"] == 0.05
+        assert hdul[3].header["AP_PAR"] == 0.1
+
+    # Delete the files
+    os.remove("tests/tess-1980VR1-s0001-1-1-shape11x11-moving_tp.fits")
+    os.remove("tests/tess-1980VR1-s0001-1-1-shape11x11_lc.fits")
+
+
 def test_comet():
     """
     Check that tess_asteriods runs successfully for an example comet.
@@ -546,19 +731,22 @@ def test_comet():
     target.make_tpf(shape=(20, 20), bg_method="rolling", save=True, outdir="tests")
     target.make_lc(save=True, outdir="tests")
     target.animate_tpf(save=True, outdir="tests")
+    target.plot_lc(save=True, outdir="tests")
 
     # Check the files exist
     assert os.path.exists("tests/tess-C2016N6-s0007-2-1-shape20x20-moving_tp.fits")
     assert os.path.exists("tests/tess-C2016N6-s0007-2-1-shape20x20-moving_tp.gif")
     assert os.path.exists("tests/tess-C2016N6-s0007-2-1-shape20x20_lc.fits")
+    assert os.path.exists("tests/tess-C2016N6-s0007-2-1-shape20x20_lc.png")
 
     # Open the TPF with astropy and check header attributes
     with fits.open("tests/tess-C2016N6-s0007-2-1-shape20x20-moving_tp.fits") as hdul:
         # Check primary header
         assert hdul[0].header["OBJECT"].strip() == "C/2016 N6"
-        assert hdul[0].header["HMAG"] == 0
+        assert hdul[0].header["HMAG"] is None
 
     # Delete the files
     os.remove("tests/tess-C2016N6-s0007-2-1-shape20x20-moving_tp.fits")
     os.remove("tests/tess-C2016N6-s0007-2-1-shape20x20-moving_tp.gif")
     os.remove("tests/tess-C2016N6-s0007-2-1-shape20x20_lc.fits")
+    os.remove("tests/tess-C2016N6-s0007-2-1-shape20x20_lc.png")

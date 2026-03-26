@@ -1840,6 +1840,26 @@ uncertainties = ">=3.1.4"
 urllib3 = {version = ">=1.23", markers = "python_version >= \"3.8\" and python_version < \"4.0\""}
 
 [[package]]
+name = "linkify-it-py"
+version = "2.0.3"
+description = "Links recognition library with FULL unicode support."
+optional = false
+python-versions = ">=3.7"
+files = [
+    {file = "linkify-it-py-2.0.3.tar.gz", hash = "sha256:68cda27e162e9215c17d786649d1da0021a451bdc436ef9e0fa0ba5234b9b048"},
+    {file = "linkify_it_py-2.0.3-py3-none-any.whl", hash = "sha256:6bcbc417b0ac14323382aef5c5192c0075bf8a9d6b41820a2b66371eac6b6d79"},
+]
+
+[package.dependencies]
+uc-micro-py = "*"
+
+[package.extras]
+benchmark = ["pytest", "pytest-benchmark"]
+dev = ["black", "flake8", "isort", "pre-commit", "pyproject-flake8"]
+doc = ["myst-parser", "sphinx", "sphinx-book-theme"]
+test = ["coverage", "pytest", "pytest-cov"]
+
+[[package]]
 name = "lkprf"
 version = "1.1.1"
 description = ""
@@ -1903,6 +1923,8 @@ files = [
 ]
 
 [package.dependencies]
+linkify-it-py = {version = ">=1,<3", optional = true, markers = "extra == \"linkify\""}
+mdit-py-plugins = {version = "*", optional = true, markers = "extra == \"plugins\""}
 mdurl = ">=0.1,<1.0"
 
 [package.extras]
@@ -2103,6 +2125,76 @@ python-versions = ">=3, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, <4"
 files = [
     {file = "memoization-0.4.0.tar.gz", hash = "sha256:fde5e7cd060ef45b135e0310cfec17b2029dc472ccb5bbbbb42a503d4538a135"},
 ]
+
+[[package]]
+name = "memray"
+version = "1.19.1"
+description = "A memory profiler for Python applications"
+optional = false
+python-versions = ">=3.7.0"
+files = [
+    {file = "memray-1.19.1-cp310-cp310-macosx_10_14_x86_64.whl", hash = "sha256:64f226ebf287cb8815069f3a5cbb5823f9c20ef65ea684b1601a7433662967fe"},
+    {file = "memray-1.19.1-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:8f981fd89bda1de0a29b628447672945e40076fa96848f74510f02bf9069a8b7"},
+    {file = "memray-1.19.1-cp310-cp310-manylinux2014_i686.manylinux_2_17_i686.whl", hash = "sha256:bd2519ab3eb2114ae299277671e754c38b808342e8161d4aeee138d335f43ea0"},
+    {file = "memray-1.19.1-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:90c77eeebda3dbce527b3436087c08f2bee772837ca86d5f906d4f8abc6297b8"},
+    {file = "memray-1.19.1-cp310-cp310-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:bb9bb9b6bae11353d6cab0eb1199dd86a06d472dfaa4f7c92756dff1c40bf080"},
+    {file = "memray-1.19.1-cp310-cp310-musllinux_1_2_x86_64.whl", hash = "sha256:5469d48c6f9799d3061115d5f05401432a232551d778a3be129b74ff1cf3d91e"},
+    {file = "memray-1.19.1-cp311-cp311-macosx_10_14_x86_64.whl", hash = "sha256:2cb5026aede2805215edc442519d85ecf0604e98bd1d9ef6be060004547f6688"},
+    {file = "memray-1.19.1-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:e2eb057b3e9545a1bc90ca71911834bde019f66d7e5306729abce3478a23855b"},
+    {file = "memray-1.19.1-cp311-cp311-manylinux2014_i686.manylinux_2_17_i686.whl", hash = "sha256:004588fbf0ac91fb15d58e09b16c5fc28644ee48893b04dfcd28338ae56e378d"},
+    {file = "memray-1.19.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:548cb205ef856f546275754abc1c5f7f6aafac427c247bb4581791eaaa47a770"},
+    {file = "memray-1.19.1-cp311-cp311-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:b53dfb11f22d390a3d58cfee59eef8c2385bcc3cff5e7f79c80fa5952bc224a4"},
+    {file = "memray-1.19.1-cp311-cp311-musllinux_1_2_x86_64.whl", hash = "sha256:464a2705c601ab2ff59d26c99345965a33bcd98065877a0a1884d9a17745ccd1"},
+    {file = "memray-1.19.1-cp312-cp312-macosx_10_14_x86_64.whl", hash = "sha256:57b0430e4800b8cbc38e1f529ad7af959cc96386e00773c8af57c46eddb15ecd"},
+    {file = "memray-1.19.1-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:595414e753a0152282974b954827aeaf552dc02f47ed16a2743821ed461b6c51"},
+    {file = "memray-1.19.1-cp312-cp312-manylinux2014_i686.manylinux_2_17_i686.whl", hash = "sha256:ead57c4be9ea89b78d8ce2017f8f3e28f552fc2279cf5d24bf75d70bdfe39ca7"},
+    {file = "memray-1.19.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:41d829191287a995eea8b832fe7c8de243cf9e5d32d53169952695c7210e3a6b"},
+    {file = "memray-1.19.1-cp312-cp312-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:5855a9c3f3cfcf8ef01151514332535756b5d7be17bdba84016b0ca57d86f7f8"},
+    {file = "memray-1.19.1-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:216918a42abdd3c18c4771862584feda3a24bf7205db6f000a41be9ddc1c98b4"},
+    {file = "memray-1.19.1-cp313-cp313-macosx_10_14_x86_64.whl", hash = "sha256:56b20156c2754762ccfcfa03fd88ce33ecd712aacd302ef099a871b3197fe4a2"},
+    {file = "memray-1.19.1-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:e9d93995a91a8383fda95a1f7a15247aca2abd2f80f7f7c7ff56b3d89a5d7893"},
+    {file = "memray-1.19.1-cp313-cp313-manylinux2014_i686.manylinux_2_17_i686.whl", hash = "sha256:500956020d245ad3440cc2fae06c1d781f339e30f8d58654bc5ae9f51f999fab"},
+    {file = "memray-1.19.1-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:9770b6046a8b7d7bb982c2cefb324a60a0ee7cd7c35c58c0df058355a9a54676"},
+    {file = "memray-1.19.1-cp313-cp313-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:89593bfec1924aff4571e7bb00066b1cd832a828d701b0380009d790139aa814"},
+    {file = "memray-1.19.1-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:5dd00e0b4f5820f7a793691c0faeb15e4fbb5472198184605c29d0a961355741"},
+    {file = "memray-1.19.1-cp314-cp314-macosx_10_14_x86_64.whl", hash = "sha256:b202f1d96211d73712f5db8281c437dcbbd9cc91e520ca44b8406466b9672624"},
+    {file = "memray-1.19.1-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:f1a99cbb0b413a945e07529e521c7441cb46e4d5e6868dd810cbdaa80af0b74c"},
+    {file = "memray-1.19.1-cp314-cp314-manylinux2014_i686.manylinux_2_17_i686.whl", hash = "sha256:c48461e7a8ba0b12ae740316e41564e18db2533ebeb1a093b2c8232d9c7c2653"},
+    {file = "memray-1.19.1-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:265812e729c90a9240d6a23dfa89d8bea11cb67d37a1411f7a690948584ff024"},
+    {file = "memray-1.19.1-cp314-cp314-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:808eb35fa012fa8e25582e3c9b76d9f0471e87776c7cd86e6c149da34fed22ed"},
+    {file = "memray-1.19.1-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:e4b33fa1b6e8619e589882b44e6bdce0ad51d8bea2dd24f7afae6efcfcd8ffa8"},
+    {file = "memray-1.19.1-cp314-cp314t-macosx_10_14_x86_64.whl", hash = "sha256:e905d04e337e1482af988f349b1062ec330408bf1d8e5b0cfe8c0c7b47959692"},
+    {file = "memray-1.19.1-cp314-cp314t-macosx_11_0_arm64.whl", hash = "sha256:9fa0d8d8df8a0cad97e934dcd1cb698af00ffb10cd79277907c2cf97212f0bd9"},
+    {file = "memray-1.19.1-cp314-cp314t-manylinux2014_i686.manylinux_2_17_i686.whl", hash = "sha256:2fe3886eef669017810782ce63b1cdf8a426f07a27ea6a9f73d9dc3e5c448b0b"},
+    {file = "memray-1.19.1-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:f7238113251d325da2d405b067ec180842b93a7fb10ff06fb3f7c261225b33ae"},
+    {file = "memray-1.19.1-cp314-cp314t-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:334754a0ad5664a703516307772a4555ffdc616586168b28efd31e8862a6cdb1"},
+    {file = "memray-1.19.1-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:6a193cc20bbe60eccee8c9b4d9eb78ccd69a3248f0291d5d1a7fdda62aa19b53"},
+    {file = "memray-1.19.1-cp38-cp38-macosx_10_14_x86_64.whl", hash = "sha256:427af714758c98d08e86fc93c7ccdf0bb96a0bb355fccb7624ef6700fd87d4ab"},
+    {file = "memray-1.19.1-cp38-cp38-macosx_11_0_arm64.whl", hash = "sha256:c459257314d33207709dde136be74d8e37b102eac38dd5649f76ef946c4efd37"},
+    {file = "memray-1.19.1-cp38-cp38-manylinux2014_i686.manylinux_2_17_i686.whl", hash = "sha256:ff5cabd4ca6672c09e1f22ab95b95b845e94f41fbd4b17021a30603705636dbc"},
+    {file = "memray-1.19.1-cp38-cp38-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:142482bb2fc0d41fb5a221de51f1fcc6d80b4421d2d7760c8f8e847600338640"},
+    {file = "memray-1.19.1-cp38-cp38-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:1af1e95ec4b2e651452ba54cc7bb261c054ec18bc940b230e3a2a5c981079495"},
+    {file = "memray-1.19.1-cp38-cp38-musllinux_1_2_x86_64.whl", hash = "sha256:1c66e535bd2382a79a1769d3ae591aaf14d5695ec0a1de38d65a6f904f1c4b17"},
+    {file = "memray-1.19.1-cp39-cp39-macosx_10_14_x86_64.whl", hash = "sha256:5afc80c460d5a317c01c9beeb5fbef98227b2aff47d7e37e504d5a7b8cc3f318"},
+    {file = "memray-1.19.1-cp39-cp39-macosx_11_0_arm64.whl", hash = "sha256:a8fb301bc6671f01fc5d453bcd3446f345a1e8753df1bf3c17dc42e23b13e675"},
+    {file = "memray-1.19.1-cp39-cp39-manylinux2014_i686.manylinux_2_17_i686.whl", hash = "sha256:5135e8d79d6a0590d0794be914c2ecf751afb6a1618f10db8225e71235719428"},
+    {file = "memray-1.19.1-cp39-cp39-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:2d42f8c8d6e304213a93f3776b23a0dead4eced293e4aed5df471551a8ca6b2b"},
+    {file = "memray-1.19.1-cp39-cp39-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:1159da44ff7cb3cd67919684e07bc3a65228d208cfd95757ad5b5736813bc07b"},
+    {file = "memray-1.19.1-cp39-cp39-musllinux_1_2_x86_64.whl", hash = "sha256:2302d50d0d3af992940cc372dd0cbea63dd0eeffc36dee685bffeab6466d4d73"},
+    {file = "memray-1.19.1.tar.gz", hash = "sha256:7fcf306eae2c00144920b01913f42fa7f235af7a80fa3226ab124672a5cb1d8f"},
+]
+
+[package.dependencies]
+jinja2 = ">=2.9"
+rich = ">=11.2.0"
+textual = ">=0.41.0"
+
+[package.extras]
+benchmark = ["asv"]
+dev = ["Cython", "IPython", "asv", "black", "bump2version", "check-manifest", "flake8", "furo", "greenlet", "ipython", "isort", "mypy", "packaging", "pytest", "pytest-cov", "pytest-textual-snapshot", "setuptools", "sphinx", "sphinx-argparse", "textual (>=0.43,!=0.65.2,!=0.66)", "towncrier"]
+docs = ["IPython", "bump2version", "furo", "sphinx", "sphinx-argparse", "towncrier"]
+lint = ["black", "check-manifest", "flake8", "isort", "mypy"]
+test = ["Cython", "greenlet", "ipython", "packaging", "pytest", "pytest-cov", "pytest-textual-snapshot", "setuptools", "textual (>=0.43,!=0.65.2,!=0.66)"]
 
 [[package]]
 name = "mergedeep"
@@ -2774,17 +2866,18 @@ files = [
 
 [[package]]
 name = "patsy"
-version = "1.0.1"
+version = "0.5.6"
 description = "A Python package for describing statistical models and for building design matrices."
 optional = false
-python-versions = ">=3.6"
+python-versions = "*"
 files = [
-    {file = "patsy-1.0.1-py2.py3-none-any.whl", hash = "sha256:751fb38f9e97e62312e921a1954b81e1bb2bcda4f5eeabaf94db251ee791509c"},
-    {file = "patsy-1.0.1.tar.gz", hash = "sha256:e786a9391eec818c054e359b737bbce692f051aee4c661f4141cc88fb459c0c4"},
+    {file = "patsy-0.5.6-py2.py3-none-any.whl", hash = "sha256:19056886fd8fa71863fa32f0eb090267f21fb74be00f19f5c70b2e9d76c883c6"},
+    {file = "patsy-0.5.6.tar.gz", hash = "sha256:95c6d47a7222535f84bff7f63d7303f2e297747a598db89cf5c67f0c0c7d2cdb"},
 ]
 
 [package.dependencies]
 numpy = ">=1.4"
+six = "*"
 
 [package.extras]
 test = ["pytest", "pytest-cov", "scipy"]
@@ -3207,7 +3300,27 @@ pygments = ">=2.7.2"
 tomli = {version = ">=1", markers = "python_version < \"3.11\""}
 
 [package.extras]
-dev = ["argcomplete", "attrs (>=19.2)", "hypothesis (>=3.56)", "mock", "requests", "setuptools", "xmlschema"]
+dev = ["argcomplete", "attrs (>=19.2)", "hypothesis (>=3.56)", "mock", "pygments (>=2.7.2)", "requests", "setuptools", "xmlschema"]
+
+[[package]]
+name = "pytest-memray"
+version = "1.8.0"
+description = "A simple plugin to use with pytest"
+optional = false
+python-versions = ">=3.8"
+files = [
+    {file = "pytest_memray-1.8.0-py3-none-any.whl", hash = "sha256:44da9fe0d98541abf4cc76acea6e4a9c525b3c8e604655e5537705f336c9b875"},
+    {file = "pytest_memray-1.8.0.tar.gz", hash = "sha256:c0c706ef81941a7aa7064f2b3b8b5cdc0cea72b5277c6a6a09b113ca9ab30bdb"},
+]
+
+[package.dependencies]
+memray = ">=1.12"
+pytest = ">=7.2"
+
+[package.extras]
+docs = ["furo (>=2022.12.7)", "sphinx (>=6.1.3)", "sphinx-argparse (>=0.4)", "sphinx-inline-tabs (>=2022.1.2b11)", "sphinxcontrib-programoutput (>=0.17)", "towncrier (>=22.12)"]
+lint = ["black (==25.1.0)", "isort (==6.0.1)", "mypy (==1.17.1)", "ruff (==0.12.7)"]
+test = ["anyio (>=4.4.0)", "covdefaults (>=2.2.2)", "coverage (>=7.0.5)", "flaky (>=3.7)", "pytest (>=7.2)", "pytest-xdist (>=3.1)"]
 
 [[package]]
 name = "python-dateutil"
@@ -3913,13 +4026,13 @@ tqdm = ">=4.67.1,<5.0.0"
 
 [[package]]
 name = "tess-ephem"
-version = "0.6.0"
+version = "0.6.4"
 description = "Where are Solar System objects located in TESS FFI data?"
 optional = false
 python-versions = "<4.0,>=3.9"
 files = [
-    {file = "tess_ephem-0.6.0-py3-none-any.whl", hash = "sha256:48a120037dca351ed29396c1f0fb2a9c3c0289de3ecdb224e0e014e7617ef82a"},
-    {file = "tess_ephem-0.6.0.tar.gz", hash = "sha256:e79076219b6b711e74a7e923cba99c8cc3aa02a7ec7ff39dd126d60655d1b789"},
+    {file = "tess_ephem-0.6.4-py3-none-any.whl", hash = "sha256:0b8d5ff58fcc1fb3b903d021b24002107eac3e0e7af674145439fea9c9295370"},
+    {file = "tess_ephem-0.6.4.tar.gz", hash = "sha256:ace306f6f5715fc32548e7f4bf0bbb8e20caea3ac0207a03b2cba831d9bc5096"},
 ]
 
 [package.dependencies]
@@ -3928,7 +4041,7 @@ astroquery = ">=0.4.9,<0.5.0"
 numpy = ">=1.23.0,<2.0.0"
 pandas = ">=2.0,<3.0"
 scipy = ">=1.9.0,<2.0.0"
-tesswcs = ">=1.6.1,<2.0.0"
+tesswcs = ">=1.7.0,<2.0.0"
 
 [[package]]
 name = "tesscube"
@@ -3954,13 +4067,13 @@ rich = ">=13.7.0,<14.0.0"
 
 [[package]]
 name = "tesswcs"
-version = "1.6.3"
+version = "1.7.0"
 description = ""
 optional = false
 python-versions = "<4.0,>=3.9"
 files = [
-    {file = "tesswcs-1.6.3-py3-none-any.whl", hash = "sha256:673b375eced75a3f7273e6f87e7ad35f43e46e0af6d270bd0df51503aee49edc"},
-    {file = "tesswcs-1.6.3.tar.gz", hash = "sha256:cc4be22df1d4158dd7428e9f5eaaae30f516ef105e2fa20524213dcd4c88e085"},
+    {file = "tesswcs-1.7.0-py3-none-any.whl", hash = "sha256:7bddf16818f1342378b85f559e700ec037500f5ea3ddf923b50d2987d85a17e5"},
+    {file = "tesswcs-1.7.0.tar.gz", hash = "sha256:b330ada611e1c2c9d8b3af6ae89da0cc2e2922bad9a38fdf1beb9c96ea1d29ea"},
 ]
 
 [package.dependencies]
@@ -3972,6 +4085,26 @@ tqdm = ">=4.66.1"
 
 [package.extras]
 database = ["tesscube (>=1.2.0)"]
+
+[[package]]
+name = "textual"
+version = "4.0.0"
+description = "Modern Text User Interface framework"
+optional = false
+python-versions = "<4.0.0,>=3.8.1"
+files = [
+    {file = "textual-4.0.0-py3-none-any.whl", hash = "sha256:214051640f890676a670aa7d29cd2a37d27cfe6b2cf866e9d5abc3b6c89c5800"},
+    {file = "textual-4.0.0.tar.gz", hash = "sha256:1cab4ea3cfc0e47ae773405cdd6bc2a17ed76ff7b648379ac8017ea89c5ad28c"},
+]
+
+[package.dependencies]
+markdown-it-py = {version = ">=2.1.0", extras = ["linkify", "plugins"]}
+platformdirs = ">=3.6.0,<5"
+rich = ">=13.3.3"
+typing-extensions = ">=4.4.0,<5.0.0"
+
+[package.extras]
+syntax = ["tree-sitter (>=0.23.0)", "tree-sitter-bash (>=0.23.0)", "tree-sitter-css (>=0.23.0)", "tree-sitter-go (>=0.23.0)", "tree-sitter-html (>=0.23.0)", "tree-sitter-java (>=0.23.0)", "tree-sitter-javascript (>=0.23.0)", "tree-sitter-json (>=0.24.0)", "tree-sitter-markdown (>=0.3.0)", "tree-sitter-python (>=0.23.0)", "tree-sitter-regex (>=0.24.0)", "tree-sitter-rust (>=0.23.0,<=0.23.2)", "tree-sitter-sql (>=0.3.0,<0.3.8)", "tree-sitter-toml (>=0.6.0)", "tree-sitter-xml (>=0.7.0)", "tree-sitter-yaml (>=0.6.0)"]
 
 [[package]]
 name = "threadpoolctl"
@@ -4121,6 +4254,20 @@ files = [
     {file = "tzdata-2025.2-py2.py3-none-any.whl", hash = "sha256:1a403fada01ff9221ca8044d701868fa132215d84beb92242d9acd2147f667a8"},
     {file = "tzdata-2025.2.tar.gz", hash = "sha256:b60a638fcc0daffadf82fe0f57e53d06bdec2f36c4df66280ae79bce6bd6f2b9"},
 ]
+
+[[package]]
+name = "uc-micro-py"
+version = "1.0.3"
+description = "Micro subset of unicode data files for linkify-it-py projects."
+optional = false
+python-versions = ">=3.7"
+files = [
+    {file = "uc-micro-py-1.0.3.tar.gz", hash = "sha256:d321b92cff673ec58027c04015fcaa8bb1e005478643ff4a500882eaab88c48a"},
+    {file = "uc_micro_py-1.0.3-py3-none-any.whl", hash = "sha256:db1dffff340817673d7b466ec86114a9dc0e9d4d9b5ba229d9d60e5c12600cd5"},
+]
+
+[package.extras]
+test = ["coverage", "pytest", "pytest-cov"]
 
 [[package]]
 name = "uncertainties"
@@ -4475,4 +4622,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.9, <3.13"
-content-hash = "d4171e4bdfd07d6509d895ef867400cf164a264014ec2f86418005354fb7ed5b"
+content-hash = "9bf7b5bd04813070aea0b1cf98e129731dd6c19800dc02c814149933b8cb0be2"

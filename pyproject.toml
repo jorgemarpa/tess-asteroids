@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "tess-asteroids"
-version = "1.2.4"
+version = "1.5.0"
 description = "Create TPFs and LCs for solar system asteroids observed by NASA's TESS mission."
 license = "MIT"
 authors = ["Amy Tuson <amy.l.tuson@nasa.gov>",
@@ -11,7 +11,7 @@ packages = [{include = "tess_asteroids", from = "src"}]
 
 [tool.poetry.dependencies]
 python = ">=3.9, <3.13"
-tess-ephem = "^0.6.0"
+tess-ephem = "^0.6.4"
 tesscube = "^1.2"
 numpy = "^1.26.4"
 pandas = "^2.0"
@@ -21,7 +21,8 @@ matplotlib = "^3.9"
 lkspacecraft = "^1.0.5"
 fbpca = "^1.0"
 tqdm = "^4.67.1"
-tesswcs = "^1.6.1"
+tesswcs = "^1.7.0"
+patsy = "^0.5.6"
 tess-backml = "^0.3.1"
 
 [tool.poetry.group.dev]
@@ -36,6 +37,7 @@ mypy = "^1.11.2"
 lightkurve = "^2.5.0"
 mkdocstrings = {extras = ["python"], version = "^0.29.1"}
 mkdocs-jupyter = "^0.25.1"
+pytest-memray = "^1.8.0"
 
 [build-system]
 requires = ["poetry-core"]

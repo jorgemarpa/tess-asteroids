@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from astropy.coordinates import SkyCoord
+from astropy.io.fits import BinTableHDU
 from astropy.visualization import simple_norm
 from astropy.wcs.utils import fit_wcs_from_points
 from matplotlib import animation, colors, patches
@@ -29,6 +30,8 @@ def calculate_TESSmag(
     This function assumes that the background flux has been perfectly removed, i.e. the only flux is that
     from the target. It can account for flux outside of the aperture via `flux_fraction`.
 
+    This function returns the symmetric errorbar, as well as asymmetric errorbars.
+
     Parameters
     ----------
     flux : float or ndarray
@@ -43,7 +46,11 @@ def calculate_TESSmag(
     mag : float or ndarray
         TESS magnitude.
     mag_err : float or ndarray
-        Error on TESS magnitude.
+        Symmetric error on TESS magnitude.
+    mag_uerr : float or ndarray
+        Upper error on TESS magnitude.
+    mag_lerr : float or ndarray
+        Lower error on TESS magnitude.
     """
 
     # Check that all values of flux fraction are within allowed range:
@@ -69,13 +76,30 @@ def calculate_TESSmag(
     flux /= flux_fraction
     flux_err /= flux_fraction
 
-    # Calculate magnitude and error.
+    # Calculate magnitude and symmetric error.
     mag = -2.5 * np.log10(flux) + TESSmag_zero_point
     mag_err = np.sqrt(
         (TESSmag_zero_point_err) ** 2 + ((2.5 / np.log(10)) * (flux_err / flux)) ** 2
     )
 
-    return mag, mag_err
+    # Calculate asymmetric errors (upper error is undefined if flux - flux_err <= 0)
+    # Catch warnings that arise if flux - flux_err <= 0
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="invalid value encountered in log10",
+            category=RuntimeWarning,
+        )
+        mag_uerr = np.sqrt(
+            ((-2.5 * np.log10(flux - flux_err) + TESSmag_zero_point) - mag) ** 2
+            + (TESSmag_zero_point_err) ** 2
+        )
+    mag_lerr = np.sqrt(
+        (mag - (-2.5 * np.log10(flux + flux_err) + TESSmag_zero_point)) ** 2
+        + (TESSmag_zero_point_err) ** 2
+    )
+
+    return mag, mag_err, mag_uerr, mag_lerr
 
 
 def target_observability(
@@ -83,7 +107,8 @@ def target_observability(
 ):
     """
     Determine if a target has been observed by TESS and, if so, during which sector/camera/CCD. This function will also
-    give an estimate of the length of time, in days, for which the target was observed on each sector/camera/CCD.
+    give an estimate of the length of time, in days, for which the target was observed on each sector/camera/CCD and its
+    predicted average visual magnitude.
 
     Parameters
     ----------
@@ -103,6 +128,7 @@ def target_observability(
 
         - 'sector', 'camera', 'ccd': sector/camera/CCD target was observed in.
         - 'dur': approximate duration for which target was observed in this sector/camera/CCD, in days.
+        - 'vmag': average predicted visual magnitude of the target.
     df_ephem : DataFrame
         If `return_ephem` = True, the ephemeris will also be returned. This includes the pixel 'row' and 'column'
         of the target over time.
@@ -110,14 +136,14 @@ def target_observability(
 
     df_ephem = ephem(target, sector=sector)
 
-    obs = {"sector": [], "camera": [], "ccd": [], "dur": []}  # type: dict
+    obs = {"sector": [], "camera": [], "ccd": [], "dur": [], "vmag": []}  # type: dict
     if len(df_ephem) != 0:
         unique_combinations = df_ephem[["sector", "camera", "ccd"]].drop_duplicates()
         for _, combo in unique_combinations.iterrows():
             obs["sector"].append(combo["sector"])
             obs["camera"].append(combo["camera"])
             obs["ccd"].append(combo["ccd"])
-            time = df_ephem[
+            df_combo = df_ephem[
                 np.logical_and(
                     df_ephem["sector"] == obs["sector"][-1],
                     np.logical_and(
@@ -125,8 +151,11 @@ def target_observability(
                         df_ephem["ccd"] == obs["ccd"][-1],
                     ),
                 )
-            ].index
-            obs["dur"].append((np.nanmax(time) - np.nanmin(time)).value)
+            ]
+            obs["dur"].append(
+                (np.nanmax(df_combo.index) - np.nanmin(df_combo.index)).value
+            )
+            obs["vmag"].append(np.nanmean(df_combo["vmag"]))
 
     if return_ephem:
         return pd.DataFrame(obs), df_ephem
@@ -328,6 +357,10 @@ def make_wcs_header(shape: Tuple[int, int]):
     # Turn WCS into header
     wcs_header = wcs.to_header(relax=True)
 
+    # Remove keywords that we do not want in TPF
+    for keyword in ["RADESYS", "MJDREF", "LONPOLE", "LATPOLE"]:
+        wcs_header.remove(keyword)
+
     # Add the physical WCS keywords
     wcs_header.set("CRVAL1P", corner[1], "value at reference CCD column")
     wcs_header.set("CRVAL2P", corner[0], "value at reference CCD row")
@@ -348,6 +381,35 @@ def make_wcs_header(shape: Tuple[int, int]):
     wcs_header.set("CDELT2P", 1.0, "physical WCS axis 2 step")
 
     return wcs_header
+
+
+def add_column_header_comments(table_hdu: BinTableHDU):
+    """
+    Add comments to FITS column header keywords (e.g. TTYPE, TFORM, TUNIT)
+    in Binary table HDU.
+
+    Parameters
+    ----------
+    table_hdu : astropy.io.fits.BinTableHDU
+        The binary table HDU to which header comments will be added.
+    """
+
+    # Define comment for each column keyword
+    keywords = {
+        "TTYPE": "column name",
+        "TFORM": "column format",
+        "TUNIT": "column unit",
+        "TNULL": "column null value",
+        "TDISP": "column display format",
+        "TDIM": "column dimensions",
+    }
+
+    # Add comments to header keywords in table HDU
+    for i in range(1, table_hdu.header["TFIELDS"] + 1):
+        for keyword, comment in keywords.items():
+            keyword_index = f"{keyword}{i}"
+            if keyword_index in table_hdu.header:
+                table_hdu.header.comments[keyword_index] = comment
 
 
 def plot_img_aperture(
@@ -546,7 +608,12 @@ def animate_cube(
     if cnorm:
         norm = simple_norm(cube.ravel(), "asinh", percent=98)
     elif vmin is None and vmax is None:
-        vmin, vmax = np.nanpercentile(cube, [3, 97])
+        # Ignore warning that arises from all NaN values.
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", message="All-NaN slice encountered", category=RuntimeWarning
+            )
+            vmin, vmax = np.nanpercentile(cube, [3, 97])
 
     # If corner is list of two ints, repeat for all times.
     if len(corner) == 2:
@@ -600,3 +667,48 @@ def animate_cube(
     )
 
     return ani
+
+
+def create_bad_bitmask(
+    bad_bits: Union[list[int], str], default_bad_bits: list[int] = []
+):
+    """
+    Convert a list of bits into an integer bitmask.
+
+    This function translates 1-indexed bit positions into a single bitwise
+    value. This value can be used with a bitwise AND operator to identify
+    data points containing specific quality flags.
+
+    Parameters
+    ----------
+    bad_bits : list or str
+        Defines bits corresponding to bad quality data. Can be one of:
+
+            - "default" - mask bits defined by `default_bad_bits`.
+            - "all" - mask all data with a quality flag.
+            - "none" - mask no data.
+            - list - mask custom bits provided in list.
+    default_bad_bits : list
+        A list of 1-indexed bit positions used if `bad_bits` is
+        set to 'default'.
+
+    Returns
+    -------
+    bad_bitmask : int or str
+        The computed integer bitmask or the string "all".
+    """
+    if bad_bits == "default":
+        bad_bits = default_bad_bits
+    elif bad_bits == "none":
+        bad_bits = []
+    elif not isinstance(bad_bits, list) and bad_bits != "all":
+        raise ValueError(
+            "`bad_bits` must be either one of ['default', 'all', 'none'] or a custom list of bad quality bits."
+        )
+    if bad_bits != "all":
+        bad_bitmask = 0
+        for bit in bad_bits:
+            bad_bitmask += 2 ** (bit - 1)  # type: ignore
+        return bad_bitmask
+    else:
+        return bad_bits  # type: ignore

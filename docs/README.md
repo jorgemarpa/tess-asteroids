@@ -3,6 +3,7 @@
 [![ruff](https://github.com/altuson/tess-asteroids/actions/workflows/ruff.yml/badge.svg)](https://github.com/altuson/tess-asteroids/actions/workflows/ruff.yml)
 [![PyPI](https://img.shields.io/pypi/v/tess-asteroids.svg)](https://pypi.python.org/pypi/tess-asteroids)
 [![Generic badge](https://img.shields.io/badge/documentation-live-blue.svg)](https://altuson.github.io/tess-asteroids/)
+[![DOI](https://zenodo.org/badge/848357424.svg)](https://doi.org/10.5281/zenodo.15882329)
 
 # tess-asteroids
 
@@ -12,9 +13,16 @@ See the full documentation, including tutorials, [here](https://altuson.github.i
 
 ## Installation
 
-The easiest way to install `tess-asteroids` and all of its dependencies is to run the following command in a terminal window:
+The easiest way to install `tess-asteroids` and all of its dependencies is to use `pip`. We recommend you do this installation in a new [virtual environment](https://docs.conda.io/projects/conda/en/latest/user-guide/tasks/manage-environments.html) by running the following commands in a terminal window:
 
 ```bash
+# Create new environment called tess-asteroids with Python 3.10
+conda create -n tess-asteroids python=3.10
+
+# Activate environment
+conda activate tess-asteroids
+
+# Install tess-asteroids (latest stable version)
 pip install tess-asteroids
 ```
 
@@ -40,9 +48,9 @@ target.make_lc(save=True)
 ```
 
 <p align="center">
-  <img alt="Example TPF" src="https://github.com/altuson/tess-asteroids/blob/main/docs/tess-1980VR1-s0001-1-1-shape11x11-moving_tp.gif?raw=true" width="43%">
+  <img alt="Example TPF" src="https://github.com/altuson/tess-asteroids/blob/main/docs/tess-1980VR1-s0001-1-1-shape11x11-moving_tp.gif?raw=true" width="35%">
 &nbsp; &nbsp; &nbsp; &nbsp;
-  <img alt="Example LC" src="https://github.com/altuson/tess-asteroids/blob/main/docs/tess-1980VR1-s0001-1-1-shape11x11_lc.png?raw=true" width="52%">
+  <img alt="Example LC" src="https://github.com/altuson/tess-asteroids/blob/main/docs/tess-1980VR1-s0001-1-1-shape11x11_lc.png?raw=true" width="55%">
 </p>
 
 ## Tutorial
@@ -103,7 +111,7 @@ ephem = pd.DataFrame({
         })
 
 # Initialise MovingTPF
-target = MovingTPF("example", ephem, time_scale = "tdb")
+target = MovingTPF("example", ephem, barycentric=False)
 
 # Make TPF, but do not save to file
 target.make_tpf()
@@ -111,7 +119,7 @@ target.make_tpf()
 
 A few things to note about the format of the ephemeris:
 
-- `time` must have units JD - 2457000. See explanation of `time_scale` [below](https://github.com/altuson/tess-asteroids?tab=readme-ov-file#time-scales).
+- `time` must have format (JD - 2457000) in the TDB scale. See explanation of the `barycentric` parameter [below](https://github.com/altuson/tess-asteroids?tab=readme-ov-file#time).
 - `sector`, `camera`, `ccd` must each have one unique value.
 - `column`, `row` must be one-indexed, where the lower left pixel of the FFI has value (1,1).
 
@@ -132,9 +140,13 @@ target.make_tpf()
 target.animate_tpf(save=True)
 ```
 
+<p align="center">
+  <img alt="Example TPF" src="https://github.com/altuson/tess-asteroids/blob/main/docs/tess-1998YT6-s0006-1-1-shape11x11-moving_tp.gif?raw=true" width="60%">
+</p>
+
 ### Making a LC
 
-You can extract a LC from the TPF, using aperture photometry, as follows:
+You can extract a LC from the TPF using aperture and/or PSF photometry. For example:
 
 ```python
 from tess_asteroids import MovingTPF
@@ -149,12 +161,36 @@ target.make_tpf(save=True)
 target.make_lc(save=True)
 ```
 
-The `make_lc()` function extracts the lightcurve, creates a quality mask and optionally saves the LCF. There are a few optional parameters in the `make_lc()` function. This includes:
+The `make_lc()` function extracts the lightcurve, creates quality flags and optionally saves the LCF. There are a few optional parameters in the `make_lc()` function. This includes:
 
-- `method` defines the method used to perform photometry. Default: `aperture`.
+- `method` defines the method used to perform photometry. Default: `all` (creates aperture and PSF lightcurve).
 - `save` determines whether or not the LCF will be saved as a FITS file. Default: `False`.
 - `outdir` is the directory where the LCF will be saved. Note, the directory is not automatically created.
 - `file_name` is the name the LCF will be saved with. If one is not given, a default name will be generated.
+
+### Plotting the LC
+
+`plot_lc()` is a built-in helper function to plot the lightcurve:
+
+```python
+from tess_asteroids import MovingTPF
+
+# Initialise MovingTPF for asteroid 1998 YT6 in TESS sector 6
+target = MovingTPF.from_name("1998 YT6", sector=6)
+
+# Make TPF, but do not save to file
+target.make_tpf()
+
+# Make LC, but do not save to file
+target.make_lc()
+
+# Plot the LC and save to file (tess-1998YT6-s0006-1-1-shape11x11_lc.png)
+target.plot_lc(ylim=(20,80), plot_err=True, save=True)
+```
+
+<p align="center">
+  <img alt="Example LC" src="https://github.com/altuson/tess-asteroids/blob/main/docs/tess-1998YT6-s0006-1-1-shape11x11_lc.png?raw=true" width="60%">
+</p>
 
 ### Compatibility with `lightkurve`
 
@@ -174,20 +210,20 @@ tpf.plot(aperture_mask=tpf.hdu[3].data["APERTURE"][200], frame=200)
 lc.plot()
 ```
 
-## Time scales
+## Time
 
-When you initialise `MovingTPF()`, the `time_scale` parameter defines the scale of the `time` column in the input ephemeris. It can have one of two values:
+When you initialise `MovingTPF()`, the parameter `barycentric` is defined as follows:
 
-- `tdb` (default): this means the input ephemeris `time` is in TDB measured at the solar system barycenter. This is the scale used for the TSTART/TSTOP keywords in SPOC FFI headers and the TIME column in SPOC TPFs and LCFs. It is the standard time scale for TESS data products.
-- `utc`: this means the input ephemeris `time` is in UTC measured at the spacecraft. This can be recovered from the SPOC data products: for FFIs subtract header keyword BARYCORR from TSTART/TSTOP and for TPFs/LCFs subtract the TIMECORR column from the TIME column.
+- `True` (default): this means the input `time` must be in TDB measured **at the solar system barycenter**. This is the case for the TSTART/TSTOP keywords in SPOC FFI headers and the TIME column in SPOC TPFs and LCFs.
+- `False`: this means the input `time` must be in TDB measured **at the spacecraft**. This can be recovered from the SPOC data products: for FFIs subtract the header keyword BARYCORR from TSTART/TSTOP and for TPFs/LCFs subtract the TIMECORR column from the TIME column.
 
-When `MovingTPF()` is initialised `from_name()`, the `time_scale` is handled internally. As a user, you will only need to consider the `time_scale` if you are inputting a custom ephemeris. 
+When `MovingTPF()` is initialised `from_name()`, the `barycentric` parameter is handled internally. As a user, you will only need to consider the `barycentric` parameter if you are inputting a custom ephemeris. 
 
 For more information about time scales, see the `astropy` [documentation](https://docs.astropy.org/en/stable/time/index.html#time-scale).
 
 ### Barycentric time correction
 
-The barycentric time correction derived by SPOC (BARYCORR) is used to transform the time in UTC at the spacecraft into the time in TDB at the solar system barycenter. This correction is calculated at the center of each FFI (i.e. one correction for each CCD) but, in reality, the correction depends upon RA and Dec. Therefore, within `tess-asteroids` we use `lkspacecraft` to re-derive the barycentric time correction based upon the position of the moving target. In the output TPFs and LCFs, you will see columns called ORIGINAL_TIME (FFI timestamp in TDB at barycenter, as derived by SPOC), ORIGINAL_TIMECORR (correction to transform UTC at spacecraft into TDB at barycenter, as derived by SPOC), TIME (re-derived time in TDB at barycenter) and TIMECORR (re-derived time correction).
+The barycentric time correction derived by SPOC (BARYCORR) is used to transform the time at the spacecraft into the time at the solar system barycenter. This correction is calculated at the center of each FFI (i.e. one correction for each CCD) but, in reality, the correction depends upon RA and Dec. Therefore, within `tess-asteroids` we use `lkspacecraft` to re-derive the barycentric time correction based upon the position of the moving target. In the output TPFs and LCFs, you will see columns called ORIGINAL_TIME (FFI timestamp in TDB at barycenter, as derived by SPOC), ORIGINAL_TIMECORR (correction to transform time at spacecraft into time at barycenter, as derived by SPOC), TIME (re-derived time in TDB at barycenter) and TIMECORR (re-derived time correction).
 
 ## Understanding the TPF and LCF
 
@@ -195,10 +231,16 @@ The TPF has four HDUs:
 
 - "PRIMARY" - a primary HDU containing only a header.
 - "PIXELS" - a table with the same columns as a SPOC TPF. Note that "POS_CORR1" and "POS_CORR2" are defined as the offset between the center of the TPF and the expected position of the moving object given the input ephemeris. 
-- "APERTURE" - an image HDU containing the average aperture across all times.
-- "EXTRAS" - a table HDU containing columns not found in a SPOC TPF. This includes "RA_PRED"/"DEC_PRED" (expected position of target in world coordinates), "CORNER1"/"CORNER2" (original FFI column/row of the lower-left pixel in the TPF), "PIXEL_QUALITY" (3D pixel quality mask identifying e.g. strap columns, non-science pixels and saturation), "APERTURE" (aperture as a function of time) and "ORIGINAL_TIME"/"ORIGINAL_TIMECORR" (time and barycentric correction derived by SPOC).
+- "APERTURE" - an image HDU containing the flattened aperture i.e. all pixels that are included in the time-dependent aperture at least once.
+- "EXTRAS" - a table HDU containing columns not found in a SPOC TPF. This includes "RA_PRED"/"DEC_PRED" (expected position of target in world coordinates), "CORNER1"/"CORNER2" (original FFI column/row of the lower-left pixel in the TPF), "PIXEL_QUALITY" (3D pixel quality flags identifying e.g. strap columns, non-science pixels and saturation), "APERTURE" (aperture as a function of time) and "ORIGINAL_TIME"/"ORIGINAL_TIMECORR" (time and barycentric correction derived by SPOC).
 
-The LCF has two HDUs: 
+The LCF has three or four HDUs (depending upon which lightcurves you created): 
 
 - "PRIMARY" - a primary HDU containing only a header.
-- "LIGHTCURVE" - a table HDU with columns including "TIME" (timestamps in BTJD), "FLUX"/"FLUX_ERR" (flux and error from aperture photometry) and "TESSMAG"/"TESSMAG_ERR" (measured TESS magnitude and error).
+- "LIGHTCURVE_AP" - a table HDU containing the aperture photomety light curve, with columns including "TIME" (timestamps in BTJD), "FLUX"/"FLUX_ERR" (flux and error from aperture photometry) and "AP_QUALITY" (light curve quality flags).
+- "LIGHTCURVE_PSF" - a table HDU containing the PSF photomety light curve, with columns including "TIME" (timestamps in BTJD), "FLUX"/"FLUX_ERR" (flux and error from PSF photometry) and "PSF_QUALITY" (light curve quality flags).
+- "EXTRAS" - a table HDU containing extra information, with columns including "RA_PRED"/"DEC_PRED" (expected position of target in world coordinates), "CORNER1"/"CORNER2" (original FFI column/row of the lower-left pixel in the TPF), "ORIGINAL_TIME"/"ORIGINAL_TIMECORR" (time and barycentric correction derived by SPOC) and "SUN_DISTANCE"/"OBS_DISTANCE"/"STO_ANGLE" (distance from Sun [AU] / distance from observer (TESS) [AU] / Sun-Target-Observer angle [deg]).
+
+## Citation
+
+If you make use of `tess-asteroids` in your work, please cite our software using the version-specific DOI from [Zenodo](https://zenodo.org/records/15882329). You can generate a BibTex citation using Zenodo.
